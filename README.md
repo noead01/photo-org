@@ -34,16 +34,11 @@ FS[Local Filesystem]
 end
 
 
-ING[Ingest Scripts
-(EXIF, Faces)]
-API[FastAPI Service
-(Search/Confirm)]
-DB[(PostgreSQL 16+
-pgvector)]
+ING[Ingest Scripts(EXIF, Faces)]
+API[FastAPI Service(Search/Confirm)]
+DB[(PostgreSQL 16+pgvector)]
 UI[React/Next.js UI]
-BATCH[Batch Jobs
-(re-evaluate priors, indexes)]
-
+BATCH[Batch Jobs(re-evaluate priors, indexes)]
 
 FS --> ING --> API --> DB
 UI <--> API
