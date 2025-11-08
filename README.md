@@ -28,17 +28,20 @@ Opinionated, local‑first photo library with **face detection**, **face search*
 ## Architecture
 
 ```mermaid
+---
+config:
+      theme: default
+---
 flowchart LR
 subgraph Filesystem
-FS[Local Filesystem]
+FS@{shape: lin-cyl, label: "Local Filesystem"}
 end
 
-
-ING[Ingest Scripts(EXIF, Faces)]
-API[FastAPI Service(Search/Confirm)]
-DB[(PostgreSQL 16+pgvector)]
-UI[React/Next.js UI]
-BATCH[Batch Jobs(re-evaluate priors, indexes)]
+ING["Ingest Scripts(EXIF, Faces)"]
+API["FastAPI Service(Search/Confirm)"]
+DB@{shape: lin-cyl, label: "PostgreSQL 16 pgvector"}
+UI@{shape: div-rect, label: "React/Next.js UI"}
+BATCH["Batch Jobs(re-evaluate priors, indexes)"]
 
 FS --> ING --> API --> DB
 UI <--> API
