@@ -1,0 +1,771 @@
+openapi: 3.1.0
+info:
+  title: Photo Organizer API
+  version: 0.2.0
+  description: |
+    Read-focused API for browsing photos, faces, people, vector search and stats.
+    **Aligned to the provided Postgres schema** (photos, faces, people, person_centroids).
+servers:
+  - url: http://localhost:8000
+    description: Local dev
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Photos
+  - name: Faces
+  - name: People
+  - name: Search
+  - name: Stats
+
+paths:
+  /photos:
+    get:
+      tags: [Photos]
+      summary: List photos (cards)
+      parameters:
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/page_size'
+        - $ref: '#/components/parameters/sort'
+        - $ref: '#/components/parameters/shot_ts_from'
+        - $ref: '#/components/parameters/shot_ts_to'
+        - $ref: '#/components/parameters/media_type'
+        - $ref: '#/components/parameters/has_faces'
+        - $ref: '#/components/parameters/nb_faces_min'
+        - $ref: '#/components/parameters/nb_faces_max'
+        - $ref: '#/components/parameters/gps_bbox'
+        - $ref: '#/components/parameters/q_path'
+      responses:
+        '200':
+          description: Paginated photo cards
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhotoPage'
+  /photos/{photo_id}:
+    get:
+      tags: [Photos]
+      summary: Get full photo metadata
+      parameters:
+        - $ref: '#/components/parameters/photo_id'
+      responses:
+        '200':
+          description: Photo detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Photo'
+        '404': { $ref: '#/components/responses/NotFound' }
+  /photos/{photo_id}/image:
+    get:
+      tags: [Photos]
+      summary: Get photo image (binary)
+      parameters:
+        - $ref: '#/components/parameters/photo_id'
+        - $ref: '#/components/parameters/image_variant'
+      responses:
+        '200':
+          description: Image bytes
+          content:
+            image/jpeg: {}
+            image/webp: {}
+        '404': { $ref: '#/components/responses/NotFound' }
+  /photos/{photo_id}/faces:
+    get:
+      tags: [Photos]
+      summary: List faces in a photo
+      parameters:
+        - $ref: '#/components/parameters/photo_id'
+      responses:
+        '200':
+          description: Faces found in the photo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  photo_id: { type: string, format: uuid }
+                  faces:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FaceCard'
+  /photos/{photo_id}/stats:
+    get:
+      tags: [Photos]
+      summary: Lightweight computed stats for a photo
+      parameters:
+        - $ref: '#/components/parameters/photo_id'
+      responses:
+        '200':
+          description: Stats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhotoStats'
+
+  /faces:
+    get:
+      tags: [Faces]
+      summary: List faces across the library
+      parameters:
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/page_size'
+        - $ref: '#/components/parameters/sort'
+        - $ref: '#/components/parameters/person_id_query'
+        - $ref: '#/components/parameters/unknown_only'
+        - $ref: '#/components/parameters/status'
+        - $ref: '#/components/parameters/match_confidence_min'
+        - $ref: '#/components/parameters/detected_from'
+        - $ref: '#/components/parameters/detected_to'
+      responses:
+        '200':
+          description: Paginated faces
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacePage'
+  /faces/{face_id}:
+    get:
+      tags: [Faces]
+      summary: Get a face
+      parameters:
+        - $ref: '#/components/parameters/face_id'
+      responses:
+        '200':
+          description: Face detail (no raw embedding by default)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Face'
+        '404': { $ref: '#/components/responses/NotFound' }
+  /faces/{face_id}/image:
+    get:
+      tags: [Faces]
+      summary: Get a face crop image (binary)
+      parameters:
+        - $ref: '#/components/parameters/face_id'
+        - $ref: '#/components/parameters/crop_variant'
+      responses:
+        '200':
+          description: Image bytes
+          content:
+            image/jpeg: {}
+            image/webp: {}
+        '404': { $ref: '#/components/responses/NotFound' }
+  /faces/search:
+    post:
+      tags: [Faces]
+      summary: Vector similarity search over faces
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FaceSearchRequest'
+      responses:
+        '200':
+          description: Nearest neighbors
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaceSearchResponse'
+  /faces/{face_id}/suggestions:
+    get:
+      tags: [Faces]
+      summary: Candidate identity suggestions for a face
+      parameters:
+        - $ref: '#/components/parameters/face_id'
+      responses:
+        '200':
+          description: Suggestions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/IdentitySuggestion'
+  /faces/{face_id}/provenance:
+    get:
+      tags: [Faces]
+      summary: Label provenance trail for a face
+      parameters:
+        - $ref: '#/components/parameters/face_id'
+      responses:
+        '200':
+          description: Provenance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProvenanceTrail'
+  /faces/{face_id}/embedding:
+    get:
+      tags: [Faces]
+      summary: Get raw embedding (admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/face_id'
+      responses:
+        '200':
+          description: Raw vector values
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmbeddingVector'
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /people:
+    get:
+      tags: [People]
+      summary: List known people
+      parameters:
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/page_size'
+        - $ref: '#/components/parameters/q_prefix'
+        - $ref: '#/components/parameters/has_photos'
+        - $ref: '#/components/parameters/min_faces'
+        - $ref: '#/components/parameters/is_active'
+      responses:
+        '200':
+          description: Paginated people
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonPage'
+  /people/{person_id}:
+    get:
+      tags: [People]
+      summary: Get a person
+      parameters:
+        - $ref: '#/components/parameters/person_id_path'
+      responses:
+        '200':
+          description: Person detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Person'
+        '404': { $ref: '#/components/responses/NotFound' }
+  /people/{person_id}/faces:
+    get:
+      tags: [People]
+      summary: List faces for a person
+      parameters:
+        - $ref: '#/components/parameters/person_id_path'
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/page_size'
+        - $ref: '#/components/parameters/sort'
+      responses:
+        '200':
+          description: Paginated faces
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FacePage'
+  /people/{person_id}/centroid:
+    get:
+      tags: [People]
+      summary: Get person's embedding centroid and face count
+      parameters:
+        - $ref: '#/components/parameters/person_id_path'
+      responses:
+        '200':
+          description: Centroid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonCentroid'
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /search/photos:
+    get:
+      tags: [Search]
+      summary: Faceted photo search
+      parameters:
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/page_size'
+        - $ref: '#/components/parameters/sort'
+        - $ref: '#/components/parameters/people'
+        - $ref: '#/components/parameters/must_all_people'
+        - $ref: '#/components/parameters/near'
+        - $ref: '#/components/parameters/cluster_id'
+        - $ref: '#/components/parameters/event_id'
+      responses:
+        '200':
+          description: Paginated photo cards
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhotoPage'
+
+  /stats/faces:
+    get:
+      tags: [Stats]
+      summary: Face distributions and counts for UI filters
+      responses:
+        '200':
+          description: Stats payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaceStats'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    page_size:
+      name: page_size
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    sort:
+      name: sort
+      in: query
+      description: Comma-separated sort fields. Prefix with '-' for desc. Photos default '-shot_ts', faces default '-detected_at'.
+      schema: { type: string, example: '-shot_ts' }
+
+    # Photos filters (aligned to columns)
+    shot_ts_from:
+      name: shot_ts_from
+      in: query
+      schema: { type: string, format: date-time }
+    shot_ts_to:
+      name: shot_ts_to
+      in: query
+      schema: { type: string, format: date-time }
+    media_type:
+      name: media_type
+      in: query
+      schema: { type: string, example: 'image' }
+    has_faces:
+      name: has_faces
+      in: query
+      schema: { type: boolean }
+    nb_faces_min:
+      name: nb_faces_min
+      in: query
+      schema: { type: integer, minimum: 0 }
+    nb_faces_max:
+      name: nb_faces_max
+      in: query
+      schema: { type: integer, minimum: 0 }
+    gps_bbox:
+      name: gps_bbox
+      in: query
+      description: 'xmin,ymin,xmax,ymax in lat,lon degrees'
+      schema: { type: string, example: '39.9,-83.2,40.2,-82.7' }
+    q_path:
+      name: q
+      in: query
+      description: Free-text over path/filename (and optionally phash/sha256 prefix)
+      schema: { type: string }
+
+    # Shared path ids
+    photo_id:
+      name: photo_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    face_id:
+      name: face_id
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+
+    # Faces filters (aligned to columns)
+    person_id_query:
+      name: person_id
+      in: query
+      schema: { type: string, format: uuid }
+    unknown_only:
+      name: unknown_only
+      in: query
+      schema: { type: boolean, default: false }
+    status:
+      name: status
+      in: query
+      description: Filter by labeling status
+      schema:
+        type: string
+        enum: [unlabeled, suggested, confirmed, unknown]
+    match_confidence_min:
+      name: match_confidence_min
+      in: query
+      schema: { type: number, minimum: 0, maximum: 1 }
+    detected_from:
+      name: detected_from
+      in: query
+      schema: { type: string, format: date-time }
+    detected_to:
+      name: detected_to
+      in: query
+      schema: { type: string, format: date-time }
+
+    # People ids/filters
+    person_id_path:
+      name: person_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    q_prefix:
+      name: q
+      in: query
+      description: Name prefix search (display_name)
+      schema: { type: string }
+    has_photos:
+      name: has_photos
+      in: query
+      schema: { type: boolean }
+    min_faces:
+      name: min_faces
+      in: query
+      schema: { type: integer, minimum: 0 }
+    is_active:
+      name: is_active
+      in: query
+      schema: { type: boolean }
+
+    # Search filters
+    people:
+      name: people
+      in: query
+      description: Comma-separated list of person UUIDs
+      schema: { type: string }
+    must_all_people:
+      name: must_all_people
+      in: query
+      schema: { type: boolean, default: false }
+    near:
+      name: near
+      in: query
+      description: 'lat,lon,radius_km'
+      schema: { type: string, example: '40.7128,-74.0060,5' }
+    cluster_id:
+      name: cluster_id
+      in: query
+      schema: { type: string }
+    event_id:
+      name: event_id
+      in: query
+      schema: { type: string }
+
+    # Binary variants
+    image_variant:
+      name: variant
+      in: query
+      schema:
+        $ref: '#/components/schemas/ImageVariant'
+    crop_variant:
+      name: variant
+      in: query
+      schema:
+        $ref: '#/components/schemas/CropVariant'
+
+  responses:
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+          required: [code, message]
+      required: [error]
+
+    Pagination:
+      type: object
+      properties:
+        page: { type: integer }
+        page_size: { type: integer }
+        total: { type: integer }
+      required: [page, page_size, total]
+
+    ImageVariant:
+      type: string
+      enum: [original, large, medium, thumb, webp]
+    CropVariant:
+      type: string
+      enum: [thumb, small, medium]
+
+    BBox:
+      type: object
+      properties:
+        x: { type: number }
+        y: { type: number }
+        w: { type: number }
+        h: { type: number }
+      required: [x, y, w, h]
+
+    PhotoCard:
+      type: object
+      properties:
+        photo_id: { type: string, format: uuid }
+        path: { type: string }
+        ext: { type: ["string","null"] }
+        width: { type: ["integer","null"] }
+        height: { type: ["integer","null"] }
+        orientation: { type: ["integer","null"] }
+        media_type: { type: string }
+        shot_ts: { type: ["string","null"], format: date-time }
+        nb_faces: { type: integer }
+        thumb_url: { type: string }
+      required: [photo_id, path, media_type, nb_faces]
+
+    Photo:
+      allOf:
+        - $ref: '#/components/schemas/PhotoCard'
+        - type: object
+          properties:
+            sha256: { type: ["string","null"] }
+            phash: { type: ["string","null"] }
+            filesize: { type: ["integer","null"] }
+            created_ts: { type: ["string","null"], format: date-time }
+            modified_ts: { type: ["string","null"], format: date-time }
+            shot_ts_source: { type: string }
+            is_scanned: { type: integer }
+            ingested_at: { type: ["string","null"], format: date-time }
+            gps_lat: { type: ["number","null"] }
+            gps_lon: { type: ["number","null"] }
+            gps_altitude: { type: ["number","null"] }
+            gps_datetime: { type: ["string","null"] }
+            face_detection_ts: { type: ["string","null"], format: date-time }
+            created_at: { type: ["string","null"], format: date-time }
+            updated_at: { type: ["string","null"], format: date-time }
+            image_urls:
+              type: object
+              properties:
+                original: { type: string }
+                large: { type: string }
+                medium: { type: string }
+                thumb: { type: string }
+
+    PhotoStats:
+      type: object
+      properties:
+        faces_count: { type: integer }
+        face_detection_ts: { type: ["string","null"], format: date-time }
+
+    FaceCard:
+      type: object
+      properties:
+        id: { type: integer, format: int64, description: 'Primary key of faces table' }
+        photo_id: { type: string, format: uuid }
+        face_index: { type: ["integer","null"] }
+        bbox: { $ref: '#/components/schemas/BBox' }
+        status:
+          type: string
+          enum: [unlabeled, suggested, confirmed, unknown]
+        person_id: { type: ["string","null"], format: uuid }
+        match_confidence: { type: ["number","null"], description: '0..1 cosine similarity or normalized score' }
+        crop_thumb: { type: ["string","null"], description: 'Derived from crop_key' }
+      required: [id, photo_id, bbox, status]
+
+    EmbeddingMeta:
+      type: object
+      properties:
+        dim: { type: integer }
+        present: { type: boolean }
+      required: [dim, present]
+
+    Face:
+      allOf:
+        - $ref: '#/components/schemas/FaceCard'
+        - type: object
+          properties:
+            x: { type: number }
+            y: { type: number }
+            w: { type: number }
+            h: { type: number }
+            detected_at: { type: ["string","null"], format: date-time }
+            match_source: { type: ["string","null"] }
+            provenance: { type: ["object","null" ] }
+            crop_key: { type: ["string","null"] }
+            embedding: { $ref: '#/components/schemas/EmbeddingMeta' }
+            last_reviewed_at: { type: ["string","null"], format: date-time }
+            created_at: { type: ["string","null"], format: date-time }
+            updated_at: { type: ["string","null"], format: date-time }
+
+    EmbeddingVector:
+      type: object
+      properties:
+        dim: { type: integer, enum: [128] }
+        values:
+          type: array
+          items: { type: number }
+      required: [dim, values]
+
+    IdentitySuggestion:
+      type: object
+      properties:
+        person_id: { type: string, format: uuid }
+        score: { type: number }
+        evidence:
+          type: array
+          items: { type: string }
+        model_version: { type: string }
+      required: [person_id, score]
+
+    ProvenanceEvent:
+      type: object
+      properties:
+        t: { type: string, format: date-time }
+        action: { type: string }
+        user: { type: string }
+        cluster_id: { type: ["string","null"] }
+      required: [t, action]
+
+    ProvenanceTrail:
+      type: object
+      properties:
+        label: { type: ["string","null"] }
+        trail:
+          type: array
+          items: { $ref: '#/components/schemas/ProvenanceEvent' }
+
+    PersonCard:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        display_name: { type: string }
+        is_active: { type: boolean }
+        faces_count: { type: integer }
+        primary_face_crop: { type: ["string","null"] }
+      required: [id, display_name, is_active, faces_count]
+
+    Person:
+      allOf:
+        - $ref: '#/components/schemas/PersonCard'
+        - type: object
+          properties:
+            note: { type: ["string","null"] }
+            created_at: { type: ["string","null"], format: date-time }
+            updated_at: { type: ["string","null"], format: date-time }
+            representative_photos:
+              type: array
+              items: { type: string, format: uuid }
+            co_occurrence:
+              type: array
+              items:
+                type: object
+                properties:
+                  person_id: { type: string, format: uuid }
+                  score: { type: number }
+
+    PersonCentroid:
+      type: object
+      properties:
+        person_id: { type: string, format: uuid }
+        n_faces: { type: integer }
+        centroid:
+          type: array
+          items: { type: number }
+      required: [person_id, n_faces, centroid]
+
+    FaceSearchRequest:
+      type: object
+      properties:
+        embedding:
+          type: array
+          items: { type: number }
+          description: '128-dim vector; will be normalized server-side for cosine'
+        k: { type: integer, default: 50 }
+        threshold: { type: number, minimum: 0, maximum: 1, default: 0.35 }
+        metric:
+          type: string
+          enum: [cosine, l2]
+          default: cosine
+      required: [embedding]
+
+    FaceSearchHit:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        person_id: { type: ["string","null"], format: uuid }
+        photo_id: { type: string, format: uuid }
+        score: { type: number }
+        crop_thumb: { type: ["string","null"] }
+      required: [id, photo_id, score]
+
+    FaceSearchResponse:
+      type: object
+      properties:
+        query_dim: { type: integer, enum: [128] }
+        metric: { type: string }
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/FaceSearchHit' }
+      required: [query_dim, metric, results]
+
+    FaceStats:
+      type: object
+      properties:
+        counts_by_month:
+          type: array
+          items:
+            type: object
+            properties:
+              month: { type: string, example: '2025-10' }
+              faces: { type: integer }
+        top_people:
+          type: array
+          items:
+            type: object
+            properties:
+              person_id: { type: string, format: uuid }
+              faces: { type: integer }
+        unknown_count: { type: integer }
+        detector_versions:
+          type: array
+          items:
+            type: object
+            properties:
+              version: { type: string }
+              faces: { type: integer }
+
+    # Paginated envelopes
+    PhotoPage:
+      allOf:
+        - $ref: '#/components/schemas/Pagination'
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/PhotoCard' }
+    FacePage:
+      allOf:
+        - $ref: '#/components/schemas/Pagination'
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/FaceCard' }
+    PersonPage:
+      allOf:
+        - $ref: '#/components/schemas/Pagination'
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/PersonCard' }
