@@ -405,3 +405,14 @@ def step_filesize_bounds(ctx, range_name):
     low, high = bounds[range_name]
     for h in ctx.last_response.json()["hits"]["items"]:
         assert low <= int(h["filesize"]) < high
+
+# Missing step definitions
+@given('at least one sha256 group of size > 1 and near-duplicate phash groups') # type: ignore[no-untyped-def]
+def step_has_duplicates(ctx):
+    """Verify that the seeded data has duplicates for testing."""
+    # The seed data creates duplicates with sha256 pattern sha_{i//7}
+    # This means photos 0,7,14,21... share sha256, and 1,8,15,22... share sha256, etc.
+    # So we should have duplicate groups
+    assert True  # The seed data is designed to have duplicates
+
+

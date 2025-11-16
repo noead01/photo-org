@@ -12,11 +12,12 @@ dev = [
   "ruff",
   "mypy",
   "alembic",
+  "httpx>=0.28.1",
 ]
 test = [
   "pytest",
   "behave",
-  
+  "pytest-cov>=7.0.0",
 ]
 prod = [
   # things you only want in prod images, e.g. gunicorn/uvicorn workers, sentry, etc.
