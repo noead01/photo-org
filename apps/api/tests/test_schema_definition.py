@@ -18,6 +18,10 @@ def test_phase_zero_schema_exposes_expected_tables():
     assert expected.issubset(metadata.tables.keys())
 
 
+def test_schema_metadata_includes_ingest_queue_table():
+    assert "ingest_queue" in metadata.tables
+
+
 def test_phase_zero_schema_applies_core_constraints():
     photos = metadata.tables["photos"]
     photo_files = metadata.tables["photo_files"]

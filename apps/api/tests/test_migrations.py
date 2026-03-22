@@ -22,6 +22,20 @@ def test_upgrade_database_creates_schema(tmp_path):
     assert {"photos", "faces", "photo_tags", "people", "face_labels"} <= tables
 
 
+def test_upgrade_database_creates_ingest_queue_table(tmp_path):
+    from app.migrations import upgrade_database
+
+    database_url = f"sqlite:///{tmp_path / 'queue.db'}"
+
+    upgrade_database(database_url)
+
+    engine = create_engine(database_url, future=True)
+    with engine.connect() as connection:
+        tables = set(connection.dialect.get_table_names(connection))
+
+    assert "ingest_queue" in tables
+
+
 def test_ingest_requires_existing_schema(tmp_path):
     database_url = f"sqlite:///{tmp_path / 'missing-schema.db'}"
 
