@@ -6,6 +6,15 @@ from sqlalchemy.sql import Select
 
 from app.schemas.search_request import SearchFilters, SortSpec, PageSpec
 from app.core.enums import FilesizeRange
+from app.domain.facets import (
+    TagsFacet,
+    PeopleFacet,
+    DateHierarchyFacet,
+    DuplicatesFacet,
+    FacetContext,
+    FacetResult,
+    FacetValue,
+)
 
 
 class PhotosRepository:
@@ -254,12 +263,6 @@ class PhotosRepository:
 
     def compute_facets(self, filtered_photo_ids: List[str]) -> Dict[str, Any]:
         """Compute facets for the filtered photo set."""
-        # Import both old and new facet systems
-        from app.services.facets import date_facet, people_facet, duplicates_facet
-        from app.domain.facets import TagsFacet, FacetContext
-        
-        # Use new domain model for tags facet
-        tags_facet_instance = TagsFacet()
         context = FacetContext(
             db=self.db,
             photo_tags=self.photo_tags,
@@ -267,13 +270,59 @@ class PhotosRepository:
             photos=self.photos
         )
         
-        # Compute tags using new domain model
-        tags_result = tags_facet_instance.compute(filtered_photo_ids, context)
-        tags_formatted = [{"value": v.value, "count": v.count} for v in tags_result.values]
+        tags_facet = TagsFacet()
+        people_facet = PeopleFacet()
+        date_facet = DateHierarchyFacet()
+        duplicates_facet = DuplicatesFacet()
+        
+        date_result = date_facet.compute(filtered_photo_ids, context)
+        tags_result = tags_facet.compute(filtered_photo_ids, context)
+        people_result = people_facet.compute(filtered_photo_ids, context)
+        duplicates_result = duplicates_facet.compute(filtered_photo_ids, context)
         
         return {
-            "date": date_facet(self.db, self.photos, filtered_photo_ids),
-            "people": people_facet(self.db, self.faces, filtered_photo_ids),
-            "tags": tags_formatted,  # Using new domain model
-            "duplicates": duplicates_facet(self.db, self.photos, filtered_photo_ids),
+            "date": self._format_date_facet(date_result),
+            "people": self._format_simple_facet(people_result),
+            "tags": self._format_simple_facet(tags_result),
+            "duplicates": self._format_duplicates_facet(duplicates_result),
+        }
+    
+    @staticmethod
+    def _format_simple_facet(result: FacetResult) -> List[Dict[str, Any]]:
+        """Convert a simple FacetResult into API response format."""
+        return [
+            {"value": value.value, "count": int(value.count)}
+            for value in (result.values or [])
+        ]
+    
+    @staticmethod
+    def _format_date_facet(result: FacetResult) -> Dict[str, Any]:
+        """Convert the hierarchical date FacetResult into nested dict format."""
+        def serialize_year(year_val: FacetValue) -> Dict[str, Any]:
+            return {
+                "value": year_val.value,
+                "count": int(year_val.count),
+                "months": [serialize_month(m) for m in (year_val.children or [])],
+            }
+        
+        def serialize_month(month_val: FacetValue) -> Dict[str, Any]:
+            return {
+                "value": month_val.value,
+                "count": int(month_val.count),
+                "days": [
+                    {"value": day.value, "count": int(day.count)}
+                    for day in (month_val.children or [])
+                ],
+            }
+        
+        years = [serialize_year(year_val) for year_val in (result.values or [])]
+        return {"years": years}
+    
+    @staticmethod
+    def _format_duplicates_facet(result: FacetResult) -> Dict[str, int]:
+        """Convert duplicate facet metadata into API response format."""
+        metadata = result.metadata or {}
+        return {
+            "exact": int(metadata.get("exact", 0) or 0),
+            "near": int(metadata.get("near", 0) or 0),
         }

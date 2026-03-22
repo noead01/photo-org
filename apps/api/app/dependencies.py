@@ -1,13 +1,13 @@
 from typing import Iterator
 import os
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import Session
+
+from app.storage import create_session_factory
+
 
 # In tests, Behave overrides get_db(). This default is only for dev/prod.
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./photoorg.db")
-
-_engine = create_engine(DATABASE_URL, future=True)
-_SessionLocal = sessionmaker(bind=_engine, autoflush=False, autocommit=False, future=True)
+DATABASE_URL = os.getenv("DATABASE_URL")
+_SessionLocal = create_session_factory(DATABASE_URL)
 
 def get_db() -> Iterator[Session]:
     db = _SessionLocal()

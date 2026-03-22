@@ -1,0 +1,50 @@
+from __future__ import annotations
+
+import argparse
+
+from app.processing.faces import OpenCvFaceDetector
+from app.processing.ingest import ingest_directory
+from app.storage import resolve_database_url
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="photo-org")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    ingest_parser = subparsers.add_parser("ingest", help="Ingest photos into the configured database")
+    ingest_parser.add_argument("root", help="Directory containing photos")
+    ingest_parser.add_argument(
+        "--database-url",
+        default=None,
+        help="SQLAlchemy database URL. Defaults to DATABASE_URL.",
+    )
+    ingest_parser.add_argument(
+        "--faces",
+        action="store_true",
+        help="Run OpenCV face detection and store detections",
+    )
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.command == "ingest":
+        detector = OpenCvFaceDetector() if args.faces else None
+        result = ingest_directory(args.root, database_url=args.database_url, face_detector=detector)
+        database_url = resolve_database_url(args.database_url)
+        print(f"database_url={database_url}")
+        print(f"scanned={result.scanned}")
+        print(f"inserted={result.inserted}")
+        print(f"updated={result.updated}")
+        if result.errors:
+            print(f"errors={len(result.errors)}")
+            for error in result.errors:
+                print(error)
+            return 1
+        return 0
+
+    parser.error(f"unknown command: {args.command}")
+    return 2

@@ -1,267 +1,453 @@
-import pytest
-from unittest.mock import Mock, patch
 from datetime import datetime
+from unittest.mock import Mock
+
+from sqlalchemy import Column, DateTime, MetaData, String, Table
+
+from app.domain.facets import (
+    DateHierarchyFacet,
+    PeopleFacet,
+    TagsFacet,
+    DuplicatesFacet,
+    FacetContext,
+    FacetRegistry,
+    FacetType,
+    FacetValue,
+    FacetResult,
+)
+
+
+def _make_photos_table():
+    metadata = MetaData()
+    return Table(
+        "photos",
+        metadata,
+        Column("photo_id", String),
+        Column("shot_ts", DateTime),
+        Column("sha256", String),
+        Column("phash", String),
+    )
+
+
+def _make_faces_table():
+    metadata = MetaData()
+    return Table(
+        "faces",
+        metadata,
+        Column("photo_id", String),
+        Column("person_id", String),
+    )
+
+
+def _make_photo_tags_table():
+    metadata = MetaData()
+    return Table(
+        "photo_tags",
+        metadata,
+        Column("photo_id", String),
+        Column("tag", String),
+    )
+
+
+def _make_context(db, photos=None, faces=None, photo_tags=None):
+    return FacetContext(
+        db=db,
+        photos=photos or _make_photos_table(),
+        faces=faces or _make_faces_table(),
+        photo_tags=photo_tags or _make_photo_tags_table(),
+    )
 
 
 class TestDateFacetLogic:
-    """Test the date aggregation logic in date_facet function."""
-    
-    @patch('app.services.facets.select')
-    def test_given_no_photos_when_getting_date_facet_then_returns_empty_years_list(self, mock_select):
-        """
-        Given: Database query returns no photo timestamps
-        When: Getting date facet for photo IDs
-        Then: Returns structure with empty years list
-        """
-        from app.services.facets import date_facet
-        
-        # Given
-        mock_db = Mock()
-        mock_photos = Mock()
-        mock_db.execute.return_value.all.return_value = []
-        
-        # When
-        result = date_facet(mock_db, mock_photos, ["photo1", "photo2"])
-        
-        # Then
-        assert result == {"years": []}
+    """Test the date aggregation logic in DateHierarchyFacet."""
 
-    @patch('app.services.facets.select')
-    def test_given_single_photo_timestamp_when_getting_date_facet_then_returns_hierarchical_date_structure(self, mock_select):
-        """
-        Given: Database query returns single photo timestamp
-        When: Getting date facet for photo ID
-        Then: Returns hierarchical structure with year/month/day counts
-        """
-        from app.services.facets import date_facet
-        
-        # Given
+    def test_given_no_photos_when_computing_then_returns_empty_result(self):
+        facet = DateHierarchyFacet()
         mock_db = Mock()
-        mock_photos = Mock()
+        mock_db.execute.return_value.all.return_value = []
+
+        result = facet.compute(["photo1", "photo2"], _make_context(mock_db))
+
+        assert result.values == []
+        assert result.total_count == 0
+
+    def test_given_single_photo_timestamp_then_returns_hierarchy(self):
+        facet = DateHierarchyFacet()
+        mock_db = Mock()
         test_date = datetime(2023, 6, 15, 10, 30, 45)
         mock_db.execute.return_value.all.return_value = [(test_date,)]
-        
-        # When
-        result = date_facet(mock_db, mock_photos, ["photo1"])
-        
-        # Then
-        expected = {
-            "years": [
-                {
-                    "value": 2023,
-                    "count": 1,
-                    "months": [
-                        {
-                            "value": 6,
-                            "count": 1,
-                            "days": [{"value": 15, "count": 1}]
-                        }
-                    ]
-                }
-            ]
-        }
-        assert result == expected
 
-    @patch('app.services.facets.select')
-    def test_date_facet_multiple_photos_same_day(self, mock_select):
-        """Test date_facet with multiple photos on the same day."""
-        from app.services.facets import date_facet
-        
-        mock_db = Mock()
-        mock_photos = Mock()
-        
-        test_date = datetime(2023, 6, 15, 10, 30, 45)
-        mock_db.execute.return_value.all.return_value = [(test_date,), (test_date,), (test_date,)]
-        
-        result = date_facet(mock_db, mock_photos, ["photo1", "photo2", "photo3"])
-        
-        expected = {
-            "years": [
-                {
-                    "value": 2023,
-                    "count": 3,
-                    "months": [
-                        {
-                            "value": 6,
-                            "count": 3,
-                            "days": [{"value": 15, "count": 3}]
-                        }
-                    ]
-                }
-            ]
-        }
-        
-        assert result == expected
+        result = facet.compute(["photo1"], _make_context(mock_db))
 
-    @patch('app.services.facets.select')
-    def test_date_facet_multiple_years_months_days(self, mock_select):
-        """Test date_facet with photos across multiple years, months, and days."""
-        from app.services.facets import date_facet
-        
+        assert len(result.values) == 1
+        year_bucket = result.values[0]
+        assert year_bucket.value == 2023
+        assert year_bucket.count == 1
+        year_children = year_bucket.children
+        assert year_children is not None
+        assert len(year_children) == 1
+        month_bucket = year_children[0]
+        assert month_bucket.value == 6
+        assert month_bucket.count == 1
+        month_children = month_bucket.children
+        assert month_children is not None
+        assert len(month_children) == 1
+        day_bucket = month_children[0]
+        assert day_bucket.value == 15
+        assert day_bucket.count == 1
+
+    def test_date_facet_multiple_years_months_days(self):
+        facet = DateHierarchyFacet()
         mock_db = Mock()
-        mock_photos = Mock()
-        
         dates = [
             datetime(2022, 12, 31, 10, 0, 0),
             datetime(2023, 1, 1, 12, 0, 0),
-            datetime(2023, 1, 2, 14, 0, 0),
             datetime(2023, 6, 15, 16, 0, 0),
+            datetime(2023, 6, 16, 16, 0, 0),
         ]
         mock_db.execute.return_value.all.return_value = [(d,) for d in dates]
-        
-        result = date_facet(mock_db, mock_photos, ["photo1", "photo2", "photo3", "photo4"])
-        
-        # Should have 2 years: 2022 and 2023
-        assert len(result["years"]) == 2
-        
-        # Check 2022
-        year_2022 = result["years"][0]
-        assert year_2022["value"] == 2022
-        assert year_2022["count"] == 1
-        assert len(year_2022["months"]) == 1
-        assert year_2022["months"][0]["value"] == 12
-        
-        # Check 2023
-        year_2023 = result["years"][1]
-        assert year_2023["value"] == 2023
-        assert year_2023["count"] == 3
-        assert len(year_2023["months"]) == 2  # January and June
 
-    @patch('app.services.facets.select')
-    def test_given_mixed_datetime_and_invalid_values_when_getting_date_facet_then_ignores_invalid_values(self, mock_select):
-        """
-        Given: Database query returns mix of valid datetime and invalid values (strings, None)
-        When: Getting date facet for photo IDs
-        Then: Ignores invalid values and only counts valid datetime entries
-        """
-        from app.services.facets import date_facet
-        
-        # Given
+        result = facet.compute(
+            ["photo1", "photo2", "photo3", "photo4"], _make_context(mock_db)
+        )
+
+        assert len(result.values) == 2
+        year_2022, year_2023 = result.values
+        assert year_2022.value == 2022
+        assert year_2022.count == 1
+        year_2022_children = year_2022.children
+        assert year_2022_children is not None
+        assert len(year_2022_children) == 1
+        assert year_2023.value == 2023
+        assert year_2023.count == 3
+        year_2023_children = year_2023.children
+        assert year_2023_children is not None
+        assert len(year_2023_children) == 2
+
+    def test_given_mixed_datetime_and_invalid_values_then_ignores_invalid(self):
+        facet = DateHierarchyFacet()
         mock_db = Mock()
-        mock_photos = Mock()
         mock_db.execute.return_value.all.return_value = [
             (datetime(2023, 6, 15, 10, 30, 45),),
             ("not_a_date",),
-            (None,),
             (datetime(2023, 6, 16, 10, 30, 45),),
         ]
-        
-        # When
-        result = date_facet(mock_db, mock_photos, ["photo1", "photo2", "photo3", "photo4"])
-        
-        # Then - should only count the 2 valid datetime entries
-        assert result["years"][0]["count"] == 2
+
+        result = facet.compute(
+            ["photo1", "photo2", "photo3", "photo4"], _make_context(mock_db)
+        )
+
+        assert result.total_count == 2
+        assert result.values
+        first_year = result.values[0]
+        first_year_children = first_year.children
+        assert first_year_children is not None
+        first_month = first_year_children[0]
+        first_month_children = first_month.children
+        assert first_month_children is not None
+        assert len(first_month_children) == 2
 
 
 class TestPeopleFacetLogic:
-    """Test the people aggregation logic in people_facet function."""
-    
-    @patch('app.services.facets.select')
-    @patch('app.services.facets.func')
-    def test_people_facet_empty_results(self, mock_func, mock_select):
-        """Test people_facet with empty results."""
-        from app.services.facets import people_facet
-        
+    """Test the people aggregation logic in PeopleFacet."""
+
+    def test_people_facet_empty_results(self):
+        facet = PeopleFacet()
         mock_db = Mock()
-        mock_faces = Mock()
         mock_db.execute.return_value.all.return_value = []
-        
-        result = people_facet(mock_db, mock_faces, ["photo1"])
-        
-        assert result == []
 
-    @patch('app.services.facets.select')
-    @patch('app.services.facets.func')
-    def test_people_facet_single_person(self, mock_func, mock_select):
-        """Test people_facet with a single person."""
-        from app.services.facets import people_facet
-        
-        mock_db = Mock()
-        mock_faces = Mock()
-        mock_db.execute.return_value.all.return_value = [("person1", 3)]
-        
-        result = people_facet(mock_db, mock_faces, ["photo1", "photo2", "photo3"])
-        
-        expected = [{"value": "person1", "count": 3}]
-        assert result == expected
+        result = facet.compute(["photo1"], _make_context(mock_db))
 
-    @patch('app.services.facets.select')
-    @patch('app.services.facets.func')
-    def test_people_facet_filters_null_person_ids(self, mock_func, mock_select):
-        """Test people_facet filters out null person IDs."""
-        from app.services.facets import people_facet
-        
+        assert result.values == []
+
+    def test_people_facet_single_person(self):
+        facet = PeopleFacet()
         mock_db = Mock()
-        mock_faces = Mock()
+        mock_db.execute.return_value.all.return_value = [("person_ines", 2)]
+
+        result = facet.compute(["photo1", "photo2"], _make_context(mock_db))
+
+        assert len(result.values) == 1
+        assert result.values[0].value == "person_ines"
+        assert result.values[0].count == 2
+
+    def test_people_facet_filters_null_person_ids(self):
+        facet = PeopleFacet()
+        mock_db = Mock()
         mock_db.execute.return_value.all.return_value = [
-            ("person1", 3),
-            (None, 2),
-            ("", 1),
-            ("person2", 4),
+            ("person_ines", 2),
+            (None, 5),
         ]
-        
-        result = people_facet(mock_db, mock_faces, ["photo1", "photo2"])
-        
-        # Should filter out None and empty string
-        expected = [
-            {"value": "person1", "count": 3},
-            {"value": "person2", "count": 4},
-        ]
-        assert result == expected
+
+        result = facet.compute(["photo1", "photo2"], _make_context(mock_db))
+
+        assert len(result.values) == 1
+        assert result.values[0].value == "person_ines"
 
 
 class TestTagsFacetLogic:
-    """Test the tags aggregation logic in tags_facet function."""
-    
-    @patch('app.services.facets.select')
-    @patch('app.services.facets.func')
-    def test_tags_facet_empty_results(self, mock_func, mock_select):
-        """Test tags_facet with empty results."""
-        from app.services.facets import tags_facet
-        
-        mock_db = Mock()
-        mock_photo_tags = Mock()
-        mock_db.execute.return_value.all.return_value = []
-        
-        result = tags_facet(mock_db, mock_photo_tags, ["photo1"])
-        
-        assert result == []
+    """Test the tags aggregation logic in TagsFacet."""
 
-    @patch('app.services.facets.select')
-    @patch('app.services.facets.func')
-    def test_tags_facet_single_tag(self, mock_func, mock_select):
-        """Test tags_facet with a single tag."""
-        from app.services.facets import tags_facet
-        
+    def test_tags_facet_empty_results(self):
+        facet = TagsFacet()
         mock_db = Mock()
-        mock_photo_tags = Mock()
-        mock_db.execute.return_value.all.return_value = [("nature", 5)]
-        
-        result = tags_facet(mock_db, mock_photo_tags, ["photo1", "photo2"])
-        
-        expected = [{"value": "nature", "count": 5}]
-        assert result == expected
+        mock_db.execute.return_value.all.return_value = []
+
+        result = facet.compute(["photo1"], _make_context(mock_db))
+
+        assert result.values == []
+
+    def test_tags_facet_single_tag(self):
+        facet = TagsFacet()
+        mock_db = Mock()
+        mock_db.execute.return_value.all.return_value = [("beach", 3)]
+
+        result = facet.compute(["photo1", "photo2"], _make_context(mock_db))
+
+        assert len(result.values) == 1
+        assert result.values[0].value == "beach"
+        assert result.values[0].count == 3
+
+    def test_tags_facet_filters_null_values(self):
+        facet = TagsFacet()
+        mock_db = Mock()
+        mock_db.execute.return_value.all.return_value = [
+            ("vacation", 5),
+            (None, 2),
+        ]
+
+        result = facet.compute(["photo1", "photo2"], _make_context(mock_db))
+
+        assert len(result.values) == 1
+        assert result.values[0].value == "vacation"
 
 
 class TestDuplicatesFacetLogic:
-    """Test the duplicates aggregation logic in duplicates_facet function."""
-    
+    """Test the duplicates aggregation logic in DuplicatesFacet."""
+
     def test_duplicates_facet_result_format(self):
-        """Test that duplicates_facet returns the expected format."""
-        # This test focuses on the result format rather than the complex SQL logic
-        # The duplicates_facet function is tightly coupled to SQLAlchemy and would
-        # require extensive mocking to test properly. In a real scenario, this would
-        # be better tested with integration tests using a test database.
-        from app.services.facets import duplicates_facet
-        
-        # We can at least verify the function exists and has the expected signature
-        import inspect
-        sig = inspect.signature(duplicates_facet)
-        params = list(sig.parameters.keys())
-        
-        assert "db" in params
-        assert "photos" in params  
-        assert "filt_ids" in params
-        
-        # The return type annotation should indicate it returns Dict[str, int]
-        assert sig.return_annotation == dict[str, int] or str(sig.return_annotation) == "typing.Dict[str, int]"
+        facet = DuplicatesFacet()
+        mock_db = Mock()
+        mock_db.execute.side_effect = [
+            Mock(scalar_one=Mock(return_value=2)),
+            Mock(scalar_one=Mock(return_value=5)),
+        ]
+
+        result = facet.compute(["photo1", "photo2"], _make_context(mock_db))
+
+        assert result.metadata == {"exact": 2, "near": 5}
+        assert result.total_count == 7
+
+    def test_duplicates_facet_handles_empty_filtered_ids(self):
+        facet = DuplicatesFacet()
+        mock_db = Mock()
+
+        result = facet.compute([], _make_context(mock_db))
+
+        assert result.metadata == {"exact": 0, "near": 0}
+        assert result.total_count == 0
+
+
+class TestTagsFacetDomain:
+    """Domain-level tests for TagsFacet behavior."""
+
+    def test_given_tags_facet_when_computing_then_returns_facet_result(self):
+        facet = TagsFacet()
+        mock_db = Mock()
+        photo_tags_table = _make_photo_tags_table()
+        mock_db.execute.return_value.all.return_value = [
+            ("vacation", 5),
+            ("beach", 3),
+            ("sunset", 2),
+        ]
+        context = FacetContext(
+            db=mock_db,
+            photo_tags=photo_tags_table,
+            faces=Mock(),
+            photos=Mock(),
+        )
+
+        result = facet.compute(["photo1", "photo2"], context)
+
+        assert isinstance(result, FacetResult)
+        assert result.facet_name == "tags"
+        assert result.facet_type == FacetType.SIMPLE_COUNT
+        assert len(result.values) == 3
+        assert result.values[0].value == "vacation"
+        assert result.values[0].count == 5
+        assert result.values[1].value == "beach"
+        assert result.values[1].count == 3
+        assert result.values[2].value == "sunset"
+        assert result.values[2].count == 2
+        assert result.total_count == 10
+
+    def test_given_tags_facet_when_checking_drill_sideways_then_returns_true(self):
+        facet = TagsFacet()
+
+        assert facet.supports_drill_sideways() is True
+
+    def test_given_tags_facet_when_generating_cache_key_then_includes_name_and_ids(self):
+        facet = TagsFacet()
+        photo_ids = ["photo1", "photo2", "photo3"]
+
+        cache_key = facet.get_cache_key(photo_ids)
+
+        assert cache_key.startswith("tags:")
+        assert isinstance(cache_key, str)
+
+    def test_given_tags_facet_when_computing_with_null_values_then_filters_nulls(self):
+        facet = TagsFacet()
+        mock_db = Mock()
+        photo_tags_table = _make_photo_tags_table()
+        mock_db.execute.return_value.all.return_value = [
+            ("vacation", 5),
+            (None, 2),
+            ("beach", 3),
+        ]
+        context = FacetContext(
+            db=mock_db,
+            photo_tags=photo_tags_table,
+            faces=Mock(),
+            photos=Mock(),
+        )
+
+        result = facet.compute(["photo1", "photo2"], context)
+
+        assert len(result.values) == 2
+        assert all(v.value is not None for v in result.values)
+
+
+class TestFacetRegistry:
+    """Test the FacetRegistry coordination."""
+
+    def test_given_registry_when_initialized_then_has_default_facets(self):
+        registry = FacetRegistry()
+
+        assert isinstance(registry.get_facet("tags"), TagsFacet)
+        assert isinstance(registry.get_facet("people"), PeopleFacet)
+        assert isinstance(registry.get_facet("date"), DateHierarchyFacet)
+        assert isinstance(registry.get_facet("duplicates"), DuplicatesFacet)
+
+    def test_given_registry_when_registering_custom_facet_then_can_retrieve_it(self):
+        registry = FacetRegistry()
+
+        class CustomFacet(TagsFacet):
+            def __init__(self) -> None:
+                super().__init__()
+                self.name = "custom"
+
+        custom_facet = CustomFacet()
+        registry.register(custom_facet)
+
+        retrieved = registry.get_facet("custom")
+        assert retrieved is not None
+        assert retrieved is custom_facet
+        assert retrieved.name == "custom"
+
+    def test_given_registry_when_getting_nonexistent_facet_then_returns_none(self):
+        registry = FacetRegistry()
+
+        assert registry.get_facet("nonexistent") is None
+
+    def test_given_registry_when_getting_all_facets_then_returns_list(self):
+        registry = FacetRegistry()
+
+        all_facets = registry.get_all_facets()
+
+        assert isinstance(all_facets, list)
+        assert len(all_facets) == 4
+        assert all(hasattr(f, "compute") for f in all_facets)
+        assert all(hasattr(f, "supports_drill_sideways") for f in all_facets)
+
+
+class TestFacetValue:
+    """Test the FacetValue data structure."""
+
+    def test_given_facet_value_when_created_then_has_expected_attributes(self):
+        value = FacetValue(value="vacation", count=5)
+
+        assert value.value == "vacation"
+        assert value.count == 5
+        assert value.metadata is None
+        assert value.children is None
+
+    def test_given_facet_value_when_created_with_children_then_supports_hierarchy(self):
+        child1 = FacetValue(value="january", count=3)
+        child2 = FacetValue(value="february", count=2)
+
+        parent = FacetValue(value=2020, count=5, children=[child1, child2])
+
+        assert parent.value == 2020
+        assert parent.count == 5
+        parent_children = parent.children
+        assert parent_children is not None
+        assert len(parent_children) == 2
+        assert parent_children[0].value == "january"
+        assert parent_children[1].value == "february"
+
+
+class TestFacetResult:
+    """Test the FacetResult data structure."""
+
+    def test_given_facet_result_when_created_then_has_expected_attributes(self):
+        values = [
+            FacetValue(value="vacation", count=5),
+            FacetValue(value="beach", count=3),
+        ]
+
+        result = FacetResult(
+            facet_name="tags",
+            facet_type=FacetType.SIMPLE_COUNT,
+            values=values,
+            total_count=8,
+        )
+
+        assert result.facet_name == "tags"
+        assert result.facet_type == FacetType.SIMPLE_COUNT
+        assert len(result.values) == 2
+        assert result.total_count == 8
+        assert result.metadata is None
+
+
+class TestFacetArchitecturalBenefits:
+    """Higher-level architectural tests for the facet system."""
+
+    def test_given_facets_when_extending_with_new_facet_then_easy_to_add(self):
+        class CameraModelFacet(TagsFacet):
+            def __init__(self) -> None:
+                super().__init__()
+                self.name = "camera_models"
+                self.table_name = "photos"
+                self.value_column = "camera_model"
+
+        registry = FacetRegistry()
+        registry.register(CameraModelFacet())
+
+        camera_facet = registry.get_facet("camera_models")
+        assert camera_facet is not None
+        assert camera_facet.name == "camera_models"
+        assert camera_facet.supports_drill_sideways() is True
+
+    def test_given_facets_when_testing_individually_then_isolated_and_focused(self):
+        tags_facet = TagsFacet()
+        people_facet = PeopleFacet()
+
+        assert tags_facet.name == "tags"
+        assert tags_facet.table_name == "photo_tags"
+        assert tags_facet.value_column == "tag"
+        assert people_facet.name == "people"
+        assert people_facet.table_name == "faces"
+        assert people_facet.value_column == "person_id"
+        assert tags_facet.supports_drill_sideways() is True
+        assert people_facet.supports_drill_sideways() is True
+
+    def test_given_facets_when_comparing_types_then_polymorphic_behavior(self):
+        tags_facet = TagsFacet()
+        date_facet = DateHierarchyFacet()
+        duplicates_facet = DuplicatesFacet()
+
+        assert tags_facet.facet_type == FacetType.SIMPLE_COUNT
+        assert date_facet.facet_type == FacetType.DATE_HIERARCHY
+        assert duplicates_facet.facet_type == FacetType.DUPLICATE_STATS
+        assert tags_facet.supports_drill_sideways() is True
+        assert date_facet.supports_drill_sideways() is True
+        assert duplicates_facet.supports_drill_sideways() is False

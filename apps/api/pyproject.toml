@@ -4,13 +4,21 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi",
-  "uvicorn[standard]"
+  "uvicorn[standard]",
+  "sqlalchemy",
+  "psycopg[binary]",
+  "pgvector",
+  "pillow",
+  "pillow-heif",
+  "opencv-python-headless",
+  "numpy"
 ]
 
 [tool.uv.sources]
 
 [project.scripts]
-api = "api.__main__:main"
+api = "app.__main__:main"
+photo-org = "app.cli:main"
 
 [project.optional-dependencies]
 test = [

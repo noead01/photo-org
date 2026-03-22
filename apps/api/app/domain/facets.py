@@ -68,14 +68,63 @@ class DateHierarchyFacet(Facet):
         super().__init__("date", FacetType.DATE_HIERARCHY)
     
     def compute(self, filtered_photo_ids: List[str], context: 'FacetContext') -> FacetResult:
-        """Compute date hierarchy facet."""
-        # This would use the context to get data
-        # For now, return empty result as this is just architectural demo
+        """Compute date hierarchy facet using hierarchical FacetValue objects."""
+        if not filtered_photo_ids:
+            return FacetResult(
+                facet_name=self.name,
+                facet_type=self.facet_type,
+                values=[],
+                total_count=0
+            )
+        
+        from sqlalchemy import select
+        from datetime import datetime
+        
+        query = select(context.photos.c.shot_ts).where(
+            context.photos.c.photo_id.in_(filtered_photo_ids)
+        )
+        rows = context.db.execute(query).all()
+        
+        by_year: Dict[int, Dict[str, Any]] = {}
+        total = 0
+        
+        for (ts,) in rows:
+            if not isinstance(ts, datetime):
+                continue
+            
+            year, month, day = ts.year, ts.month, ts.day
+            year_bucket = by_year.setdefault(year, {"count": 0, "months": {}})
+            year_bucket["count"] += 1
+            
+            month_bucket = year_bucket["months"].setdefault(
+                month, {"count": 0, "days": {}}
+            )
+            month_bucket["count"] += 1
+            month_bucket["days"][day] = month_bucket["days"].get(day, 0) + 1
+            total += 1
+        
+        year_values: List[FacetValue] = []
+        for year in sorted(by_year):
+            year_bucket = by_year[year]
+            month_values: List[FacetValue] = []
+            for month in sorted(year_bucket["months"]):
+                month_bucket = year_bucket["months"][month]
+                day_values = [
+                    FacetValue(value=day, count=count)
+                    for day, count in sorted(month_bucket["days"].items())
+                ]
+                month_values.append(
+                    FacetValue(value=month, count=month_bucket["count"], children=day_values)
+                )
+            year_values.append(
+                FacetValue(value=year, count=year_bucket["count"], children=month_values)
+            )
+        
         return FacetResult(
             facet_name=self.name,
             facet_type=self.facet_type,
-            values=[],
-            total_count=len(filtered_photo_ids)
+            values=year_values,
+            total_count=total
         )
     
     def supports_drill_sideways(self) -> bool:
@@ -151,14 +200,57 @@ class DuplicatesFacet(Facet):
         super().__init__("duplicates", FacetType.DUPLICATE_STATS)
     
     def compute(self, filtered_photo_ids: List[str], context: 'FacetContext') -> FacetResult:
-        """Compute duplicate statistics."""
-        # This would use the context to get data
-        # For now, return empty result as this is just architectural demo
+        """Compute duplicate statistics for exact and perceptual hashes."""
+        if not filtered_photo_ids:
+            return FacetResult(
+                facet_name=self.name,
+                facet_type=self.facet_type,
+                values=[],
+                total_count=0,
+                metadata={"exact": 0, "near": 0}
+            )
+        
+        from sqlalchemy import select, func
+        
+        photos = context.photos
+        sha_subquery = select(
+            photos.c.sha256,
+            func.count().label("c")
+        ).where(
+            photos.c.photo_id.in_(filtered_photo_ids)
+        ).group_by(
+            photos.c.sha256
+        ).having(
+            func.count() > 1
+        ).subquery()
+        
+        phash_subquery = select(
+            photos.c.phash,
+            func.count().label("c")
+        ).where(
+            photos.c.photo_id.in_(filtered_photo_ids)
+        ).group_by(
+            photos.c.phash
+        ).having(
+            func.count() > 1
+        ).subquery()
+        
+        exact_dup = context.db.execute(
+            select(func.count()).select_from(sha_subquery)
+        ).scalar_one()
+        near_dup = context.db.execute(
+            select(func.count()).select_from(phash_subquery)
+        ).scalar_one()
+        
+        exact_count = int(exact_dup or 0)
+        near_count = int(near_dup or 0)
+        
         return FacetResult(
             facet_name=self.name,
             facet_type=self.facet_type,
             values=[],
-            total_count=len(filtered_photo_ids)
+            total_count=exact_count + near_count,
+            metadata={"exact": exact_count, "near": near_count}
         )
     
     def supports_drill_sideways(self) -> bool:
