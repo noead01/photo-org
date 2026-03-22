@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from app.db.queue import IngestQueueStore
+from app.db.queue import IngestQueueStore, PROCESSING_LEASE_SECONDS
 from app.db.session import create_db_engine
 from app.processing.ingest import PhotoRecord, upsert_photo
 
@@ -13,6 +13,7 @@ from app.processing.ingest import PhotoRecord, upsert_photo
 class ProcessQueueResult:
     processed: int = 0
     failed: int = 0
+    retryable_errors: int = 0
 
 
 def process_pending_ingest_queue(
@@ -30,6 +31,7 @@ def process_pending_ingest_queue(
     engine = create_db_engine(database_url)
     processed = 0
     failed = 0
+    retryable_errors = 0
     for row in processable_rows:
         try:
             with engine.begin() as connection:
@@ -64,9 +66,14 @@ def process_pending_ingest_queue(
                 )
             processed += 1
         except Exception:
+            retryable_errors += 1
             continue
 
-    return ProcessQueueResult(processed=processed, failed=failed)
+    return ProcessQueueResult(
+        processed=processed,
+        failed=failed,
+        retryable_errors=retryable_errors,
+    )
 
 
 def payload_to_photo_record(payload: dict) -> PhotoRecord:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -11,6 +11,8 @@ from sqlalchemy.exc import IntegrityError
 
 from app.db.session import create_session_factory
 from photoorg_db_schema import ingest_queue
+
+PROCESSING_LEASE_SECONDS = 300
 
 
 @dataclass(frozen=True)
@@ -63,10 +65,18 @@ class IngestQueueStore:
         return self.list_by_status("pending")
 
     def list_processable(self, *, limit: int) -> list[QueueRow]:
+        reclaim_before = _processing_lease_cutoff()
         with self._session_factory() as session:
             rows = session.execute(
                 select(ingest_queue)
-                .where(ingest_queue.c.status.in_(("pending", "processing")))
+                .where(
+                    (ingest_queue.c.status == "pending")
+                    | (
+                        (ingest_queue.c.status == "processing")
+                        & ingest_queue.c.last_attempt_ts.is_not(None)
+                        & (ingest_queue.c.last_attempt_ts <= reclaim_before)
+                    )
+                )
                 .order_by(ingest_queue.c.enqueued_ts, ingest_queue.c.ingest_queue_id)
                 .limit(limit)
             ).mappings()
@@ -91,10 +101,18 @@ class IngestQueueStore:
         connection: Connection,
     ) -> QueueRow | None:
         now = datetime.now(tz=UTC)
+        reclaim_before = _processing_lease_cutoff(now)
         result = connection.execute(
             update(ingest_queue)
             .where(ingest_queue.c.ingest_queue_id == ingest_queue_id)
-            .where(ingest_queue.c.status.in_(("pending", "processing")))
+            .where(
+                (ingest_queue.c.status == "pending")
+                | (
+                    (ingest_queue.c.status == "processing")
+                    & ingest_queue.c.last_attempt_ts.is_not(None)
+                    & (ingest_queue.c.last_attempt_ts <= reclaim_before)
+                )
+            )
             .values(
                 status="processing",
                 attempt_count=ingest_queue.c.attempt_count + 1,
@@ -166,3 +184,9 @@ def _is_duplicate_idempotency_key_error(exc: IntegrityError) -> bool:
         "unique constraint failed" in message
         or "duplicate key value violates unique constraint" in message
     )
+
+
+def _processing_lease_cutoff(now: datetime | None = None) -> datetime:
+    if now is None:
+        now = datetime.now(tz=UTC)
+    return now - timedelta(seconds=PROCESSING_LEASE_SECONDS)
