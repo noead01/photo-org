@@ -142,20 +142,38 @@ def test_process_pending_rows_keeps_transient_domain_write_failures_retryable(
     first = process_pending_ingest_queue(database_url, limit=10)
     assert first.processed == 0
     assert first.failed == 0
+    assert first.retryable_errors == 1
     assert queue_store.list_by_status("failed") == []
-    pending_rows = queue_store.list_by_status("pending")
-    assert len(pending_rows) == 1
-    assert pending_rows[0].attempt_count == 0
+    processing_rows = queue_store.list_by_status("processing")
+    assert len(processing_rows) == 1
+    assert processing_rows[0].attempt_count == 1
+    assert processing_rows[0].last_attempt_ts is not None
+    assert "transient db outage" in processing_rows[0].last_error
+
+    second = process_pending_ingest_queue(database_url, limit=10)
+    assert second.processed == 0
+    assert second.failed == 0
+    assert second.retryable_errors == 0
+
+    mark_queue_row_processing(
+        database_url,
+        processing_rows[0].ingest_queue_id,
+        last_attempt_ts=datetime.now(tz=UTC)
+        - timedelta(seconds=PROCESSING_LEASE_SECONDS + 1),
+    )
 
     monkeypatch.setattr(ingest_queue_processor, "upsert_photo", original_upsert)
 
-    second = process_pending_ingest_queue(database_url, limit=10)
+    third = process_pending_ingest_queue(database_url, limit=10)
 
-    assert second.processed == 1
-    assert second.failed == 0
+    assert third.processed == 1
+    assert third.failed == 0
+    assert third.retryable_errors == 0
 
 
-def test_process_pending_rows_retries_rows_left_in_processing(tmp_path):
+def test_process_pending_rows_retries_rows_left_in_processing_after_retryable_failure(
+    tmp_path, monkeypatch
+):
     database_url = f"sqlite:///{tmp_path / 'queue-processor-reclaim.db'}"
     upgrade_database(database_url)
     queue_store = IngestQueueStore(database_url)
@@ -165,6 +183,23 @@ def test_process_pending_rows_retries_rows_left_in_processing(tmp_path):
         idempotency_key="photo-reclaim",
     )
 
+    original_upsert = ingest_queue_processor.upsert_photo
+
+    def flaky_upsert(*args, **kwargs):
+        raise RuntimeError("retry me")
+
+    monkeypatch.setattr(ingest_queue_processor, "upsert_photo", flaky_upsert)
+
+    first = process_pending_ingest_queue(database_url, limit=10)
+
+    processing_rows = queue_store.list_by_status("processing")
+    assert first.processed == 0
+    assert first.failed == 0
+    assert first.retryable_errors == 1
+    assert len(processing_rows) == 1
+    assert processing_rows[0].ingest_queue_id == queue_id
+    assert processing_rows[0].attempt_count == 1
+
     mark_queue_row_processing(
         database_url,
         queue_id,
@@ -172,10 +207,13 @@ def test_process_pending_rows_retries_rows_left_in_processing(tmp_path):
         - timedelta(seconds=PROCESSING_LEASE_SECONDS + 1),
     )
 
+    monkeypatch.setattr(ingest_queue_processor, "upsert_photo", original_upsert)
+
     result = process_pending_ingest_queue(database_url, limit=10)
 
     assert result.processed == 1
     assert result.failed == 0
+    assert result.retryable_errors == 0
     assert load_photo_paths(database_url) == [SAMPLE_PAYLOAD["path"]]
     assert queue_store.list_by_status("processing") == []
     assert len(queue_store.list_by_status("completed")) == 1
@@ -264,19 +302,33 @@ def test_process_pending_rows_keeps_row_retryable_when_completion_transition_fai
 
     assert first.retryable_errors == 1
 
-    rows = queue_store.list_by_status("pending")
+    rows = queue_store.list_by_status("processing")
     assert len(rows) == 1
+    assert rows[0].attempt_count == 1
 
     monkeypatch.setattr(Connection, "execute", original_execute)
 
     second = process_pending_ingest_queue(database_url, limit=10)
 
+    assert second.processed == 0
+    assert second.failed == 0
+    assert second.retryable_errors == 0
+
+    mark_queue_row_processing(
+        database_url,
+        rows[0].ingest_queue_id,
+        last_attempt_ts=datetime.now(tz=UTC)
+        - timedelta(seconds=PROCESSING_LEASE_SECONDS + 1),
+    )
+
+    third = process_pending_ingest_queue(database_url, limit=10)
+
     assert first.processed == 0
     assert first.failed == 0
     assert first.retryable_errors == 1
-    assert second.processed == 1
-    assert second.failed == 0
-    assert second.retryable_errors == 0
+    assert third.processed == 1
+    assert third.failed == 0
+    assert third.retryable_errors == 0
     assert load_photo_paths(database_url) == [SAMPLE_PAYLOAD["path"]]
     assert queue_store.list_by_status("failed") == []
     assert queue_store.list_by_status("processing") == []

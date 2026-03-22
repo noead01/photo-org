@@ -65,7 +65,8 @@ def process_pending_ingest_queue(
                     connection=connection,
                 )
             processed += 1
-        except Exception:
+        except Exception as exc:
+            queue_store.record_retryable_failure(row.ingest_queue_id, str(exc))
             retryable_errors += 1
             continue
 

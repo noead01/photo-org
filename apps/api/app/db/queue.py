@@ -177,6 +177,22 @@ class IngestQueueStore:
             session.execute(statement)
             session.commit()
 
+    def record_retryable_failure(self, ingest_queue_id: str, error_message: str) -> None:
+        with self._session_factory() as session:
+            session.execute(
+                update(ingest_queue)
+                .where(ingest_queue.c.ingest_queue_id == ingest_queue_id)
+                .where(ingest_queue.c.status.in_(("pending", "processing")))
+                .values(
+                    status="processing",
+                    attempt_count=ingest_queue.c.attempt_count + 1,
+                    last_attempt_ts=datetime.now(tz=UTC),
+                    processed_ts=None,
+                    last_error=error_message,
+                )
+            )
+            session.commit()
+
 
 def _is_duplicate_idempotency_key_error(exc: IntegrityError) -> bool:
     message = str(exc.orig).lower()
