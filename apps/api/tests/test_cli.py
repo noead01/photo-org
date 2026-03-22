@@ -1,3 +1,6 @@
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 from app.cli import main
@@ -43,3 +46,23 @@ def test_ingest_cli_triggers_queue_processing_when_chunk_threshold_is_reached(
     assert exit_code == 0
     assert len(calls) == 5
     assert [call["limit"] for call in calls] == [2, 2, 2, 2, 2]
+
+
+def test_cli_module_executes_main_when_run_with_dash_m(tmp_path):
+    db_url = f"sqlite:///{tmp_path / 'cli-module.db'}"
+    repo_root = Path(__file__).resolve().parents[3]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(repo_root / "apps" / "api")
+
+    result = subprocess.run(
+        [sys.executable, "-m", "app.cli", "migrate", "--database-url", db_url],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert f"database_url={db_url}" in result.stdout
+    assert "migration=head" in result.stdout
