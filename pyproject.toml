@@ -23,3 +23,13 @@ test = [
 prod = [
   # things you only want in prod images, e.g. gunicorn/uvicorn workers, sentry, etc.
 ]
+
+[tool.coverage.run]
+source = [
+  "apps/api/app",
+  "packages/db-schema/photoorg_db_schema",
+]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
