@@ -1,6 +1,5 @@
 from sqlalchemy import create_engine, inspect
 
-from app.storage import ensure_schema
 from photoorg_db_schema import ingest_queue, metadata
 
 
@@ -38,10 +37,9 @@ def test_phase_zero_schema_applies_core_constraints():
     assert str(ingest_queue.c.status.server_default.arg) == "'pending'"
     assert str(ingest_queue.c.attempt_count.server_default.arg) == "0"
 
-
-def test_ensure_schema_creates_phase_zero_tables(tmp_path):
+def test_shared_metadata_defines_phase_zero_tables(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'schema.db'}", future=True)
-    ensure_schema(engine)
+    metadata.create_all(engine)
 
     tables = set(inspect(engine).get_table_names())
 
