@@ -10,3 +10,4 @@ packages/*/.venv/
 .env
 .env.*
 .envrc
+*.egg-info/

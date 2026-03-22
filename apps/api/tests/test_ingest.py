@@ -54,7 +54,8 @@ def test_ingest_directory_loads_sample_photos_into_sqlite(tmp_path):
         ).all()
 
     assert len(rows) == 10
-    assert all("/apps/api/features/samples/" in row[0] for row in rows)
+    assert all(row[0].endswith(".HEIC") for row in rows)
+    assert all("apps/api/features/samples/" in row[0] for row in rows)
     assert {row[1] for row in rows} == {"heic"}
     assert all(row[2] > 0 for row in rows)
     assert all(len(row[3]) == 64 for row in rows)
