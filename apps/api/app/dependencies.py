@@ -1,17 +1,30 @@
-from typing import Iterator
 import os
+from typing import Iterator
+
+from fastapi import Header, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.session import create_session_factory
 
 
-# In tests, Behave overrides get_db(). This default is only for dev/prod.
-DATABASE_URL = os.getenv("DATABASE_URL")
-_SessionLocal = create_session_factory(DATABASE_URL)
+WORKER_ROLE_HEADER = "X-Worker-Role"
+INGEST_PROCESSOR_ROLE = "ingest-processor"
+
 
 def get_db() -> Iterator[Session]:
-    db = _SessionLocal()
+    session_local = create_session_factory(os.getenv("DATABASE_URL"))
+    db = session_local()
     try:
         yield db
     finally:
         db.close()
+
+
+def require_worker_role(
+    worker_role: str | None = Header(default=None, alias=WORKER_ROLE_HEADER),
+) -> None:
+    if worker_role != INGEST_PROCESSOR_ROLE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Worker role required",
+        )
