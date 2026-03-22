@@ -21,9 +21,6 @@ def upgrade() -> None:
     bind = op.get_bind()
     is_postgresql = bind.dialect.name == "postgresql"
 
-    if is_postgresql:
-        op.execute("CREATE EXTENSION IF NOT EXISTS vector")
-
     embedding_type = Vector(EMBEDDING_DIMENSION) if is_postgresql and Vector is not None else sa.JSON()
 
     op.create_table(
