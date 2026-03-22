@@ -72,3 +72,7 @@ ADRs should be used for decisions that affect one or more of:
 - operational model
 
 Do not create ADRs for minor implementation details unless they constrain the architecture.
+
+## Recent ADRs
+
+- `ADR-0013`: keep domain persistence API-owned and use a queue ingress for worker submissions

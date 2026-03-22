@@ -103,3 +103,11 @@ Typical usage is expected to be:
 ## Status
 
 The project is still being shaped and documented. The architecture, operational model, and development standards are being defined before the main implementation is expanded.
+
+The current Phase 0 development path now uses an API-owned persistence boundary for ingest work:
+
+- the worker-side ingest flow queues `photo_metadata` submissions instead of writing catalog tables directly
+- the API owns queue processing and domain-table mutation
+- internal queue processing can be triggered through a bounded API endpoint for worker use
+
+For contributor-facing details about that boundary, see [CONTRIBUTING.md](CONTRIBUTING.md) and ADR-0013 in [docs/adr/README.md](docs/adr/README.md).

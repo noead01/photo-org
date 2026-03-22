@@ -91,6 +91,24 @@ Current high-value targets:
 The `pre-push` target is intentionally scoped to checks that are currently expected to pass on this repo state.
 As broader lint and type-check coverage is cleaned up, that target should expand rather than drift into a second undocumented workflow.
 
+### Worker And API Queue Boundary
+
+The current ingest development path uses an API-owned persistence boundary.
+
+Contributors should assume:
+
+- worker-side ingest code queues `photo_metadata` submissions instead of mutating catalog tables directly
+- the API service owns processing queued submissions and writing domain tables
+- internal queue processing is triggered through the bounded API endpoint rather than ad hoc direct DB writes
+
+Current development implications:
+
+- changes to queue payload shape should stay aligned with the API-side processor contract
+- worker-side changes should preserve the queue trigger chunking behavior exposed through `--queue-commit-chunk-size`
+- tests for ingest behavior should distinguish queue submission from API-side queue processing
+
+The architectural decision behind this boundary is recorded in ADR-0013.
+
 ### Automated Version Updates
 
 Packaging and release workflows should update versions automatically in a controlled way rather than relying on manual edits scattered across the repo.
