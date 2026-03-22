@@ -1,4 +1,6 @@
+import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 from sqlalchemy import create_engine, func, inspect, select
 
@@ -57,6 +59,33 @@ def test_upgrade_database_creates_ingest_queue_table(tmp_path):
         and index["column_names"] == ["status", "enqueued_ts"]
         for index in indexes
     )
+
+
+def test_initial_postgresql_migration_does_not_create_vector_extension(monkeypatch):
+    revision_path = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "20260321_000001_initial_schema.py"
+    spec = importlib.util.spec_from_file_location("initial_schema_revision", revision_path)
+    assert spec is not None
+    assert spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    recorded_sql: list[str] = []
+
+    monkeypatch.setattr(
+        migration.op,
+        "get_bind",
+        lambda: SimpleNamespace(dialect=SimpleNamespace(name="postgresql")),
+    )
+    monkeypatch.setattr(
+        migration.op,
+        "execute",
+        lambda sql: recorded_sql.append(str(sql)),
+    )
+    monkeypatch.setattr(migration.op, "create_table", lambda *args, **kwargs: None)
+    monkeypatch.setattr(migration.op, "create_index", lambda *args, **kwargs: None)
+
+    migration.upgrade()
+
+    assert recorded_sql == []
 
 
 def test_ingest_requires_existing_schema(tmp_path):
