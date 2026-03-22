@@ -150,8 +150,25 @@ def upgrade() -> None:
     )
     op.create_index("idx_ingest_runs_watched_folder_id", "ingest_runs", ["watched_folder_id"], unique=False)
 
+    op.create_table(
+        "ingest_queue",
+        sa.Column("ingest_queue_id", sa.String(36), primary_key=True),
+        sa.Column("payload_type", sa.String(), nullable=False),
+        sa.Column("payload_json", sa.JSON(), nullable=False),
+        sa.Column("idempotency_key", sa.String(), nullable=False, unique=True),
+        sa.Column("status", sa.String(), nullable=False, server_default=sa.text("'pending'")),
+        sa.Column("attempt_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
+        sa.Column("enqueued_ts", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column("last_attempt_ts", sa.TIMESTAMP(timezone=True), nullable=True),
+        sa.Column("processed_ts", sa.TIMESTAMP(timezone=True), nullable=True),
+        sa.Column("last_error", sa.Text(), nullable=True),
+    )
+    op.create_index("idx_ingest_queue_status_enqueued_ts", "ingest_queue", ["status", "enqueued_ts"], unique=False)
+
 
 def downgrade() -> None:
+    op.drop_index("idx_ingest_queue_status_enqueued_ts", table_name="ingest_queue")
+    op.drop_table("ingest_queue")
     op.drop_index("idx_ingest_runs_watched_folder_id", table_name="ingest_runs")
     op.drop_table("ingest_runs")
     op.drop_index("idx_face_labels_person_id", table_name="face_labels")

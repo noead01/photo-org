@@ -167,6 +167,26 @@ ingest_runs = Table(
     Column("error_summary", Text),
 )
 
+ingest_queue = Table(
+    "ingest_queue",
+    metadata,
+    Column("ingest_queue_id", String(36), primary_key=True),
+    Column("payload_type", String, nullable=False),
+    Column("payload_json", JSON, nullable=False),
+    Column("idempotency_key", String, nullable=False, unique=True),
+    Column("status", String, nullable=False, server_default=text("'pending'")),
+    Column("attempt_count", Integer, nullable=False, server_default=text("0")),
+    Column(
+        "enqueued_ts",
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    Column("last_attempt_ts", TIMESTAMP(timezone=True)),
+    Column("processed_ts", TIMESTAMP(timezone=True)),
+    Column("last_error", Text),
+)
+
 Index("idx_photos_shot_ts", photos.c.shot_ts)
 Index("idx_photos_sha256", photos.c.sha256)
 Index("idx_faces_photo_id", faces.c.photo_id)
@@ -175,6 +195,7 @@ Index("idx_photo_tags_photo_id", photo_tags.c.photo_id)
 Index("idx_face_labels_face_id", face_labels.c.face_id)
 Index("idx_face_labels_person_id", face_labels.c.person_id)
 Index("idx_ingest_runs_watched_folder_id", ingest_runs.c.watched_folder_id)
+Index("idx_ingest_queue_status_enqueued_ts", ingest_queue.c.status, ingest_queue.c.enqueued_ts)
 
 
 def configure_embedding_column(bind: Engine | Connection) -> None:

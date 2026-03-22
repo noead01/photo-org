@@ -1,7 +1,6 @@
 from sqlalchemy import create_engine, inspect
 
-from app.storage import ensure_schema
-from photoorg_db_schema import metadata
+from photoorg_db_schema import ingest_queue, metadata
 
 
 def test_phase_zero_schema_exposes_expected_tables():
@@ -13,9 +12,14 @@ def test_phase_zero_schema_exposes_expected_tables():
         "face_labels",
         "watched_folders",
         "ingest_runs",
+        "ingest_queue",
     }
 
     assert expected.issubset(metadata.tables.keys())
+
+
+def test_ingest_queue_is_publicly_exported_from_shared_schema():
+    assert ingest_queue is metadata.tables["ingest_queue"]
 
 
 def test_phase_zero_schema_applies_core_constraints():
@@ -23,16 +27,19 @@ def test_phase_zero_schema_applies_core_constraints():
     photo_files = metadata.tables["photo_files"]
     faces = metadata.tables["faces"]
     watched_folders = metadata.tables["watched_folders"]
+    ingest_queue = metadata.tables["ingest_queue"]
 
     assert photos.c.sha256.unique is True
     assert watched_folders.c.root_path.unique is True
     assert [fk.column.table.name for fk in photo_files.c.photo_id.foreign_keys] == ["photos"]
     assert [fk.column.table.name for fk in faces.c.photo_id.foreign_keys] == ["photos"]
+    assert ingest_queue.c.idempotency_key.unique is True
+    assert str(ingest_queue.c.status.server_default.arg) == "'pending'"
+    assert str(ingest_queue.c.attempt_count.server_default.arg) == "0"
 
-
-def test_ensure_schema_creates_phase_zero_tables(tmp_path):
+def test_shared_metadata_defines_phase_zero_tables(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'schema.db'}", future=True)
-    ensure_schema(engine)
+    metadata.create_all(engine)
 
     tables = set(inspect(engine).get_table_names())
 
@@ -44,4 +51,5 @@ def test_ensure_schema_creates_phase_zero_tables(tmp_path):
         "face_labels",
         "watched_folders",
         "ingest_runs",
+        "ingest_queue",
     } <= tables
