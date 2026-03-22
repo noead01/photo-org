@@ -3,6 +3,7 @@ from sqlalchemy.engine import Connection
 
 from app.db.queue import IngestQueueStore
 from app.migrations import upgrade_database
+from app.services import ingest_queue_processor
 from app.services.ingest_queue_processor import process_pending_ingest_queue
 from app.storage import photos
 from photoorg_db_schema import ingest_queue
@@ -91,7 +92,44 @@ def test_process_pending_rows_marks_unsupported_payload_failed_without_stranding
     assert queue_store.list_by_status("processing") == []
     failed_rows = queue_store.list_by_status("failed")
     assert len(failed_rows) == 1
+    assert failed_rows[0].attempt_count == 1
     assert "Unsupported payload_type" in failed_rows[0].last_error
+
+
+def test_process_pending_rows_keeps_transient_domain_write_failures_retryable(
+    tmp_path, monkeypatch
+):
+    database_url = f"sqlite:///{tmp_path / 'queue-processor-transient.db'}"
+    upgrade_database(database_url)
+    queue_store = IngestQueueStore(database_url)
+
+    queue_store.enqueue(
+        payload_type="photo_metadata",
+        payload=SAMPLE_PAYLOAD,
+        idempotency_key="photo-transient",
+    )
+
+    original_upsert = ingest_queue_processor.upsert_photo
+
+    def flaky_upsert(*args, **kwargs):
+        raise RuntimeError("transient db outage")
+
+    monkeypatch.setattr(ingest_queue_processor, "upsert_photo", flaky_upsert)
+
+    first = process_pending_ingest_queue(database_url, limit=10)
+    assert first.processed == 0
+    assert first.failed == 0
+    assert queue_store.list_by_status("failed") == []
+    pending_rows = queue_store.list_by_status("pending")
+    assert len(pending_rows) == 1
+    assert pending_rows[0].attempt_count == 0
+
+    monkeypatch.setattr(ingest_queue_processor, "upsert_photo", original_upsert)
+
+    second = process_pending_ingest_queue(database_url, limit=10)
+
+    assert second.processed == 1
+    assert second.failed == 0
 
 
 def test_process_pending_rows_retries_rows_left_in_processing(tmp_path):

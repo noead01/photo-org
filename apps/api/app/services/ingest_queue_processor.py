@@ -9,10 +9,6 @@ from app.db.session import create_db_engine
 from app.processing.ingest import PhotoRecord, upsert_photo
 
 
-class PermanentQueueProcessingError(Exception):
-    pass
-
-
 @dataclass(frozen=True)
 class ProcessQueueResult:
     processed: int = 0
@@ -44,22 +40,29 @@ def process_pending_ingest_queue(
                 if claimed_row is None:
                     continue
                 if claimed_row.payload_type != "photo_metadata":
-                    raise PermanentQueueProcessingError(
-                        f"Unsupported payload_type: {claimed_row.payload_type}"
+                    queue_store.mark_failed(
+                        claimed_row.ingest_queue_id,
+                        f"Unsupported payload_type: {claimed_row.payload_type}",
+                        connection=connection,
                     )
+                    failed += 1
+                    continue
                 try:
                     record = payload_to_photo_record(claimed_row.payload_json)
-                    upsert_photo(connection, record)
-                except Exception as exc:
-                    raise PermanentQueueProcessingError(str(exc)) from exc
+                except (KeyError, TypeError, ValueError) as exc:
+                    queue_store.mark_failed(
+                        claimed_row.ingest_queue_id,
+                        str(exc),
+                        connection=connection,
+                    )
+                    failed += 1
+                    continue
+                upsert_photo(connection, record)
                 queue_store.mark_completed(
                     claimed_row.ingest_queue_id,
                     connection=connection,
                 )
             processed += 1
-        except PermanentQueueProcessingError as exc:
-            queue_store.mark_failed(row.ingest_queue_id, str(exc))
-            failed += 1
         except Exception:
             continue
 

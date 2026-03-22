@@ -134,20 +134,29 @@ class IngestQueueStore:
             session.execute(statement)
             session.commit()
 
-    def mark_failed(self, ingest_queue_id: str, error_message: str) -> None:
-        with self._session_factory() as session:
-            session.execute(
-                update(ingest_queue)
-                .where(ingest_queue.c.ingest_queue_id == ingest_queue_id)
-                .where(ingest_queue.c.status.in_(("pending", "processing")))
-                .values(
-                    status="failed",
-                    attempt_count=ingest_queue.c.attempt_count + 1,
-                    last_attempt_ts=datetime.now(tz=UTC),
-                    processed_ts=None,
-                    last_error=error_message,
-                )
+    def mark_failed(
+        self,
+        ingest_queue_id: str,
+        error_message: str,
+        *,
+        connection: Connection | None = None,
+    ) -> None:
+        statement = (
+            update(ingest_queue)
+            .where(ingest_queue.c.ingest_queue_id == ingest_queue_id)
+            .where(ingest_queue.c.status.in_(("pending", "processing")))
+            .values(
+                status="failed",
+                processed_ts=None,
+                last_error=error_message,
             )
+        )
+        if connection is not None:
+            connection.execute(statement)
+            return
+
+        with self._session_factory() as session:
+            session.execute(statement)
             session.commit()
 
 
