@@ -1,7 +1,7 @@
 from sqlalchemy import create_engine, inspect
 
 from app.storage import ensure_schema
-from photoorg_db_schema import metadata
+from photoorg_db_schema import ingest_queue, metadata
 
 
 def test_phase_zero_schema_exposes_expected_tables():
@@ -13,9 +13,15 @@ def test_phase_zero_schema_exposes_expected_tables():
         "face_labels",
         "watched_folders",
         "ingest_runs",
+        "ingest_queue",
     }
 
     assert expected.issubset(metadata.tables.keys())
+
+
+def test_ingest_queue_is_publicly_exported_from_shared_schema():
+    assert ingest_queue is metadata.tables["ingest_queue"]
+
 
 def test_phase_zero_schema_applies_core_constraints():
     photos = metadata.tables["photos"]
@@ -47,4 +53,5 @@ def test_ensure_schema_creates_phase_zero_tables(tmp_path):
         "face_labels",
         "watched_folders",
         "ingest_runs",
+        "ingest_queue",
     } <= tables
