@@ -65,3 +65,28 @@ def test_enqueue_reraises_non_idempotency_integrity_errors(tmp_path):
             payload={"path": "a.heic"},
             idempotency_key="bad-null-payload-type",
         )
+
+
+def test_enqueue_reraises_invalid_submission_for_existing_idempotency_key(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'queue-store-mixed-failure.db'}"
+    upgrade_database(database_url)
+
+    store = IngestQueueStore(database_url)
+    queue_id = store.enqueue(
+        payload_type="photo_metadata",
+        payload={"path": "a.heic"},
+        idempotency_key="dup-key",
+    )
+
+    with pytest.raises(IntegrityError):
+        store.enqueue(
+            payload_type=None,
+            payload={"path": "b.heic"},
+            idempotency_key="dup-key",
+        )
+
+    rows = store.list_pending()
+
+    assert [row.ingest_queue_id for row in rows] == [queue_id]
+    assert rows[0].payload_type == "photo_metadata"
+    assert rows[0].payload_json == {"path": "a.heic"}

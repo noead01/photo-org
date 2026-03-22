@@ -47,6 +47,8 @@ class IngestQueueStore:
                 return queue_id
             except IntegrityError as exc:
                 session.rollback()
+                if not _is_duplicate_idempotency_key_error(exc):
+                    raise exc
                 existing_id = session.execute(
                     select(ingest_queue.c.ingest_queue_id).where(
                         ingest_queue.c.idempotency_key == idempotency_key
@@ -64,3 +66,11 @@ class IngestQueueStore:
                 .order_by(ingest_queue.c.enqueued_ts, ingest_queue.c.ingest_queue_id)
             ).mappings()
             return [QueueRow(**row) for row in rows]
+
+
+def _is_duplicate_idempotency_key_error(exc: IntegrityError) -> bool:
+    message = str(exc.orig).lower()
+    return "idempotency_key" in message and (
+        "unique constraint failed" in message
+        or "duplicate key value violates unique constraint" in message
+    )
