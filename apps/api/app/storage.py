@@ -20,7 +20,7 @@ from sqlalchemy import (
     create_engine,
     text,
 )
-from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 
 
@@ -143,21 +143,6 @@ def create_session_factory(database_url: str | Path | None = None) -> sessionmak
     engine = create_db_engine(database_url)
     return sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
-
-def ensure_schema(bind: Engine | Connection) -> None:
-    connection = bind.connect() if isinstance(bind, Engine) else bind
-    close_after = isinstance(bind, Engine)
-    try:
-        if connection.dialect.name == "postgresql":
-            connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-            _configure_embedding_column(connection)
-        metadata.create_all(connection)
-    finally:
-        if close_after:
-            connection.commit()
-            connection.close()
-
-
-def _configure_embedding_column(bind: Engine | Connection) -> None:
+def _configure_embedding_column(bind: Engine) -> None:
     dialect_name = bind.dialect.name
     faces.c.embedding.type = embedding_column_type(dialect_name)

@@ -3,9 +3,10 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, func, select
 
+from app.migrations import upgrade_database
 from app.processing.faces import OpenCvFaceDetector
 from app.processing.ingest import ingest_directory
-from app.storage import ensure_schema, faces, photos
+from app.storage import faces, photos
 
 
 SAMPLES_DIR = Path("/mnt/d/Projects/photo-org/apps/api/features/samples")
@@ -15,6 +16,7 @@ pytest.importorskip("pillow_heif")
 
 def test_ingest_directory_loads_sample_photos_into_sqlite(tmp_path):
     db_url = f"sqlite:///{tmp_path / 'photoorg.db'}"
+    upgrade_database(db_url)
 
     result = ingest_directory(SAMPLES_DIR, database_url=db_url)
 
@@ -58,6 +60,7 @@ def test_ingest_directory_loads_sample_photos_into_sqlite(tmp_path):
 
 def test_ingest_directory_is_idempotent_for_existing_paths(tmp_path):
     db_url = f"sqlite:///{tmp_path / 'photoorg.db'}"
+    upgrade_database(db_url)
 
     first_run = ingest_directory(SAMPLES_DIR, database_url=db_url)
     second_run = ingest_directory(SAMPLES_DIR, database_url=db_url)
@@ -70,6 +73,7 @@ def test_ingest_directory_is_idempotent_for_existing_paths(tmp_path):
 
 def test_ingest_directory_stores_face_rows_when_detector_is_enabled(tmp_path):
     db_url = f"sqlite:///{tmp_path / 'faces.db'}"
+    upgrade_database(db_url)
 
     result = ingest_directory(
         SAMPLES_DIR,
@@ -95,9 +99,10 @@ def test_ingest_directory_stores_face_rows_when_detector_is_enabled(tmp_path):
     assert any(row[1] > 0 for row in photo_rows)
 
 
-def test_ensure_schema_creates_search_tables(tmp_path):
-    engine = create_engine(f"sqlite:///{tmp_path / 'schema.db'}", future=True)
-    ensure_schema(engine)
+def test_upgrade_database_creates_search_tables(tmp_path):
+    db_url = f"sqlite:///{tmp_path / 'schema.db'}"
+    upgrade_database(db_url)
+    engine = create_engine(db_url, future=True)
 
     with engine.connect() as connection:
         tables = set(connection.dialect.get_table_names(connection))

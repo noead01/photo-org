@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 
+from app.migrations import upgrade_database
 from app.processing.faces import OpenCvFaceDetector
 from app.processing.ingest import ingest_directory
 from app.storage import resolve_database_url
@@ -24,6 +25,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run OpenCV face detection and store detections",
     )
 
+    migrate_parser = subparsers.add_parser("migrate", help="Apply database migrations")
+    migrate_parser.add_argument(
+        "--database-url",
+        default=None,
+        help="SQLAlchemy database URL. Defaults to DATABASE_URL.",
+    )
+
     return parser
 
 
@@ -44,6 +52,11 @@ def main(argv: list[str] | None = None) -> int:
             for error in result.errors:
                 print(error)
             return 1
+        return 0
+    if args.command == "migrate":
+        upgrade_database(args.database_url)
+        print(f"database_url={resolve_database_url(args.database_url)}")
+        print("migration=head")
         return 0
 
     parser.error(f"unknown command: {args.command}")

@@ -11,7 +11,7 @@ from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.engine import Connection
 
 from app.processing.metadata import extract_image_metadata, stat_timestamp_to_iso
-from app.storage import create_db_engine, ensure_schema, faces, photos
+from app.storage import create_db_engine, faces, photos
 
 
 SUPPORTED_EXTENSIONS = {".heic", ".heif", ".jpeg", ".jpg", ".png"}
@@ -62,7 +62,6 @@ def ingest_directory(
 
     engine = create_db_engine(database_url)
     with engine.begin() as connection:
-        ensure_schema(connection)
         for photo_path in iter_photo_files(source_root):
             result.scanned += 1
             try:
