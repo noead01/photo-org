@@ -1,6 +1,4 @@
 from pathlib import Path
-
-import pytest
 from sqlalchemy import create_engine, inspect, select
 
 from app.processing.ingest import ingest_directory

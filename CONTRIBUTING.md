@@ -66,6 +66,31 @@ That pipeline should include:
 
 Validation should be fast enough for normal developer use but strict enough to prevent obvious regressions from reaching the main branch.
 
+## Preferred Local Commands
+
+The repo has a workspace-level `pyproject.toml` plus package-level `pyproject.toml` files under `apps/` and `packages/`.
+Contributors should prefer the root `Makefile` so the common sync, lint, and test commands run through one documented path.
+
+Current high-value targets:
+
+- `make sync`
+  - install or refresh the root dev/test environment with `uv`
+- `make lint`
+  - run the currently enforced Ruff checks for the Phase 0 schema and migration surfaces
+- `make test`
+  - run the focused schema, migration, and ingest pytest slice
+- `make test-all`
+  - run the full `apps/api/tests` pytest suite
+- `make check`
+  - run `lint` and the focused `test` slice
+- `make pre-push`
+  - run the local validation path expected before pushing changes
+- `make migrate`
+  - apply database migrations from the repo root through the wrapper script
+
+The `pre-push` target is intentionally scoped to checks that are currently expected to pass on this repo state.
+As broader lint and type-check coverage is cleaned up, that target should expand rather than drift into a second undocumented workflow.
+
 ### Automated Version Updates
 
 Packaging and release workflows should update versions automatically in a controlled way rather than relying on manual edits scattered across the repo.
