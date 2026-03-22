@@ -5,6 +5,22 @@ from pathlib import Path
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine
+from sqlalchemy import (
+    JSON,
+    TIMESTAMP,
+    Column,
+    ForeignKey,
+    Index,
+    Integer,
+    LargeBinary,
+    MetaData,
+    Float,
+    String,
+    Table,
+    Text,
+    create_engine,
+    text,
+)
 from sqlalchemy.orm import sessionmaker
 
 from photoorg_db_schema import (
@@ -61,3 +77,6 @@ def ensure_schema(bind: Engine | Connection) -> None:
         if close_after:
             connection.commit()
             connection.close()
+def _configure_embedding_column(bind: Engine) -> None:
+    dialect_name = bind.dialect.name
+    faces.c.embedding.type = embedding_column_type(dialect_name)
