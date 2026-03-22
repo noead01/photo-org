@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+import app.dependencies as dependencies
 from app.db.queue import IngestQueueStore
 from app.db.session import create_session_factory
 from app.dependencies import get_db
@@ -65,6 +66,85 @@ def test_process_queue_endpoint_rejects_missing_worker_role(client: TestClient):
     response = client.post("/api/v1/internal/ingest-queue/process")
 
     assert response.status_code == 403
+    assert response.json() == {"detail": "Worker role required"}
+
+
+def test_process_queue_endpoint_rejects_wrong_worker_role(client: TestClient):
+    response = client.post(
+        "/api/v1/internal/ingest-queue/process",
+        headers={"X-Worker-Role": "wrong-role"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Worker role required"}
+
+
+def test_process_queue_endpoint_forwards_limit_to_processor(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    captured: dict[str, int] = {}
+
+    def fake_process_pending_ingest_queue(*, limit: int = 100):
+        captured["limit"] = limit
+
+        class Result:
+            processed = 0
+            failed = 0
+            retryable_errors = 0
+
+        return Result()
+
+    monkeypatch.setattr(
+        "app.routers.ingest_queue.process_pending_ingest_queue",
+        fake_process_pending_ingest_queue,
+    )
+
+    response = client.post(
+        "/api/v1/internal/ingest-queue/process",
+        headers={"X-Worker-Role": "ingest-processor"},
+        json={"limit": 7},
+    )
+
+    assert response.status_code == 200
+    assert captured == {"limit": 7}
+    assert response.json() == {
+        "processed": 0,
+        "failed": 0,
+        "retryable_errors": 0,
+    }
+
+
+def test_get_db_reuses_cached_session_factory_for_database_url(monkeypatch: pytest.MonkeyPatch):
+    created_for: list[str | None] = []
+
+    class DummySession:
+        def close(self) -> None:
+            pass
+
+    class DummySessionFactory:
+        def __call__(self) -> DummySession:
+            return DummySession()
+
+    def fake_create_session_factory(database_url: str | None):
+        created_for.append(database_url)
+        return DummySessionFactory()
+
+    dependencies._get_session_factory.cache_clear()
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///cached.db")
+    monkeypatch.setattr(dependencies, "create_session_factory", fake_create_session_factory)
+
+    first = dependencies.get_db()
+    second = dependencies.get_db()
+    first_session = next(first)
+    second_session = next(second)
+
+    assert isinstance(first_session, DummySession)
+    assert isinstance(second_session, DummySession)
+    assert created_for == ["sqlite:///cached.db"]
+
+    first.close()
+    second.close()
 
 
 def test_process_queue_endpoint_processes_pending_rows_for_worker_role(
