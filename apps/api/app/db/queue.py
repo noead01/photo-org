@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from sqlalchemy import select, update
+from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 
 from app.db.session import create_session_factory
@@ -61,6 +62,16 @@ class IngestQueueStore:
     def list_pending(self) -> list[QueueRow]:
         return self.list_by_status("pending")
 
+    def list_processable(self, *, limit: int) -> list[QueueRow]:
+        with self._session_factory() as session:
+            rows = session.execute(
+                select(ingest_queue)
+                .where(ingest_queue.c.status.in_(("pending", "processing")))
+                .order_by(ingest_queue.c.enqueued_ts, ingest_queue.c.ingest_queue_id)
+                .limit(limit)
+            ).mappings()
+            return [QueueRow(**row) for row in rows]
+
     def list_by_status(self, status: str) -> list[QueueRow]:
         with self._session_factory() as session:
             rows = session.execute(
@@ -71,55 +82,56 @@ class IngestQueueStore:
             return [QueueRow(**row) for row in rows]
 
     def claim_pending(self, *, limit: int) -> list[QueueRow]:
+        return self.list_processable(limit=limit)
+
+    def begin_processing_attempt(
+        self,
+        ingest_queue_id: str,
+        *,
+        connection: Connection,
+    ) -> QueueRow | None:
         now = datetime.now(tz=UTC)
-
-        with self._session_factory() as session:
-            rows = session.execute(
-                select(ingest_queue)
-                .where(ingest_queue.c.status == "pending")
-                .order_by(ingest_queue.c.enqueued_ts, ingest_queue.c.ingest_queue_id)
-                .limit(limit)
-            ).mappings()
-
-            claimed_ids: list[str] = []
-            for row in rows:
-                result = session.execute(
-                    update(ingest_queue)
-                    .where(ingest_queue.c.ingest_queue_id == row["ingest_queue_id"])
-                    .where(ingest_queue.c.status == "pending")
-                    .values(
-                        status="processing",
-                        attempt_count=ingest_queue.c.attempt_count + 1,
-                        last_attempt_ts=now,
-                        last_error=None,
-                    )
-                )
-                if result.rowcount:
-                    claimed_ids.append(row["ingest_queue_id"])
-
-            session.commit()
-
-            if not claimed_ids:
-                return []
-
-            claimed_rows = session.execute(
-                select(ingest_queue)
-                .where(ingest_queue.c.ingest_queue_id.in_(claimed_ids))
-                .order_by(ingest_queue.c.enqueued_ts, ingest_queue.c.ingest_queue_id)
-            ).mappings()
-            return [QueueRow(**row) for row in claimed_rows]
-
-    def mark_completed(self, ingest_queue_id: str) -> None:
-        with self._session_factory() as session:
-            session.execute(
-                update(ingest_queue)
-                .where(ingest_queue.c.ingest_queue_id == ingest_queue_id)
-                .values(
-                    status="completed",
-                    processed_ts=datetime.now(tz=UTC),
-                    last_error=None,
-                )
+        result = connection.execute(
+            update(ingest_queue)
+            .where(ingest_queue.c.ingest_queue_id == ingest_queue_id)
+            .where(ingest_queue.c.status.in_(("pending", "processing")))
+            .values(
+                status="processing",
+                attempt_count=ingest_queue.c.attempt_count + 1,
+                last_attempt_ts=now,
+                last_error=None,
             )
+        )
+        if not result.rowcount:
+            return None
+
+        row = connection.execute(
+            select(ingest_queue).where(ingest_queue.c.ingest_queue_id == ingest_queue_id)
+        ).mappings().one()
+        return QueueRow(**row)
+
+    def mark_completed(
+        self,
+        ingest_queue_id: str,
+        *,
+        connection: Connection | None = None,
+    ) -> None:
+        statement = (
+            update(ingest_queue)
+            .where(ingest_queue.c.ingest_queue_id == ingest_queue_id)
+            .where(ingest_queue.c.status == "processing")
+            .values(
+                status="completed",
+                processed_ts=datetime.now(tz=UTC),
+                last_error=None,
+            )
+        )
+        if connection is not None:
+            connection.execute(statement)
+            return
+
+        with self._session_factory() as session:
+            session.execute(statement)
             session.commit()
 
     def mark_failed(self, ingest_queue_id: str, error_message: str) -> None:
@@ -127,8 +139,12 @@ class IngestQueueStore:
             session.execute(
                 update(ingest_queue)
                 .where(ingest_queue.c.ingest_queue_id == ingest_queue_id)
+                .where(ingest_queue.c.status.in_(("pending", "processing")))
                 .values(
                     status="failed",
+                    attempt_count=ingest_queue.c.attempt_count + 1,
+                    last_attempt_ts=datetime.now(tz=UTC),
+                    processed_ts=None,
                     last_error=error_message,
                 )
             )

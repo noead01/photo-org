@@ -9,6 +9,10 @@ from app.db.session import create_db_engine
 from app.processing.ingest import PhotoRecord, upsert_photo
 
 
+class PermanentQueueProcessingError(Exception):
+    pass
+
+
 @dataclass(frozen=True)
 class ProcessQueueResult:
     processed: int = 0
@@ -21,26 +25,43 @@ def process_pending_ingest_queue(
     limit: int = 100,
 ) -> ProcessQueueResult:
     queue_store = IngestQueueStore(database_url)
-    claimed_rows = queue_store.claim_pending(limit=limit)
+    processable_rows = queue_store.list_processable(limit=limit)
     result = ProcessQueueResult()
 
-    if not claimed_rows:
+    if not processable_rows:
         return result
 
     engine = create_db_engine(database_url)
     processed = 0
     failed = 0
-    for row in claimed_rows:
+    for row in processable_rows:
         try:
-            if row.payload_type != "photo_metadata":
-                raise ValueError(f"Unsupported payload_type: {row.payload_type}")
             with engine.begin() as connection:
-                upsert_photo(connection, payload_to_photo_record(row.payload_json))
-            queue_store.mark_completed(row.ingest_queue_id)
+                claimed_row = queue_store.begin_processing_attempt(
+                    row.ingest_queue_id,
+                    connection=connection,
+                )
+                if claimed_row is None:
+                    continue
+                if claimed_row.payload_type != "photo_metadata":
+                    raise PermanentQueueProcessingError(
+                        f"Unsupported payload_type: {claimed_row.payload_type}"
+                    )
+                try:
+                    record = payload_to_photo_record(claimed_row.payload_json)
+                    upsert_photo(connection, record)
+                except Exception as exc:
+                    raise PermanentQueueProcessingError(str(exc)) from exc
+                queue_store.mark_completed(
+                    claimed_row.ingest_queue_id,
+                    connection=connection,
+                )
             processed += 1
-        except Exception as exc:
+        except PermanentQueueProcessingError as exc:
             queue_store.mark_failed(row.ingest_queue_id, str(exc))
             failed += 1
+        except Exception:
+            continue
 
     return ProcessQueueResult(processed=processed, failed=failed)
 
