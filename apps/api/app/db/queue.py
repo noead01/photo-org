@@ -92,6 +92,7 @@ class IngestQueueStore:
             return [QueueRow(**row) for row in rows]
 
     def claim_pending(self, *, limit: int) -> list[QueueRow]:
+        # Legacy compatibility surface; Task 3 processing uses lease-aware list_processable().
         return self.list_processable(limit=limit)
 
     def begin_processing_attempt(
@@ -185,6 +186,22 @@ class IngestQueueStore:
                 .where(ingest_queue.c.status.in_(("pending", "processing")))
                 .values(
                     status="processing",
+                    attempt_count=ingest_queue.c.attempt_count + 1,
+                    last_attempt_ts=datetime.now(tz=UTC),
+                    processed_ts=None,
+                    last_error=error_message,
+                )
+            )
+            session.commit()
+
+    def record_permanent_failure(self, ingest_queue_id: str, error_message: str) -> None:
+        with self._session_factory() as session:
+            session.execute(
+                update(ingest_queue)
+                .where(ingest_queue.c.ingest_queue_id == ingest_queue_id)
+                .where(ingest_queue.c.status.in_(("pending", "processing")))
+                .values(
+                    status="failed",
                     attempt_count=ingest_queue.c.attempt_count + 1,
                     last_attempt_ts=datetime.now(tz=UTC),
                     processed_ts=None,

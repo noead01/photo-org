@@ -60,6 +60,35 @@ def mark_queue_row_processing(
         )
 
 
+def seed_existing_photo_with_same_photo_id(database_url: str) -> None:
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            photos.insert().values(
+                photo_id=SAMPLE_PAYLOAD["photo_id"],
+                path="existing/other-path.heic",
+                sha256="b" * 64,
+                phash=None,
+                filesize=999,
+                ext="heic",
+                created_ts=datetime.now(tz=UTC),
+                modified_ts=datetime.now(tz=UTC),
+                shot_ts=None,
+                shot_ts_source=None,
+                camera_make=None,
+                camera_model=None,
+                software=None,
+                orientation=None,
+                gps_latitude=None,
+                gps_longitude=None,
+                gps_altitude=None,
+                updated_ts=datetime.now(tz=UTC),
+                faces_count=0,
+                faces_detected_ts=None,
+            )
+        )
+
+
 def test_process_pending_rows_applies_domain_write_and_marks_queue_complete(tmp_path):
     database_url = f"sqlite:///{tmp_path / 'queue-processor.db'}"
     upgrade_database(database_url)
@@ -169,6 +198,31 @@ def test_process_pending_rows_keeps_transient_domain_write_failures_retryable(
     assert third.processed == 1
     assert third.failed == 0
     assert third.retryable_errors == 0
+
+
+def test_process_pending_rows_marks_deterministic_domain_write_failures_failed(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'queue-processor-integrity.db'}"
+    upgrade_database(database_url)
+    queue_store = IngestQueueStore(database_url)
+
+    seed_existing_photo_with_same_photo_id(database_url)
+
+    queue_store.enqueue(
+        payload_type="photo_metadata",
+        payload=SAMPLE_PAYLOAD,
+        idempotency_key="photo-integrity",
+    )
+
+    result = process_pending_ingest_queue(database_url, limit=10)
+
+    assert result.processed == 0
+    assert result.failed == 1
+    assert result.retryable_errors == 0
+    assert queue_store.list_by_status("processing") == []
+    failed_rows = queue_store.list_by_status("failed")
+    assert len(failed_rows) == 1
+    assert failed_rows[0].attempt_count == 1
+    assert "integrity" in failed_rows[0].last_error.lower() or "unique" in failed_rows[0].last_error.lower()
 
 
 def test_process_pending_rows_retries_rows_left_in_processing_after_retryable_failure(

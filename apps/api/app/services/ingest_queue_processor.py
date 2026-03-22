@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from sqlalchemy.exc import IntegrityError
+
 from app.db.queue import IngestQueueStore, PROCESSING_LEASE_SECONDS
 from app.db.session import create_db_engine
 from app.processing.ingest import PhotoRecord, upsert_photo
@@ -65,6 +67,9 @@ def process_pending_ingest_queue(
                     connection=connection,
                 )
             processed += 1
+        except IntegrityError as exc:
+            queue_store.record_permanent_failure(row.ingest_queue_id, str(exc))
+            failed += 1
         except Exception as exc:
             queue_store.record_retryable_failure(row.ingest_queue_id, str(exc))
             retryable_errors += 1
