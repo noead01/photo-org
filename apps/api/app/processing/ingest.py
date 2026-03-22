@@ -136,6 +136,7 @@ def upsert_photo(connection: Connection, record: PhotoRecord) -> bool:
         "gps_latitude": record.gps_latitude,
         "gps_longitude": record.gps_longitude,
         "gps_altitude": record.gps_altitude,
+        "updated_ts": record.modified_ts,
         "faces_count": record.faces_count,
         "faces_detected_ts": None,
     }

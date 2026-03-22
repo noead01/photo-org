@@ -9,7 +9,17 @@ from app.processing.ingest import ingest_directory
 from app.storage import faces, photos
 
 
-SAMPLES_DIR = Path("/mnt/d/Projects/photo-org/apps/api/features/samples")
+
+def _resolve_samples_dir() -> Path:
+    test_file = Path(__file__).resolve()
+    for parent in test_file.parents:
+        candidate = parent / "apps" / "api" / "features" / "samples"
+        if candidate.is_dir():
+            return candidate
+    raise FileNotFoundError("Could not locate apps/api/features/samples from test_ingest.py")
+
+
+SAMPLES_DIR = _resolve_samples_dir()
 PIL = pytest.importorskip("PIL")
 pytest.importorskip("pillow_heif")
 
@@ -44,7 +54,7 @@ def test_ingest_directory_loads_sample_photos_into_sqlite(tmp_path):
         ).all()
 
     assert len(rows) == 10
-    assert all(row[0].startswith("apps/api/features/samples/") for row in rows)
+    assert all("/apps/api/features/samples/" in row[0] for row in rows)
     assert {row[1] for row in rows} == {"heic"}
     assert all(row[2] > 0 for row in rows)
     assert all(len(row[3]) == 64 for row in rows)
