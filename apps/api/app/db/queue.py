@@ -45,13 +45,15 @@ class IngestQueueStore:
                 )
                 session.commit()
                 return queue_id
-            except IntegrityError:
+            except IntegrityError as exc:
                 session.rollback()
                 existing_id = session.execute(
                     select(ingest_queue.c.ingest_queue_id).where(
                         ingest_queue.c.idempotency_key == idempotency_key
                     )
-                ).scalar_one()
+                ).scalar_one_or_none()
+                if existing_id is None:
+                    raise exc
                 return existing_id
 
     def list_pending(self) -> list[QueueRow]:
