@@ -41,4 +41,5 @@ def test_ingest_cli_triggers_queue_processing_when_chunk_threshold_is_reached(
     )
 
     assert exit_code == 0
-    assert calls
+    assert len(calls) == 5
+    assert [call["limit"] for call in calls] == [2, 2, 2, 2, 2]

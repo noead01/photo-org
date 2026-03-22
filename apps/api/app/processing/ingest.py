@@ -66,7 +66,9 @@ def ingest_directory(
     result = IngestResult()
 
     queue_store = IngestQueueStore(database_url)
-    processing_trigger = trigger_client or QueueTriggerClient()
+    processing_trigger = trigger_client or QueueTriggerClient(
+        limit=queue_commit_chunk_size
+    )
     pending_since_last_trigger = 0
 
     for photo_path in iter_photo_files(source_root):
