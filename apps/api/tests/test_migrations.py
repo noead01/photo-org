@@ -31,9 +31,22 @@ def test_upgrade_database_creates_ingest_queue_table(tmp_path):
 
     engine = create_engine(database_url, future=True)
     with engine.connect() as connection:
-        tables = set(connection.dialect.get_table_names(connection))
+        inspector = inspect(connection)
+
+        tables = set(inspector.get_table_names())
+        unique_constraints = inspector.get_unique_constraints("ingest_queue")
+        columns = {column["name"]: column for column in inspector.get_columns("ingest_queue")}
+        indexes = inspector.get_indexes("ingest_queue")
 
     assert "ingest_queue" in tables
+    assert any(constraint["column_names"] == ["idempotency_key"] for constraint in unique_constraints)
+    assert columns["status"]["default"] == "'pending'"
+    assert columns["attempt_count"]["default"] == "0"
+    assert any(
+        index["name"] == "idx_ingest_queue_status_enqueued_ts"
+        and index["column_names"] == ["status", "enqueued_ts"]
+        for index in indexes
+    )
 
 
 def test_ingest_requires_existing_schema(tmp_path):
