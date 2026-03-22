@@ -10,7 +10,9 @@ from uuid import NAMESPACE_URL, uuid5
 from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.engine import Connection
 
+from app.db.queue import IngestQueueStore
 from app.processing.metadata import extract_image_metadata, stat_timestamp_to_iso
+from app.services.worker_queue_trigger import QueueTriggerClient
 from app.storage import create_db_engine, faces, photos
 
 
@@ -46,6 +48,7 @@ class PhotoRecord:
 @dataclass
 class IngestResult:
     scanned: int = 0
+    enqueued: int = 0
     inserted: int = 0
     updated: int = 0
     errors: list[str] = field(default_factory=list)
@@ -55,27 +58,37 @@ def ingest_directory(
     root: str | Path,
     database_url: str | Path | None = None,
     *,
+    queue_commit_chunk_size: int = 100,
+    trigger_client: QueueTriggerClient | None = None,
     face_detector: FaceDetector | None = None,
 ) -> IngestResult:
     source_root = Path(root).expanduser().resolve()
     result = IngestResult()
 
-    engine = create_db_engine(database_url)
-    with engine.begin() as connection:
-        for photo_path in iter_photo_files(source_root):
-            result.scanned += 1
-            try:
-                record = build_photo_record(photo_path)
-                was_inserted = upsert_photo(connection, record)
-                if was_inserted:
-                    result.inserted += 1
-                else:
-                    result.updated += 1
+    queue_store = IngestQueueStore(database_url)
+    processing_trigger = trigger_client or QueueTriggerClient()
+    pending_since_last_trigger = 0
 
-                if face_detector is not None:
-                    store_face_detections(connection, record.photo_id, face_detector.detect(photo_path))
-            except Exception as exc:
-                result.errors.append(f"{photo_path}: {exc}")
+    for photo_path in iter_photo_files(source_root):
+        result.scanned += 1
+        try:
+            payload = build_ingest_submission(photo_path)
+            queue_store.enqueue(
+                payload_type="photo_metadata",
+                payload=payload,
+                idempotency_key=payload["idempotency_key"],
+            )
+            result.enqueued += 1
+            pending_since_last_trigger += 1
+
+            if pending_since_last_trigger >= queue_commit_chunk_size:
+                processing_trigger.process_pending_queue()
+                pending_since_last_trigger = 0
+        except Exception as exc:
+            result.errors.append(f"{photo_path}: {exc}")
+
+    if pending_since_last_trigger > 0 and result.enqueued > 0:
+        processing_trigger.process_pending_queue()
 
     return result
 
@@ -111,6 +124,31 @@ def build_photo_record(path: Path) -> PhotoRecord:
         gps_longitude=image_metadata.gps_longitude,
         gps_altitude=image_metadata.gps_altitude,
     )
+
+
+def build_ingest_submission(path: Path) -> dict:
+    record = build_photo_record(path)
+    payload = {
+        "photo_id": record.photo_id,
+        "path": record.path,
+        "sha256": record.sha256,
+        "filesize": record.filesize,
+        "ext": record.ext,
+        "created_ts": record.created_ts.isoformat(),
+        "modified_ts": record.modified_ts.isoformat(),
+        "shot_ts": _format_optional_timestamp(record.shot_ts),
+        "shot_ts_source": record.shot_ts_source,
+        "camera_make": record.camera_make,
+        "camera_model": record.camera_model,
+        "software": record.software,
+        "orientation": record.orientation,
+        "gps_latitude": record.gps_latitude,
+        "gps_longitude": record.gps_longitude,
+        "gps_altitude": record.gps_altitude,
+        "faces_count": record.faces_count,
+    }
+    payload["idempotency_key"] = record.photo_id
+    return payload
 
 
 def upsert_photo(connection: Connection, record: PhotoRecord) -> bool:
@@ -200,3 +238,9 @@ def _parse_timestamp(value: str | None) -> datetime | None:
     if value is None:
         return None
     return datetime.fromisoformat(value)
+
+
+def _format_optional_timestamp(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat()

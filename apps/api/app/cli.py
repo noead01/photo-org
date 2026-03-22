@@ -24,6 +24,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run OpenCV face detection and store detections",
     )
+    ingest_parser.add_argument(
+        "--queue-commit-chunk-size",
+        type=int,
+        default=100,
+        help="Number of queued submissions to accumulate before triggering queue processing",
+    )
 
     migrate_parser = subparsers.add_parser("migrate", help="Apply database migrations")
     migrate_parser.add_argument(
@@ -41,10 +47,16 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "ingest":
         detector = OpenCvFaceDetector() if args.faces else None
-        result = ingest_directory(args.root, database_url=args.database_url, face_detector=detector)
+        result = ingest_directory(
+            args.root,
+            database_url=args.database_url,
+            queue_commit_chunk_size=args.queue_commit_chunk_size,
+            face_detector=detector,
+        )
         database_url = resolve_database_url(args.database_url)
         print(f"database_url={database_url}")
         print(f"scanned={result.scanned}")
+        print(f"enqueued={result.enqueued}")
         print(f"inserted={result.inserted}")
         print(f"updated={result.updated}")
         if result.errors:
