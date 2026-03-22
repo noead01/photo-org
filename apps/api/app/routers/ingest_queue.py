@@ -15,6 +15,7 @@ class ProcessQueueRequest(BaseModel):
 class ProcessQueueResponse(BaseModel):
     processed: int
     failed: int
+    retryable_errors: int
 
 
 @router.post("/internal/ingest-queue/process", response_model=ProcessQueueResponse)
@@ -23,4 +24,8 @@ def process_ingest_queue_endpoint(
     _: None = Depends(require_worker_role),
 ) -> ProcessQueueResponse:
     result = process_pending_ingest_queue(limit=body.limit)
-    return ProcessQueueResponse(processed=result.processed, failed=result.failed)
+    return ProcessQueueResponse(
+        processed=result.processed,
+        failed=result.failed,
+        retryable_errors=result.retryable_errors,
+    )

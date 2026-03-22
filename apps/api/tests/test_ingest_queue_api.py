@@ -83,4 +83,8 @@ def test_process_queue_endpoint_processes_pending_rows_for_worker_role(
     )
 
     assert response.status_code == 200
-    assert response.json()["processed"] == 1
+    assert response.json() == {
+        "processed": 1,
+        "failed": 0,
+        "retryable_errors": 0,
+    }
