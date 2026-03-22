@@ -8,6 +8,7 @@ dependencies = [
   "sqlalchemy",
   "psycopg[binary]",
   "pgvector",
+  "photoorg-db-schema",
   "pillow",
   "pillow-heif",
   "opencv-python-headless",

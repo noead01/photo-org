@@ -1,0 +1,8 @@
+pyproject.toml
+photoorg_db_schema/__init__.py
+photoorg_db_schema/schema.py
+photoorg_db_schema.egg-info/PKG-INFO
+photoorg_db_schema.egg-info/SOURCES.txt
+photoorg_db_schema.egg-info/dependency_links.txt
+photoorg_db_schema.egg-info/requires.txt
+photoorg_db_schema.egg-info/top_level.txt

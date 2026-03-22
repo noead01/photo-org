@@ -5,6 +5,7 @@ members = ["apps/*", "packages/*"]
 # If apps depend on local packages, declare the *names* here and map to workspace sources.
 # This makes them editable, no wheel builds needed during dev.
 [tool.uv.sources]
+photoorg-db-schema = { workspace = true }
 
 # Standardized dependency groups (PEP 735)
 [dependency-groups]
