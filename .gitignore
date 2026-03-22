@@ -6,3 +6,4 @@
 apps/*/uv.lock
 apps/*/.venv/
 packages/*/.venv/
+.worktrees/
