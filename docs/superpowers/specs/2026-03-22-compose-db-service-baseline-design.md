@@ -75,9 +75,14 @@ The Compose workflow should provide:
 
 - explicit environment wiring for the DB connection
 - a predictable local port for the DB service
+- automatic schema bootstrapping for the Compose-managed PostgreSQL instance during DB-service startup
 - a documented startup path contributors can run without ad hoc manual fixes
 
 The CLI should run outside Compose by default in the developer environment, pointed at the Compose-managed stack.
+
+For this issue, the DB service should wait for PostgreSQL readiness, run migrations as part of its startup sequence, and only begin serving requests after migration succeeds.
+
+If migration fails, the DB service should fail hard and remain down until the problem is fixed. The local stack should not hide migration failures behind retry loops.
 
 ### CLI And Queue Boundary
 
@@ -115,6 +120,14 @@ The preferred outcome is:
 
 What should not remain is a stale static contract that advertises endpoints or schemas the service no longer exposes.
 
+### Migration Operations
+
+Migration ownership stays with the DB service rather than the CLI.
+
+Compose startup should perform the normal migration path automatically so a fresh or existing local PostgreSQL volume is brought to the expected schema state when the stack starts successfully.
+
+The repository should also expose one explicit operator command for rerunning migrations against the Compose-managed database when needed. A dedicated target such as `make compose-migrate` is the preferred path for this issue because it aligns with Compose as the default local environment workflow.
+
 ### Verification Strategy
 
 Verification should prove both the runtime baseline and the service boundary.
@@ -124,6 +137,7 @@ The issue should include:
 - automated tests showing CLI queue submission remains limited to `ingest_queue`
 - automated tests showing the DB service owns queue processing and domain persistence
 - a repeatable Compose-based smoke path that starts the stack and exercises one representative queue-processing flow
+- verification that DB-service startup fails clearly when migrations cannot be applied
 - documentation updates that describe Compose as the default local startup path
 - updates or fixes to existing tests that currently assume path layouts that break in a worktree, including the fixture lookup failure in [`apps/api/tests/test_ingest.py`](/mnt/d/Projects/photo-org/.worktrees/issue-18-compose-dev-stack/apps/api/tests/test_ingest.py)
 
@@ -132,6 +146,7 @@ The issue should include:
 After issue `#18`:
 
 - contributors can start the local runtime through Docker Compose
+- a successful Compose startup leaves the local PostgreSQL instance migrated and ready to use
 - the repository has a cleaner separation between the CLI client and the DB service
 - the CLI is a real app under `apps/cli` rather than a legacy alias into `apps/api`
 - the DB service owns migrations, queue processing, and domain-table behavior
