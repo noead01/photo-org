@@ -118,4 +118,11 @@ The current Phase 0 development path now uses an API-owned persistence boundary 
 - the API owns queue processing and domain-table mutation
 - internal queue processing can be triggered through a bounded API endpoint for worker use
 
+The repository also now includes a checked-in offline seed corpus for end-to-end validation and demos:
+
+- the corpus lives under `seed-corpus/`
+- assets are curated for deterministic ingest and search behavior
+- source and license metadata are tracked in `seed-corpus/manifest.json`
+- contributor workflows for validating and loading the corpus are documented in [CONTRIBUTING.md](CONTRIBUTING.md)
+
 For contributor-facing details about that boundary, see [CONTRIBUTING.md](CONTRIBUTING.md) and ADR-0013 in [docs/adr/README.md](docs/adr/README.md).

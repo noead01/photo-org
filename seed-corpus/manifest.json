@@ -1,0 +1,560 @@
+{
+  "version": 1,
+  "root": "seed-corpus",
+  "assets": [
+    {
+      "asset_id": "birthday_park_001",
+      "path": "seed-corpus/family-events/birthday-park/birthday_park_001.jpg",
+      "scenario_tags": [
+        "ingest",
+        "search",
+        "face-bearing",
+        "event:birthday"
+      ],
+      "license": {
+        "spdx": "LicenseRef-Public-Domain",
+        "source_url": "https://commons.wikimedia.org/wiki/File:Albert_Einstein_1947a.jpg",
+        "attribution": "Library of Congress / Oren Jack Turner"
+      },
+      "expected": {
+        "format": "jpg",
+        "has_exif": true,
+        "has_faces": true,
+        "supports_face_labeling": true,
+        "filesize_bytes": 100266,
+        "camera_make": "Canon",
+        "camera_model": "EOS RP",
+        "shot_ts": "2022-06-14T15:20:00+00:00"
+      }
+    },
+    {
+      "asset_id": "birthday_park_002",
+      "path": "seed-corpus/family-events/birthday-park/birthday_park_002.jpeg",
+      "scenario_tags": [
+        "ingest",
+        "search",
+        "face-bearing",
+        "event:birthday"
+      ],
+      "license": {
+        "spdx": "LicenseRef-Public-Domain",
+        "source_url": "https://commons.wikimedia.org/wiki/File:Marie_Curie_(1900)_(cropped).jpg",
+        "attribution": "Unknown author"
+      },
+      "expected": {
+        "format": "jpeg",
+        "has_exif": true,
+        "has_faces": true,
+        "supports_face_labeling": true,
+        "filesize_bytes": 155532,
+        "camera_make": "Canon",
+        "camera_model": "EOS RP",
+        "shot_ts": "2022-06-14T15:21:00+00:00"
+      }
+    },
+    {
+      "asset_id": "birthday_park_003",
+      "path": "seed-corpus/family-events/birthday-park/birthday_park_003.heic",
+      "scenario_tags": [
+        "ingest",
+        "face-bearing",
+        "event:birthday"
+      ],
+      "license": {
+        "spdx": "LicenseRef-Public-Domain",
+        "source_url": "https://commons.wikimedia.org/wiki/File:Blue_Portrait_of_Nikola_Tesla.jpg",
+        "attribution": "Unknown author"
+      },
+      "expected": {
+        "format": "heic",
+        "has_exif": false,
+        "has_faces": true,
+        "supports_face_labeling": true,
+        "filesize_bytes": 46013
+      }
+    },
+    {
+      "asset_id": "birthday_park_004",
+      "path": "seed-corpus/family-events/birthday-park/birthday_park_004.png",
+      "scenario_tags": [
+        "ingest",
+        "search",
+        "event:birthday",
+        "no-faces"
+      ],
+      "license": {
+        "spdx": "LicenseRef-Public-Domain",
+        "source_url": "https://commons.wikimedia.org/wiki/File:Bondi_Beach_1930.jpg",
+        "attribution": "Sam Hood"
+      },
+      "expected": {
+        "format": "png",
+        "has_exif": false,
+        "has_faces": false,
+        "supports_face_labeling": false,
+        "filesize_bytes": 365906
+      }
+    },
+    {
+      "asset_id": "birthday_park_005",
+      "path": "seed-corpus/family-events/birthday-park/birthday_park_005.jpg",
+      "scenario_tags": [
+        "ingest",
+        "face-bearing",
+        "event:birthday"
+      ],
+      "license": {
+        "spdx": "LicenseRef-Public-Domain",
+        "source_url": "https://commons.wikimedia.org/wiki/File:Charlie_chaplin_karno_portrait.jpg",
+        "attribution": "Albert Witzel"
+      },
+      "expected": {
+        "format": "jpg",
+        "has_exif": true,
+        "has_faces": true,
+        "supports_face_labeling": true,
+        "filesize_bytes": 77509,
+        "camera_make": "Apple",
+        "camera_model": "iPhone 12 mini",
+        "shot_ts": "2022-06-14T15:28:00+00:00"
+      }
+    },
+    {
+      "asset_id": "birthday_park_006",
+      "path": "seed-corpus/family-events/birthday-park/birthday_park_006.jpg",
+      "scenario_tags": [
+        "ingest",
+        "search",
+        "event:birthday",
+        "no-faces"
+      ],
+      "license": {
+        "spdx": "LicenseRef-Public-Domain",
+        "source_url": "https://commons.wikimedia.org/wiki/File:PortorsOnNewJerseyBeach1930.jpg",
+        "attribution": "Unknown author"
+      },
+      "expected": {
+        "format": "jpg",
+        "has_exif": false,
+        "has_faces": false,
+        "supports_face_labeling": false,
+        "filesize_bytes": 108355
+      }
+    },
+    {
+      "asset_id": "lake_weekend_001",
+      "path": "seed-corpus/family-events/lake-weekend/lake_weekend_001.jpg",
+      "scenario_tags": [
+        "ingest",
+        "search",
+        "event:lake-weekend",
+        "no-faces"
+      ],
+      "license": {
+        "spdx": "LicenseRef-Public-Domain",
+        "source_url": "https://commons.wikimedia.org/wiki/File:The_Yosemite_Valley.png",
+        "attribution": "Thomas Ayres"
+      },
+      "expected": {
+        "format": "jpg",
+        "has_exif": true,
+        "has_faces": false,
+        "supports_face_labeling": false,
+        "filesize_bytes": 102505,
+        "camera_make": "Nikon",
+        "camera_model": "D750",
+        "shot_ts": "2022-07-02T10:00:00+00:00"
+      }
+    },
+    {
+      "asset_id": "lake_weekend_002",
+      "path": "seed-corpus/family-events/lake-weekend/lake_weekend_002.heic",
+      "scenario_tags": [
+        "ingest",
+        "event:lake-weekend",
+        "no-faces"
+      ],
+      "license": {
+        "spdx": "LicenseRef-Public-Domain",
+        "source_url": "https://commons.wikimedia.org/wiki/File:PortorsOnNewJerseyBeach1930.jpg",
+        "attribution": "Unknown author"
+      },
+      "expected": {
+        "format": "heic",
+        "has_exif": false,
+        "has_faces": false,
+        "supports_face_labeling": false,
+        "filesize_bytes": 167253
+      }
+    },
+    {
+      "asset_id": "lake_weekend_003",
+      "path": "seed-corpus/family-events/lake-weekend/lake_weekend_003.png",
+      "scenario_tags": [
+        "ingest",
+        "search",
+        "face-bearing",
+        "event:lake-weekend"
+      ],
+      "license": {
+        "spdx": "LicenseRef-Public-Domain",
+        "source_url": "https://commons.wikimedia.org/wiki/File:Albert_Einstein_1947a.jpg",
+        "attribution": "Library of Congress / Oren Jack Turner"
+      },
+      "expected": {
+        "format": "png",
+        "has_exif": false,
+        "has_faces": true,
+        "supports_face_labeling": true,
+        "filesize_bytes": 597122
+      }
+    },
+    {
+      "asset_id": "lake_weekend_004",
+      "path": "seed-corpus/family-events/lake-weekend/lake_weekend_004.jpeg",
+      "scenario_tags": [
+        "ingest",
+        "search",
+        "face-bearing",
+        "event:lake-weekend"
+      ],
+      "license": {
+        "spdx": "LicenseRef-Public-Domain",
+        "source_url": "https://commons.wikimedia.org/wiki/File:Marie_Curie_(1900)_(cropped).jpg",
+        "attribution": "Unknown author"
+      },
+      "expected": {
+        "format": "jpeg",
+        "has_exif": true,
+        "has_faces": true,
+        "supports_face_labeling": true,
+        "filesize_bytes": 136611,
+        "camera_make": "Apple",
+        "camera_model": "iPhone 13",
+        "shot_ts": "2022-07-02T10:14:00+00:00"
+      }
+    },
+    {
+      "asset_id": "lake_weekend_005",
+      "path": "seed-corpus/family-events/lake-weekend/lake_weekend_005.jpg",
+      "scenario_tags": [
+        "ingest",
+        "search",
+        "event:lake-weekend",
+        "no-faces"
+      ],
+      "license": {
+        "spdx": "LicenseRef-Public-Domain",
+        "source_url": "https://commons.wikimedia.org/wiki/File:Bondi_Beach_1930.jpg",
+        "attribution": "Sam Hood"
+      },
+      "expected": {
+        "format": "jpg",
+        "has_exif": true,
+        "has_faces": false,
+        "supports_face_labeling": false,
+        "filesize_bytes": 69129,
+        "camera_make": "Canon",
+        "camera_model": "EOS RP",
+        "shot_ts": "2022-07-02T11:00:00+00:00"
+      }
+    },
+    {
+      "asset_id": "lake_weekend_006",
+      "path": "seed-corpus/family-events/lake-weekend/lake_weekend_006.jpg",
+      "scenario_tags": [
+        "ingest",
+        "face-bearing",
+        "event:lake-weekend"
+      ],
+      "license": {
+        "spdx": "LicenseRef-Public-Domain",
+        "source_url": "https://commons.wikimedia.org/wiki/File:Blue_Portrait_of_Nikola_Tesla.jpg",
+        "attribution": "Unknown author"
+      },
+      "expected": {
+        "format": "jpg",
+        "has_exif": false,
+        "has_faces": true,
+        "supports_face_labeling": true,
+        "filesize_bytes": 35275
+      }
+    },
+    {
+      "asset_id": "city_break_001",
+      "path": "seed-corpus/travel/city-break/city_break_001.jpg",
+      "scenario_tags": [
+        "ingest",
+        "search",
+        "face-bearing",
+        "event:city-break"
+      ],
+      "license": {
+        "spdx": "LicenseRef-Public-Domain",
+        "source_url": "https://commons.wikimedia.org/wiki/File:Charlie_chaplin_karno_portrait.jpg",
+        "attribution": "Albert Witzel"
+      },
+      "expected": {
+        "format": "jpg",
+        "has_exif": true,
+        "has_faces": true,
+        "supports_face_labeling": true,
+        "filesize_bytes": 72206,
+        "camera_make": "Sony",
+        "camera_model": "A7C",
+        "shot_ts": "2021-10-11T08:30:00+00:00"
+      }
+    },
+    {
+      "asset_id": "city_break_002",
+      "path": "seed-corpus/travel/city-break/city_break_002.png",
+      "scenario_tags": [
+        "ingest",
+        "search",
+        "event:city-break",
+        "no-faces"
+      ],
+      "license": {
+        "spdx": "LicenseRef-Public-Domain",
+        "source_url": "https://commons.wikimedia.org/wiki/File:The_Yosemite_Valley.png",
+        "attribution": "Thomas Ayres"
+      },
+      "expected": {
+        "format": "png",
+        "has_exif": false,
+        "has_faces": false,
+        "supports_face_labeling": false,
+        "filesize_bytes": 907090
+      }
+    },
+    {
+      "asset_id": "city_break_003",
+      "path": "seed-corpus/travel/city-break/city_break_003.heic",
+      "scenario_tags": [
+        "ingest",
+        "face-bearing",
+        "event:city-break"
+      ],
+      "license": {
+        "spdx": "LicenseRef-Public-Domain",
+        "source_url": "https://commons.wikimedia.org/wiki/File:Marie_Curie_(1900)_(cropped).jpg",
+        "attribution": "Unknown author"
+      },
+      "expected": {
+        "format": "heic",
+        "has_exif": false,
+        "has_faces": true,
+        "supports_face_labeling": true,
+        "filesize_bytes": 162989
+      }
+    },
+    {
+      "asset_id": "city_break_004",
+      "path": "seed-corpus/travel/city-break/city_break_004.jpg",
+      "scenario_tags": [
+        "ingest",
+        "search",
+        "event:city-break",
+        "no-faces"
+      ],
+      "license": {
+        "spdx": "LicenseRef-Public-Domain",
+        "source_url": "https://commons.wikimedia.org/wiki/File:PortorsOnNewJerseyBeach1930.jpg",
+        "attribution": "Unknown author"
+      },
+      "expected": {
+        "format": "jpg",
+        "has_exif": true,
+        "has_faces": false,
+        "supports_face_labeling": false,
+        "filesize_bytes": 97317,
+        "camera_make": "Apple",
+        "camera_model": "iPhone 12 mini",
+        "shot_ts": "2021-10-11T08:35:00+00:00"
+      }
+    },
+    {
+      "asset_id": "city_break_005",
+      "path": "seed-corpus/travel/city-break/city_break_005.jpeg",
+      "scenario_tags": [
+        "ingest",
+        "search",
+        "face-bearing",
+        "event:city-break"
+      ],
+      "license": {
+        "spdx": "LicenseRef-Public-Domain",
+        "source_url": "https://commons.wikimedia.org/wiki/File:Albert_Einstein_1947a.jpg",
+        "attribution": "Library of Congress / Oren Jack Turner"
+      },
+      "expected": {
+        "format": "jpeg",
+        "has_exif": true,
+        "has_faces": true,
+        "supports_face_labeling": true,
+        "filesize_bytes": 104008,
+        "camera_make": "Canon",
+        "camera_model": "EOS RP",
+        "shot_ts": "2021-10-11T08:44:00+00:00"
+      }
+    },
+    {
+      "asset_id": "city_break_006",
+      "path": "seed-corpus/travel/city-break/city_break_006.jpg",
+      "scenario_tags": [
+        "ingest",
+        "search",
+        "event:city-break",
+        "no-faces"
+      ],
+      "license": {
+        "spdx": "LicenseRef-Public-Domain",
+        "source_url": "https://commons.wikimedia.org/wiki/File:Bondi_Beach_1930.jpg",
+        "attribution": "Sam Hood"
+      },
+      "expected": {
+        "format": "jpg",
+        "has_exif": false,
+        "has_faces": false,
+        "supports_face_labeling": false,
+        "filesize_bytes": 65625
+      }
+    },
+    {
+      "asset_id": "reference_face_001",
+      "path": "seed-corpus/reference-faces/reference_face_001.jpg",
+      "scenario_tags": [
+        "reference-face",
+        "face-bearing"
+      ],
+      "license": {
+        "spdx": "LicenseRef-Public-Domain",
+        "source_url": "https://commons.wikimedia.org/wiki/File:Albert_Einstein_1947a.jpg",
+        "attribution": "Library of Congress / Oren Jack Turner"
+      },
+      "expected": {
+        "format": "jpg",
+        "has_exif": true,
+        "has_faces": true,
+        "supports_face_labeling": true,
+        "filesize_bytes": 79040,
+        "camera_make": "Canon",
+        "camera_model": "EOS RP",
+        "shot_ts": "2020-02-01T09:00:00+00:00"
+      }
+    },
+    {
+      "asset_id": "reference_face_002",
+      "path": "seed-corpus/reference-faces/reference_face_002.jpg",
+      "scenario_tags": [
+        "reference-face",
+        "face-bearing"
+      ],
+      "license": {
+        "spdx": "LicenseRef-Public-Domain",
+        "source_url": "https://commons.wikimedia.org/wiki/File:Marie_Curie_(1900)_(cropped).jpg",
+        "attribution": "Unknown author"
+      },
+      "expected": {
+        "format": "jpg",
+        "has_exif": true,
+        "has_faces": true,
+        "supports_face_labeling": true,
+        "filesize_bytes": 98525,
+        "camera_make": "Canon",
+        "camera_model": "EOS RP",
+        "shot_ts": "2020-02-01T09:01:00+00:00"
+      }
+    },
+    {
+      "asset_id": "reference_face_003",
+      "path": "seed-corpus/reference-faces/reference_face_003.jpg",
+      "scenario_tags": [
+        "reference-face",
+        "face-bearing"
+      ],
+      "license": {
+        "spdx": "LicenseRef-Public-Domain",
+        "source_url": "https://commons.wikimedia.org/wiki/File:Blue_Portrait_of_Nikola_Tesla.jpg",
+        "attribution": "Unknown author"
+      },
+      "expected": {
+        "format": "jpg",
+        "has_exif": true,
+        "has_faces": true,
+        "supports_face_labeling": true,
+        "filesize_bytes": 35443,
+        "camera_make": "Canon",
+        "camera_model": "EOS RP",
+        "shot_ts": "2020-02-01T09:02:00+00:00"
+      }
+    },
+    {
+      "asset_id": "reference_face_004",
+      "path": "seed-corpus/reference-faces/reference_face_004.jpg",
+      "scenario_tags": [
+        "reference-face",
+        "face-bearing"
+      ],
+      "license": {
+        "spdx": "LicenseRef-Public-Domain",
+        "source_url": "https://commons.wikimedia.org/wiki/File:Charlie_chaplin_karno_portrait.jpg",
+        "attribution": "Albert Witzel"
+      },
+      "expected": {
+        "format": "jpg",
+        "has_exif": true,
+        "has_faces": true,
+        "supports_face_labeling": true,
+        "filesize_bytes": 54226,
+        "camera_make": "Canon",
+        "camera_model": "EOS RP",
+        "shot_ts": "2020-02-01T09:03:00+00:00"
+      }
+    },
+    {
+      "asset_id": "no_exif_001",
+      "path": "seed-corpus/misc/no-exif/no_exif_001.jpg",
+      "scenario_tags": [
+        "ingest",
+        "search",
+        "no-faces",
+        "missing-exif"
+      ],
+      "license": {
+        "spdx": "LicenseRef-Public-Domain",
+        "source_url": "https://commons.wikimedia.org/wiki/File:PortorsOnNewJerseyBeach1930.jpg",
+        "attribution": "Unknown author"
+      },
+      "expected": {
+        "format": "jpg",
+        "has_exif": false,
+        "has_faces": false,
+        "supports_face_labeling": false,
+        "filesize_bytes": 84677
+      }
+    },
+    {
+      "asset_id": "no_exif_002",
+      "path": "seed-corpus/misc/no-exif/no_exif_002.png",
+      "scenario_tags": [
+        "ingest",
+        "search",
+        "no-faces",
+        "missing-exif"
+      ],
+      "license": {
+        "spdx": "LicenseRef-Public-Domain",
+        "source_url": "https://commons.wikimedia.org/wiki/File:The_Yosemite_Valley.png",
+        "attribution": "Thomas Ayres"
+      },
+      "expected": {
+        "format": "png",
+        "has_exif": false,
+        "has_faces": false,
+        "supports_face_labeling": false,
+        "filesize_bytes": 857159
+      }
+    }
+  ]
+}

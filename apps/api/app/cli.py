@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 
+from app.dev.seed_corpus import load_seed_corpus_into_database, validate_seed_corpus
 from app.migrations import upgrade_database
 from app.processing.faces import OpenCvFaceDetector
 from app.processing.ingest import ingest_directory
@@ -38,6 +39,36 @@ def build_parser() -> argparse.ArgumentParser:
         help="SQLAlchemy database URL. Defaults to DATABASE_URL.",
     )
 
+    seed_corpus_parser = subparsers.add_parser(
+        "seed-corpus",
+        help="Validate and load the checked-in seed corpus",
+    )
+    seed_corpus_subparsers = seed_corpus_parser.add_subparsers(
+        dest="seed_corpus_command",
+        required=True,
+    )
+
+    seed_corpus_subparsers.add_parser(
+        "validate",
+        help="Validate the checked-in seed corpus and manifest",
+    )
+
+    seed_corpus_load_parser = seed_corpus_subparsers.add_parser(
+        "load",
+        help="Migrate and load the checked-in seed corpus",
+    )
+    seed_corpus_load_parser.add_argument(
+        "--database-url",
+        default=None,
+        help="SQLAlchemy database URL. Defaults to DATABASE_URL.",
+    )
+    seed_corpus_load_parser.add_argument(
+        "--queue-limit",
+        type=int,
+        default=100,
+        help="Maximum queue batch size used during API-side seed load processing",
+    )
+
     return parser
 
 
@@ -70,6 +101,28 @@ def main(argv: list[str] | None = None) -> int:
         print(f"database_url={resolve_database_url(args.database_url)}")
         print("migration=head")
         return 0
+    if args.command == "seed-corpus":
+        if args.seed_corpus_command == "validate":
+            report = validate_seed_corpus()
+            print(f"assets_validated={report.asset_count}")
+            if report.errors:
+                print(f"errors={len(report.errors)}")
+                for error in report.errors:
+                    print(error)
+                return 1
+            print("validation=ok")
+            return 0
+        if args.seed_corpus_command == "load":
+            upgrade_database(args.database_url)
+            result = load_seed_corpus_into_database(
+                database_url=args.database_url,
+                queue_limit=args.queue_limit,
+            )
+            print(f"database_url={resolve_database_url(args.database_url)}")
+            print(f"scanned={result['scanned']}")
+            print(f"enqueued={result['enqueued']}")
+            print(f"processed={result['processed']}")
+            return 0
 
     parser.error(f"unknown command: {args.command}")
     return 2
