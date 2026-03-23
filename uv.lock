@@ -71,8 +71,9 @@ wheels = [
 [[package]]
 name = "api"
 version = "0.1.0"
-source = { virtual = "apps/api" }
+source = { editable = "apps/api" }
 dependencies = [
+    { name = "alembic" },
     { name = "fastapi" },
     { name = "numpy" },
     { name = "opencv-python-headless" },
@@ -93,6 +94,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "alembic" },
     { name = "fastapi" },
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27" },
     { name = "numpy" },
@@ -130,6 +132,12 @@ wheels = [
 name = "cli"
 version = "0.1.0"
 source = { virtual = "apps/cli" }
+dependencies = [
+    { name = "api" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "api", editable = "apps/api" }]
 
 [[package]]
 name = "click"

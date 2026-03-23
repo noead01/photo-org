@@ -5,6 +5,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-photoorg}
       POSTGRES_USER: ${POSTGRES_USER:-photoorg}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-photoorg}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - ./apps/api/docker/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test:
         [

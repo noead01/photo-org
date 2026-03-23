@@ -14,7 +14,8 @@ COPY packages ./packages
 
 RUN uv sync --frozen --no-dev --package api
 
-WORKDIR /workspace/apps/api
+ENV VIRTUAL_ENV="/workspace/.venv" \
+    PATH="/workspace/.venv/bin:/root/.local/bin:${PATH}"
 
 COPY apps/api/docker/entrypoint.sh docker/entrypoint.sh
 RUN chmod +x docker/entrypoint.sh

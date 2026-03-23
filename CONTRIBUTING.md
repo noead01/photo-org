@@ -95,6 +95,8 @@ Current high-value targets:
   - rerun database migrations against the Compose baseline without starting the app server
 - `make compose-down`
   - stop and remove the Compose baseline
+- `make compose-smoke`
+  - verify the Compose baseline by enqueueing work from the host CLI and processing it through the db-service
 - `make seed-corpus-check`
   - validate the checked-in `seed-corpus/` inventory and manifest
 - `make seed-corpus-load`
@@ -110,6 +112,10 @@ The default local DB-service workflow is Compose-based:
 - `make compose-up` starts postgres and the db-service container
 - `make compose-migrate` reruns schema migration against an existing Compose volume
 - `make compose-down` stops and removes the local Compose stack
+- `make compose-smoke` brings the stack up, enqueues the checked-in seed corpus through the host CLI, processes the queue through the db-service endpoint, and tears the stack back down
+
+The Compose baseline publishes Postgres on host port `5432` by default.
+If you need a different port, override `POSTGRES_PORT` and the matching `COMPOSE_DATABASE_URL`.
 
 Generated local artifacts should go under `.local/`.
 

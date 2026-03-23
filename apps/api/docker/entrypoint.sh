@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
 
-exec python -m docker.entrypoint
+exec /workspace/.venv/bin/python /workspace/apps/api/docker/entrypoint.py
