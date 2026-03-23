@@ -93,6 +93,8 @@ Current high-value targets:
   - validate the checked-in `seed-corpus/` inventory and manifest
 - `make seed-corpus-load`
   - migrate and load the checked-in `seed-corpus/` into the local development database
+- `uv run python apps/api/scripts/generate_openapi.py`
+  - regenerate `apps/api/openapi/spec.yaml` from the current FastAPI app
 
 The `pre-push` target is intentionally scoped to checks that are currently expected to pass on this repo state.
 As broader lint and type-check coverage is cleaned up, that target should expand rather than drift into a second undocumented workflow.

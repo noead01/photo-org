@@ -1,4 +1,7 @@
+from pathlib import Path
+
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 from app.main import app
 
@@ -51,3 +54,17 @@ class TestHealthEndpoint:
         paths = response.json()["paths"]
         assert "/api/v1/search" not in paths
         assert "/healthz" in paths
+
+    def test_given_checked_in_openapi_when_compared_to_runtime_then_matches_current_fastapi_schema(self):
+        """
+        Given: The checked-in OpenAPI contract
+        When: Comparing it to the runtime schema
+        Then: The contract matches the current FastAPI app exactly
+        """
+        client = TestClient(app)
+        runtime = client.get("/openapi.json").json()
+        checked_in = yaml.safe_load(
+            Path(__file__).resolve().parents[1].joinpath("openapi", "spec.yaml").read_text()
+        )
+
+        assert checked_in == runtime
