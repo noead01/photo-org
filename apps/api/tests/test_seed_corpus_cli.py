@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from app.cli import main
 import app.dev.seed_corpus as seed_corpus
@@ -38,9 +39,11 @@ def test_seed_corpus_load_cli_runs_migrate_and_corpus_loader(tmp_path, monkeypat
         lambda url: calls.append(("migrate", url)),
     )
     monkeypatch.setattr(
-        "app.cli.load_seed_corpus_into_database",
-        lambda **kwargs: calls.append(("load", kwargs["database_url"]))
-        or {"scanned": 24, "enqueued": 24, "processed": 24},
+        "app.cli._load_queue_client",
+        lambda: SimpleNamespace(
+            load_seed_corpus_into_queue=lambda **kwargs: calls.append(("load", kwargs["database_url"]))
+            or {"scanned": 24, "enqueued": 24, "processed": 0},
+        ),
     )
 
     exit_code = main(["seed-corpus", "load", "--database-url", database_url])
@@ -88,14 +91,8 @@ def test_validate_seed_corpus_reports_duplicate_file_content(tmp_path):
     assert any("duplicate sha256" in error for error in report.errors)
 
 
-def test_load_seed_corpus_into_database_uses_local_queue_processing(monkeypatch):
+def test_load_seed_corpus_into_database_uses_local_queue_loading(monkeypatch):
     calls: list[tuple[str, object]] = []
-    batches = iter(
-        [
-            type("Batch", (), {"processed": 24, "retryable_errors": 0})(),
-            type("Batch", (), {"processed": 0, "retryable_errors": 0})(),
-        ]
-    )
 
     monkeypatch.setattr(
         "app.dev.seed_corpus.validate_seed_corpus",
@@ -103,22 +100,19 @@ def test_load_seed_corpus_into_database_uses_local_queue_processing(monkeypatch)
     )
     monkeypatch.setattr(
         "app.dev.seed_corpus.ingest_directory",
-        lambda *args, **kwargs: calls.append(("ingest", kwargs.get("trigger_client")))
+        lambda *args, **kwargs: calls.append(("ingest", kwargs))
         or type(
             "Result",
             (),
             {"scanned": 24, "enqueued": 24, "inserted": 0, "updated": 0, "errors": []},
         )(),
     )
-    monkeypatch.setattr(
-        "app.dev.seed_corpus.process_pending_ingest_queue",
-        lambda database_url, limit: calls.append(("process", limit))
-        or next(batches),
-    )
 
-    result = load_seed_corpus_into_database(database_url="sqlite:///seed.db", queue_limit=10)
+    result = load_seed_corpus_into_database(database_url="sqlite:///seed.db")
 
-    assert result == {"scanned": 24, "enqueued": 24, "processed": 24}
+    assert result == {"scanned": 24, "enqueued": 24, "processed": 0}
     assert calls[0][0] == "ingest"
-    assert calls[0][1] is not None
-    assert calls[1:] == [("process", 10), ("process", 10)]
+    assert calls[0][1] == {
+        "database_url": "sqlite:///seed.db",
+    }
+    assert calls[1:] == []

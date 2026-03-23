@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
+from importlib import import_module
+from pathlib import Path
 
-from app.dev.seed_corpus import load_seed_corpus_into_database, validate_seed_corpus
+from app.dev.seed_corpus import validate_seed_corpus
 from app.migrations import upgrade_database
 from app.processing.faces import OpenCvFaceDetector
-from app.processing.ingest import ingest_directory
 from app.storage import resolve_database_url
 
 
@@ -25,13 +27,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run OpenCV face detection and store detections",
     )
-    ingest_parser.add_argument(
-        "--queue-commit-chunk-size",
-        type=int,
-        default=100,
-        help="Number of queued submissions to accumulate before triggering queue processing",
-    )
-
     migrate_parser = subparsers.add_parser("migrate", help="Apply database migrations")
     migrate_parser.add_argument(
         "--database-url",
@@ -62,14 +57,28 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="SQLAlchemy database URL. Defaults to DATABASE_URL.",
     )
-    seed_corpus_load_parser.add_argument(
-        "--queue-limit",
-        type=int,
-        default=100,
-        help="Maximum queue batch size used during API-side seed load processing",
-    )
-
     return parser
+
+
+def _load_queue_client():
+    source_path = (
+        Path(__file__).resolve().parents[3]
+        / "apps"
+        / "cli"
+        / "cli"
+        / "queue_client.py"
+    )
+    if source_path.is_file():
+        spec = importlib.util.spec_from_file_location(
+            "photoorg_cli_queue_client",
+            source_path,
+        )
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load queue client from {source_path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    return import_module("cli.queue_client")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -78,10 +87,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "ingest":
         detector = OpenCvFaceDetector() if args.faces else None
-        result = ingest_directory(
+        result = _load_queue_client().enqueue_directory(
             args.root,
             database_url=args.database_url,
-            queue_commit_chunk_size=args.queue_commit_chunk_size,
             face_detector=detector,
         )
         database_url = resolve_database_url(args.database_url)
@@ -114,10 +122,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.seed_corpus_command == "load":
             upgrade_database(args.database_url)
-            result = load_seed_corpus_into_database(
-                database_url=args.database_url,
-                queue_limit=args.queue_limit,
-            )
+            result = _load_queue_client().load_seed_corpus_into_queue(database_url=args.database_url)
             print(f"database_url={resolve_database_url(args.database_url)}")
             print(f"scanned={result['scanned']}")
             print(f"enqueued={result['enqueued']}")

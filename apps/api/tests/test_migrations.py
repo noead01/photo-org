@@ -1,7 +1,5 @@
 import importlib.util
 from pathlib import Path
-from types import SimpleNamespace
-
 from sqlalchemy import create_engine, func, inspect, select
 
 from app.db.queue import IngestQueueStore
@@ -10,14 +8,6 @@ from app.storage import photos
 
 
 SAMPLES_DIR = Path("/mnt/d/Projects/photo-org/.worktrees/feature-issue-19-seed-corpus-load-path/apps/api/tests/fixtures/samples")
-
-
-class NoOpTriggerClient:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def process_pending_queue(self) -> None:
-        self.calls += 1
 
 
 def test_upgrade_database_creates_schema(tmp_path):
@@ -90,17 +80,14 @@ def test_initial_postgresql_migration_does_not_create_vector_extension(monkeypat
 
 def test_ingest_requires_existing_schema(tmp_path):
     database_url = f"sqlite:///{tmp_path / 'missing-schema.db'}"
-    trigger_client = NoOpTriggerClient()
 
     result = ingest_directory(
         SAMPLES_DIR,
         database_url=database_url,
-        trigger_client=trigger_client,
     )
 
     assert result.errors
     assert "no such table: ingest_queue" in result.errors[0]
-    assert trigger_client.calls == 0
 
 
 def test_ingest_succeeds_after_running_migrations(tmp_path):
@@ -108,17 +95,14 @@ def test_ingest_succeeds_after_running_migrations(tmp_path):
 
     database_url = f"sqlite:///{tmp_path / 'ingest.db'}"
     upgrade_database(database_url)
-    trigger_client = NoOpTriggerClient()
 
     result = ingest_directory(
         SAMPLES_DIR,
         database_url=database_url,
-        trigger_client=trigger_client,
     )
 
     assert result.errors == []
     assert result.enqueued == 10
-    assert trigger_client.calls == 1
 
     queue_store = IngestQueueStore(database_url)
     pending_rows = queue_store.list_pending()

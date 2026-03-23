@@ -66,12 +66,10 @@ def test_ingest_directory_loads_sample_photos_into_queue(tmp_path, monkeypatch):
     staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
     db_url = f"sqlite:///{tmp_path / 'photoorg.db'}"
     upgrade_database(db_url)
-    trigger_client = RecordingTriggerClient()
 
     result = ingest_directory(
         staged_corpus_dir,
         database_url=db_url,
-        trigger_client=trigger_client,
     )
 
     assert result.scanned == 10
@@ -79,7 +77,6 @@ def test_ingest_directory_loads_sample_photos_into_queue(tmp_path, monkeypatch):
     assert result.inserted == 0
     assert result.updated == 0
     assert result.errors == []
-    assert trigger_client.calls == 1
 
     rows = load_pending_queue_rows(db_url)
 
@@ -103,20 +100,16 @@ def test_ingest_directory_enqueues_records_without_writing_photos_table(tmp_path
     staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
     db_url = f"sqlite:///{tmp_path / 'queue-ingest.db'}"
     upgrade_database(db_url)
-    trigger_client = RecordingTriggerClient()
 
     result = ingest_directory(
         staged_corpus_dir,
         database_url=db_url,
-        queue_commit_chunk_size=1000,
-        trigger_client=trigger_client,
     )
 
     assert result.scanned == 10
     assert result.enqueued == 10
     assert load_photo_count(db_url) == 0
     assert load_pending_queue_count(db_url) == 10
-    assert trigger_client.calls == 1
 
 
 def test_ingest_directory_is_idempotent_for_existing_paths(tmp_path, monkeypatch):
@@ -124,10 +117,9 @@ def test_ingest_directory_is_idempotent_for_existing_paths(tmp_path, monkeypatch
     staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
     db_url = f"sqlite:///{tmp_path / 'photoorg.db'}"
     upgrade_database(db_url)
-    trigger_client = RecordingTriggerClient()
 
-    first_run = ingest_directory(staged_corpus_dir, database_url=db_url, trigger_client=trigger_client)
-    second_run = ingest_directory(staged_corpus_dir, database_url=db_url, trigger_client=trigger_client)
+    first_run = ingest_directory(staged_corpus_dir, database_url=db_url)
+    second_run = ingest_directory(staged_corpus_dir, database_url=db_url)
 
     assert first_run.enqueued == 10
     assert second_run.enqueued == 10
@@ -136,7 +128,6 @@ def test_ingest_directory_is_idempotent_for_existing_paths(tmp_path, monkeypatch
     assert second_run.errors == []
     assert load_photo_count(db_url) == 0
     assert load_pending_queue_count(db_url) == 10
-    assert trigger_client.calls == 2
 
 
 def test_ingest_directory_keeps_domain_tables_unwritten_when_detector_is_enabled(tmp_path, monkeypatch):
@@ -144,12 +135,10 @@ def test_ingest_directory_keeps_domain_tables_unwritten_when_detector_is_enabled
     staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
     db_url = f"sqlite:///{tmp_path / 'faces.db'}"
     upgrade_database(db_url)
-    trigger_client = RecordingTriggerClient()
 
     result = ingest_directory(
         staged_corpus_dir,
         database_url=db_url,
-        trigger_client=trigger_client,
         face_detector=UnusedFaceDetector(),
     )
 
@@ -158,7 +147,24 @@ def test_ingest_directory_keeps_domain_tables_unwritten_when_detector_is_enabled
     assert load_photo_count(db_url) == 0
     assert load_face_count(db_url) == 0
     assert load_pending_queue_count(db_url) == 10
-    assert trigger_client.calls == 1
+
+
+def test_ingest_directory_keeps_queue_only_behavior(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'chunk-threshold.db'}"
+    upgrade_database(db_url)
+
+    result = ingest_directory(
+        staged_corpus_dir,
+        database_url=db_url,
+    )
+
+    assert result.errors == []
+    assert result.scanned == 10
+    assert result.enqueued == 10
+    assert load_pending_queue_count(db_url) == 10
+    assert load_photo_count(db_url) == 0
 
 
 def test_upgrade_database_creates_search_tables(tmp_path):
@@ -192,14 +198,6 @@ def load_face_count(database_url: str) -> int:
     engine = create_engine(database_url, future=True)
     with engine.connect() as connection:
         return connection.execute(select(func.count()).select_from(faces)).scalar_one()
-
-
-class RecordingTriggerClient:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def process_pending_queue(self) -> None:
-        self.calls += 1
 
 
 class UnusedFaceDetector:

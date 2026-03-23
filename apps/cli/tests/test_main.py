@@ -43,9 +43,11 @@ def test_ingest_command_parses_root_and_database_url(monkeypatch, tmp_path):
 
     monkeypatch.setattr(
         api_cli,
-        "ingest_directory",
-        lambda root, **kwargs: calls.append((Path(root), kwargs))
-        or SimpleNamespace(scanned=3, enqueued=3, inserted=0, updated=0, errors=[]),
+        "_load_queue_client",
+        lambda: SimpleNamespace(
+            enqueue_directory=lambda root, **kwargs: calls.append((Path(root), kwargs))
+            or SimpleNamespace(scanned=3, enqueued=3, inserted=0, updated=0, errors=[]),
+        ),
     )
     monkeypatch.setattr(api_cli, "resolve_database_url", lambda database_url: database_url)
 
@@ -55,8 +57,6 @@ def test_ingest_command_parses_root_and_database_url(monkeypatch, tmp_path):
             str(tmp_path),
             "--database-url",
             "sqlite:///cli.db",
-            "--queue-commit-chunk-size",
-            "7",
         ]
     )
 
@@ -66,14 +66,13 @@ def test_ingest_command_parses_root_and_database_url(monkeypatch, tmp_path):
             tmp_path,
             {
                 "database_url": "sqlite:///cli.db",
-                "queue_commit_chunk_size": 7,
                 "face_detector": None,
             },
         )
     ]
 
 
-def test_seed_corpus_load_command_parses_database_url_and_queue_limit(monkeypatch):
+def test_seed_corpus_load_command_parses_database_url(monkeypatch):
     cli_main, api_cli = _import_cli_modules(monkeypatch)
     calls: list[tuple[str, dict]] = []
 
@@ -84,8 +83,11 @@ def test_seed_corpus_load_command_parses_database_url_and_queue_limit(monkeypatc
     )
     monkeypatch.setattr(
         api_cli,
-        "load_seed_corpus_into_database",
-        lambda **kwargs: calls.append(("load", kwargs)) or {"scanned": 2, "enqueued": 2, "processed": 2},
+        "_load_queue_client",
+        lambda: SimpleNamespace(
+            load_seed_corpus_into_queue=lambda **kwargs: calls.append(("load", kwargs))
+            or {"scanned": 2, "enqueued": 2, "processed": 0},
+        ),
     )
     monkeypatch.setattr(api_cli, "resolve_database_url", lambda database_url: database_url)
 
@@ -95,18 +97,13 @@ def test_seed_corpus_load_command_parses_database_url_and_queue_limit(monkeypatc
             "load",
             "--database-url",
             "sqlite:///seed.db",
-            "--queue-limit",
-            "8",
         ]
     )
 
     assert exit_code == 0
     assert calls == [
         ("upgrade", {"database_url": "sqlite:///seed.db"}),
-        (
-            "load",
-            {"database_url": "sqlite:///seed.db", "queue_limit": 8},
-        ),
+        ("load", {"database_url": "sqlite:///seed.db"}),
     ]
 
 
@@ -141,3 +138,4 @@ def test_script_help_text_exposes_expected_commands():
     assert "ingest" in result.stdout
     assert "seed-corpus" in result.stdout
     assert "migrate" in result.stdout
+    assert "triggering queue processing" not in result.stdout
