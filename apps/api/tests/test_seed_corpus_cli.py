@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from app.cli import main
-from app.dev.seed_corpus import validate_seed_corpus
+from app.dev.seed_corpus import load_seed_corpus_into_database, validate_seed_corpus
 
 
 def test_seed_corpus_validate_cli_succeeds_for_checked_in_manifest(capsys):
@@ -71,3 +71,39 @@ def test_validate_seed_corpus_reports_duplicate_file_content(tmp_path):
 
     assert report.asset_count == 2
     assert any("duplicate sha256" in error for error in report.errors)
+
+
+def test_load_seed_corpus_into_database_uses_local_queue_processing(monkeypatch):
+    calls: list[tuple[str, object]] = []
+    batches = iter(
+        [
+            type("Batch", (), {"processed": 24, "retryable_errors": 0})(),
+            type("Batch", (), {"processed": 0, "retryable_errors": 0})(),
+        ]
+    )
+
+    monkeypatch.setattr(
+        "app.dev.seed_corpus.validate_seed_corpus",
+        lambda corpus_root=None: type("Report", (), {"errors": [], "asset_count": 24})(),
+    )
+    monkeypatch.setattr(
+        "app.dev.seed_corpus.ingest_directory",
+        lambda *args, **kwargs: calls.append(("ingest", kwargs.get("trigger_client")))
+        or type(
+            "Result",
+            (),
+            {"scanned": 24, "enqueued": 24, "inserted": 0, "updated": 0, "errors": []},
+        )(),
+    )
+    monkeypatch.setattr(
+        "app.dev.seed_corpus.process_pending_ingest_queue",
+        lambda database_url, limit: calls.append(("process", limit))
+        or next(batches),
+    )
+
+    result = load_seed_corpus_into_database(database_url="sqlite:///seed.db", queue_limit=10)
+
+    assert result == {"scanned": 24, "enqueued": 24, "processed": 24}
+    assert calls[0][0] == "ingest"
+    assert calls[0][1] is not None
+    assert calls[1:] == [("process", 10), ("process", 10)]

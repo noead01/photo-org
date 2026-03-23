@@ -16,6 +16,11 @@ class SeedCorpusValidationReport:
     errors: list[str]
 
 
+class _LocalQueueTrigger:
+    def process_pending_queue(self) -> None:
+        return None
+
+
 def resolve_seed_corpus_root() -> Path:
     return Path(__file__).resolve().parents[4] / "seed-corpus"
 
@@ -70,6 +75,7 @@ def load_seed_corpus_into_database(
         resolve_seed_corpus_root(),
         database_url=database_url,
         queue_commit_chunk_size=queue_limit,
+        trigger_client=_LocalQueueTrigger(),
     )
     processed = 0
 

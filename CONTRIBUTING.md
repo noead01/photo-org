@@ -97,6 +97,16 @@ Current high-value targets:
 The `pre-push` target is intentionally scoped to checks that are currently expected to pass on this repo state.
 As broader lint and type-check coverage is cleaned up, that target should expand rather than drift into a second undocumented workflow.
 
+Generated local artifacts should go under `.local/`.
+
+Use that directory for:
+
+- local SQLite databases created for verification or demos
+- screenshots, temporary exports, and other generated test outputs
+- intermediary local build or workflow state that should not be committed
+
+Contributors should avoid scattering generated files through tracked source directories when a repo-local `.local/` path is sufficient.
+
 ### Worker And API Queue Boundary
 
 The current ingest development path uses an API-owned persistence boundary.
@@ -131,6 +141,8 @@ Current development commands for the corpus are:
 - `make seed-corpus-check`
 - `make seed-corpus-load`
 - `make test-e2e`
+
+The default local seed-corpus load target writes its generated SQLite database under `.local/seed-corpus/`.
 
 Synthetic fixtures remain preferred for unit tests and BDD scenarios. The checked-in corpus is the fixed real-file dataset for the end-to-end workflow.
 

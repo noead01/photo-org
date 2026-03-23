@@ -3,6 +3,8 @@ PYTHON := .venv/bin/python
 PYTEST := $(PYTHON) -m pytest
 PYTEST_COV_ARGS := --cov --cov-report=term-missing
 RUFF := .venv/bin/ruff
+LOCAL_DIR := .local
+SEED_CORPUS_DB := $(LOCAL_DIR)/seed-corpus/photoorg.db
 SCHEMA_TESTS := apps/api/tests/test_schema_definition.py apps/api/tests/test_migrations.py apps/api/tests/test_ingest.py
 LINT_PATHS := apps/api/alembic apps/api/app/migrations.py apps/api/tests/test_schema_definition.py apps/api/tests/test_migrations.py apps/api/tests/test_ingest.py packages/db-schema/photoorg_db_schema
 
@@ -47,4 +49,5 @@ seed-corpus-check:
 	./scripts/photo-org seed-corpus validate
 
 seed-corpus-load:
-	./scripts/photo-org seed-corpus load
+	mkdir -p $(dir $(SEED_CORPUS_DB))
+	./scripts/photo-org seed-corpus load --database-url $(SEED_CORPUS_DB)
