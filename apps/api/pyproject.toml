@@ -17,9 +17,11 @@ dependencies = [
 
 [tool.uv.sources]
 
+[tool.setuptools.packages.find]
+include = ["app*"]
+
 [project.scripts]
 api = "app.__main__:main"
-photo-org = "app.cli:main"
 
 [project.optional-dependencies]
 test = [
