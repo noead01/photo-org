@@ -1,28 +1,66 @@
 import os
 import subprocess
 import sys
+import shutil
 from pathlib import Path
 
 from app.cli import main
 from app.migrations import upgrade_database
 
 
-def _resolve_samples_dir() -> Path:
-    test_file = Path(__file__).resolve()
-    for parent in test_file.parents:
-        candidate = parent / "apps" / "api" / "tests" / "fixtures" / "samples"
+def _resolve_seed_corpus_dir(start: Path | None = None) -> Path:
+    test_file = (start or Path(__file__)).resolve()
+    for parent in [test_file.parent, *test_file.parents]:
+        candidate = parent / "seed-corpus"
         if candidate.is_dir():
             return candidate
-    raise FileNotFoundError("Could not locate apps/api/tests/fixtures/samples from test_cli.py")
+    raise FileNotFoundError("Could not locate seed-corpus from test_cli.py")
 
 
-SAMPLES_DIR = _resolve_samples_dir()
+SEED_CORPUS_DIR = _resolve_seed_corpus_dir()
+SEED_CORPUS_SUBSET_PATHS = (
+    "seed-corpus/family-events/birthday-park/birthday_park_001.jpg",
+    "seed-corpus/family-events/birthday-park/birthday_park_002.jpeg",
+    "seed-corpus/family-events/birthday-park/birthday_park_003.heic",
+    "seed-corpus/family-events/birthday-park/birthday_park_004.png",
+    "seed-corpus/family-events/birthday-park/birthday_park_005.jpg",
+    "seed-corpus/family-events/birthday-park/birthday_park_006.jpg",
+    "seed-corpus/family-events/lake-weekend/lake_weekend_001.jpg",
+    "seed-corpus/family-events/lake-weekend/lake_weekend_002.heic",
+    "seed-corpus/family-events/lake-weekend/lake_weekend_003.png",
+    "seed-corpus/family-events/lake-weekend/lake_weekend_004.jpeg",
+)
+
+
+def test_resolve_seed_corpus_dir_finds_a_worktree_layout(tmp_path):
+    repo_root = tmp_path / "repo"
+    seed_corpus_dir = repo_root / "seed-corpus"
+    seed_corpus_dir.mkdir(parents=True)
+
+    worktree_test_file = repo_root / ".worktrees" / "issue-18-compose-dev-stack" / "apps" / "api" / "tests" / "test_cli.py"
+    worktree_test_file.parent.mkdir(parents=True)
+    worktree_test_file.write_text("")
+
+    assert _resolve_seed_corpus_dir(worktree_test_file) == seed_corpus_dir
+
+
+def _stage_seed_corpus_subset(destination_root: Path) -> Path:
+    staged_root = destination_root / "seed-corpus"
+    for asset_path in SEED_CORPUS_SUBSET_PATHS:
+        relative_path = asset_path.removeprefix("seed-corpus/")
+        source = SEED_CORPUS_DIR / relative_path
+        target = staged_root / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+    return staged_root
 
 
 def test_ingest_cli_triggers_queue_processing_when_chunk_threshold_is_reached(
     monkeypatch,
     tmp_path,
 ):
+    monkeypatch.chdir(tmp_path)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
     db_url = f"sqlite:///{tmp_path / 'cli-ingest.db'}"
     calls: list[dict] = []
     upgrade_database(db_url)
@@ -35,7 +73,7 @@ def test_ingest_cli_triggers_queue_processing_when_chunk_threshold_is_reached(
     exit_code = main(
         [
             "ingest",
-            str(SAMPLES_DIR),
+            str(staged_corpus_dir),
             "--database-url",
             db_url,
             "--queue-commit-chunk-size",

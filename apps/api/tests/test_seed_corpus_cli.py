@@ -2,7 +2,8 @@ import json
 from pathlib import Path
 
 from app.cli import main
-from app.dev.seed_corpus import load_seed_corpus_into_database, validate_seed_corpus
+import app.dev.seed_corpus as seed_corpus
+from app.dev.seed_corpus import load_seed_corpus_into_database, resolve_seed_corpus_root, validate_seed_corpus
 
 
 def test_seed_corpus_validate_cli_succeeds_for_checked_in_manifest(capsys):
@@ -12,6 +13,20 @@ def test_seed_corpus_validate_cli_succeeds_for_checked_in_manifest(capsys):
     assert exit_code == 0
     assert "assets_validated=" in captured.out
     assert "validation=ok" in captured.out
+
+
+def test_resolve_seed_corpus_root_tracks_worktree_layout(tmp_path, monkeypatch):
+    worktree_root = tmp_path / "repo" / ".worktrees" / "issue-18-compose-dev-stack"
+    seed_corpus_dir = worktree_root / "seed-corpus"
+    seed_corpus_dir.mkdir(parents=True)
+
+    fake_module_file = worktree_root / "apps" / "api" / "app" / "dev" / "seed_corpus.py"
+    fake_module_file.parent.mkdir(parents=True)
+    fake_module_file.write_text("")
+
+    monkeypatch.setattr(seed_corpus, "__file__", str(fake_module_file))
+
+    assert resolve_seed_corpus_root() == seed_corpus_dir
 
 
 def test_seed_corpus_load_cli_runs_migrate_and_corpus_loader(tmp_path, monkeypatch):
