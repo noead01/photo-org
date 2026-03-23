@@ -1,4 +1,5 @@
 UV ?= uv
+COMPOSE ?= docker compose
 PYTHON := .venv/bin/python
 PYTEST := $(PYTHON) -m pytest
 PYTEST_COV_ARGS := --cov --cov-report=term-missing
@@ -8,7 +9,7 @@ SEED_CORPUS_DB := $(LOCAL_DIR)/seed-corpus/photoorg.db
 SCHEMA_TESTS := apps/api/tests/test_schema_definition.py apps/api/tests/test_migrations.py apps/api/tests/test_ingest.py
 LINT_PATHS := apps/api/alembic apps/api/app/migrations.py apps/api/tests/test_schema_definition.py apps/api/tests/test_migrations.py apps/api/tests/test_ingest.py packages/db-schema/photoorg_db_schema
 
-.PHONY: help sync lint test test-all test-e2e check pre-push migrate seed-corpus-check seed-corpus-load
+.PHONY: help sync lint test test-all test-e2e check pre-push migrate compose-up compose-migrate compose-down seed-corpus-check seed-corpus-load
 
 help:
 	@printf '%s\n' \
@@ -20,6 +21,9 @@ help:
 		'make check     - run lint and the focused test slice' \
 		'make pre-push  - run lint plus the full coverage-enforced test suite' \
 		'make migrate   - apply database migrations through the repo-root wrapper' \
+		'make compose-up - build and start the Compose baseline for postgres plus db-service' \
+		'make compose-migrate - rerun database migrations against the Compose baseline' \
+		'make compose-down - stop and remove the Compose baseline' \
 		'make seed-corpus-check - validate the checked-in seed corpus' \
 		'make seed-corpus-load  - migrate and load the checked-in seed corpus'
 
@@ -44,6 +48,15 @@ pre-push: lint test-all
 
 migrate:
 	./scripts/photo-org migrate
+
+compose-up:
+	$(COMPOSE) up --build -d
+
+compose-migrate:
+	$(COMPOSE) run --rm db-service python -c "from app.migrations import upgrade_database; upgrade_database()"
+
+compose-down:
+	$(COMPOSE) down
 
 seed-corpus-check:
 	./scripts/photo-org seed-corpus validate
