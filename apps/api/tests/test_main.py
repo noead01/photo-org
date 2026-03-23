@@ -36,3 +36,18 @@ class TestHealthEndpoint:
         assert response.headers["content-type"] == "application/json"
         assert "status" in response.json()
         assert response.json()["status"] == "ok"
+
+    def test_given_openapi_schema_when_fetching_then_excludes_search_route_and_keeps_health_route(self):
+        """
+        Given: The runtime OpenAPI schema
+        When: Fetching /openapi.json
+        Then: Search is no longer exposed and health remains available
+        """
+        client = TestClient(app)
+
+        response = client.get("/openapi.json")
+
+        assert response.status_code == 200
+        paths = response.json()["paths"]
+        assert "/api/v1/search" not in paths
+        assert "/healthz" in paths
