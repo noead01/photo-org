@@ -10,10 +10,10 @@ from app.migrations import upgrade_database
 def _resolve_samples_dir() -> Path:
     test_file = Path(__file__).resolve()
     for parent in test_file.parents:
-        candidate = parent / "apps" / "api" / "features" / "samples"
+        candidate = parent / "apps" / "api" / "tests" / "fixtures" / "samples"
         if candidate.is_dir():
             return candidate
-    raise FileNotFoundError("Could not locate apps/api/features/samples from test_cli.py")
+    raise FileNotFoundError("Could not locate apps/api/tests/fixtures/samples from test_cli.py")
 
 
 SAMPLES_DIR = _resolve_samples_dir()

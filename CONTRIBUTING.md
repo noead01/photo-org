@@ -81,15 +81,31 @@ Current high-value targets:
   - run the focused schema, migration, and ingest pytest slice
 - `make test-all`
   - run the full `apps/api/tests` pytest suite
+- `make test-e2e`
+  - run the seed-corpus end-to-end pytest slice against the checked-in corpus
 - `make check`
   - run `lint` and the focused `test` slice
 - `make pre-push`
   - run the local validation path expected before pushing changes
 - `make migrate`
   - apply database migrations from the repo root through the wrapper script
+- `make seed-corpus-check`
+  - validate the checked-in `seed-corpus/` inventory and manifest
+- `make seed-corpus-load`
+  - migrate and load the checked-in `seed-corpus/` into the local development database
 
 The `pre-push` target is intentionally scoped to checks that are currently expected to pass on this repo state.
 As broader lint and type-check coverage is cleaned up, that target should expand rather than drift into a second undocumented workflow.
+
+Generated local artifacts should go under `.local/`.
+
+Use that directory for:
+
+- local SQLite databases created for verification or demos
+- screenshots, temporary exports, and other generated test outputs
+- intermediary local build or workflow state that should not be committed
+
+Contributors should avoid scattering generated files through tracked source directories when a repo-local `.local/` path is sufficient.
 
 ### Worker And API Queue Boundary
 
@@ -108,6 +124,27 @@ Current development implications:
 - tests for ingest behavior should distinguish queue submission from API-side queue processing
 
 The architectural decision behind this boundary is recorded in ADR-0013.
+
+### Seed Corpus Workflow
+
+The repository now includes a checked-in offline corpus under `seed-corpus/`.
+
+Contributors should assume:
+
+- the corpus exists for end-to-end validation and demos
+- every asset in the corpus must be safe to redistribute in-repo
+- every asset must record source and license metadata in `seed-corpus/manifest.json`
+- the root `Makefile` is the supported command surface for validating and loading the corpus
+
+Current development commands for the corpus are:
+
+- `make seed-corpus-check`
+- `make seed-corpus-load`
+- `make test-e2e`
+
+The default local seed-corpus load target writes its generated SQLite database under `.local/seed-corpus/`.
+
+Synthetic fixtures remain preferred for unit tests and BDD scenarios. The checked-in corpus is the fixed real-file dataset for the end-to-end workflow.
 
 ### Automated Version Updates
 

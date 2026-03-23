@@ -15,11 +15,21 @@ Use a fixed seed corpus of approximately:
 - At least 2 small time-based clusters such as "birthday" and "vacation"
 - A few photos with incomplete metadata or ambiguous faces
 
-The seed corpus should be stored outside the repo when necessary, but the repo should contain:
+The seed corpus may be stored outside the repo when necessary, but the current Phase 0 workflow uses a checked-in offline corpus under `seed-corpus/`.
+
+The repo should contain:
 
 - a manifest describing the seed dataset
 - deterministic IDs and labels used by tests
 - fixtures or scripts that can load the corpus into the local development database
+
+The checked-in corpus should be treated as a curated repository asset:
+
+- every file must be safe to redistribute in-repo
+- every file must record source and license metadata in the manifest
+- folder layout should remain stable so end-to-end tests can refer to known paths
+
+Synthetic fixtures remain preferred for unit tests and BDD scenarios.
 
 ## Product Questions To Answer Early
 
@@ -138,11 +148,17 @@ Only then should work shift toward:
 
 To support this model, the repo should gain and maintain:
 
-- a seed data manifest, for example `data/seed/manifest.json`
+- a seed data manifest, for example `seed-corpus/manifest.json`
 - loader scripts for the development database
 - fixture-backed tests that refer to the seed IDs
 - UI screenshots or smoke tests generated from the seed corpus
 - concise product notes documenting what changed in the user workflow
+
+Current expected local workflow:
+
+- `make seed-corpus-check`
+- `make seed-corpus-load`
+- `make test-e2e`
 
 ## Prioritization Rule
 

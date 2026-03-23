@@ -17,7 +17,6 @@ dev = [
 ]
 test = [
   "pytest",
-  "behave",
   "pytest-cov>=7.0.0",
 ]
 prod = [

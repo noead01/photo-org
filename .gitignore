@@ -13,4 +13,5 @@ packages/*/.venv/
 .env
 .env.*
 .envrc
+.local/
 *.egg-info/

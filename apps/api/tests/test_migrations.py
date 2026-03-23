@@ -9,7 +9,7 @@ from app.processing.ingest import ingest_directory
 from app.storage import photos
 
 
-SAMPLES_DIR = Path("/mnt/d/Projects/photo-org/apps/api/features/samples")
+SAMPLES_DIR = Path("/mnt/d/Projects/photo-org/.worktrees/feature-issue-19-seed-corpus-load-path/apps/api/tests/fixtures/samples")
 
 
 class NoOpTriggerClient:
