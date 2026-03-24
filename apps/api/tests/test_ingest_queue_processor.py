@@ -10,7 +10,7 @@ from app.services.ingest_queue_processor import (
     PROCESSING_LEASE_SECONDS,
     process_pending_ingest_queue,
 )
-from app.storage import photos
+from app.storage import faces, photos
 from photoorg_db_schema import ingest_queue
 
 
@@ -40,6 +40,36 @@ def load_photo_paths(database_url: str) -> list[str]:
     with engine.connect() as connection:
         rows = connection.execute(select(photos.c.path).order_by(photos.c.path)).all()
     return [row[0] for row in rows]
+
+
+def load_photo_detection_state(database_url: str, photo_id: str) -> tuple[int, datetime | None]:
+    engine = create_engine(database_url, future=True)
+    with engine.connect() as connection:
+        row = connection.execute(
+            select(photos.c.faces_count, photos.c.faces_detected_ts).where(
+                photos.c.photo_id == photo_id
+            )
+        ).one()
+    return row[0], row[1]
+
+
+def load_face_rows(database_url: str, photo_id: str) -> list[dict]:
+    engine = create_engine(database_url, future=True)
+    with engine.connect() as connection:
+        rows = connection.execute(
+            select(
+                faces.c.face_id,
+                faces.c.photo_id,
+                faces.c.bbox_x,
+                faces.c.bbox_y,
+                faces.c.bbox_w,
+                faces.c.bbox_h,
+                faces.c.provenance,
+            )
+            .where(faces.c.photo_id == photo_id)
+            .order_by(faces.c.face_id)
+        ).mappings()
+    return [dict(row) for row in rows]
 
 
 def mark_queue_row_processing(
@@ -146,6 +176,122 @@ def test_process_pending_rows_marks_unsupported_payload_failed_without_stranding
     assert len(failed_rows) == 1
     assert failed_rows[0].attempt_count == 1
     assert "Unsupported payload_type" in failed_rows[0].last_error
+
+
+def test_process_pending_rows_persists_detected_faces_for_photo_metadata(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'queue-processor-faces.db'}"
+    upgrade_database(database_url)
+    queue_store = IngestQueueStore(database_url)
+
+    queue_store.enqueue(
+        payload_type="photo_metadata",
+        payload=SAMPLE_PAYLOAD,
+        idempotency_key="photo-with-faces",
+    )
+
+    result = process_pending_ingest_queue(
+        database_url,
+        limit=10,
+        face_detector=StaticFaceDetector(
+            detections=[
+                {
+                    "face_id": "face-1",
+                    "bbox_x": 10,
+                    "bbox_y": 20,
+                    "bbox_w": 30,
+                    "bbox_h": 40,
+                    "bitmap": None,
+                    "embedding": None,
+                    "provenance": {"detector": "test-detector"},
+                }
+            ]
+        ),
+    )
+
+    assert result.processed == 1
+    assert result.failed == 0
+    assert result.retryable_errors == 0
+    assert load_face_rows(database_url, SAMPLE_PAYLOAD["photo_id"]) == [
+        {
+            "face_id": "face-1",
+            "photo_id": SAMPLE_PAYLOAD["photo_id"],
+            "bbox_x": 10,
+            "bbox_y": 20,
+            "bbox_w": 30,
+            "bbox_h": 40,
+            "provenance": {"detector": "test-detector"},
+        }
+    ]
+    faces_count, faces_detected_ts = load_photo_detection_state(
+        database_url, SAMPLE_PAYLOAD["photo_id"]
+    )
+    assert faces_count == 1
+    assert faces_detected_ts is not None
+    completed_rows = queue_store.list_by_status("completed")
+    assert len(completed_rows) == 1
+    assert completed_rows[0].last_error is None
+
+
+def test_process_pending_rows_marks_detection_complete_when_no_faces_found(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'queue-processor-no-faces.db'}"
+    upgrade_database(database_url)
+    queue_store = IngestQueueStore(database_url)
+
+    queue_store.enqueue(
+        payload_type="photo_metadata",
+        payload=SAMPLE_PAYLOAD,
+        idempotency_key="photo-without-faces",
+    )
+
+    result = process_pending_ingest_queue(
+        database_url,
+        limit=10,
+        face_detector=StaticFaceDetector(detections=[]),
+    )
+
+    assert result.processed == 1
+    assert load_face_rows(database_url, SAMPLE_PAYLOAD["photo_id"]) == []
+    faces_count, faces_detected_ts = load_photo_detection_state(
+        database_url, SAMPLE_PAYLOAD["photo_id"]
+    )
+    assert faces_count == 0
+    assert faces_detected_ts is not None
+    completed_rows = queue_store.list_by_status("completed")
+    assert len(completed_rows) == 1
+    assert completed_rows[0].last_error is None
+
+
+def test_process_pending_rows_keeps_photo_ingest_successful_when_detection_fails(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'queue-processor-face-failure.db'}"
+    upgrade_database(database_url)
+    queue_store = IngestQueueStore(database_url)
+
+    queue_store.enqueue(
+        payload_type="photo_metadata",
+        payload=SAMPLE_PAYLOAD,
+        idempotency_key="photo-face-failure",
+    )
+
+    result = process_pending_ingest_queue(
+        database_url,
+        limit=10,
+        face_detector=RaisingFaceDetector("detector exploded"),
+    )
+
+    assert result.processed == 1
+    assert result.failed == 0
+    assert result.retryable_errors == 0
+    assert load_photo_paths(database_url) == [SAMPLE_PAYLOAD["path"]]
+    assert load_face_rows(database_url, SAMPLE_PAYLOAD["photo_id"]) == []
+    faces_count, faces_detected_ts = load_photo_detection_state(
+        database_url, SAMPLE_PAYLOAD["photo_id"]
+    )
+    assert faces_count == 0
+    assert faces_detected_ts is None
+    completed_rows = queue_store.list_by_status("completed")
+    assert len(completed_rows) == 1
+    assert "face detection failed" in completed_rows[0].last_error.lower()
+    assert "detector exploded" in completed_rows[0].last_error
 
 
 def test_process_pending_rows_keeps_transient_domain_write_failures_retryable(
@@ -387,3 +533,19 @@ def test_process_pending_rows_keeps_row_retryable_when_completion_transition_fai
     assert queue_store.list_by_status("failed") == []
     assert queue_store.list_by_status("processing") == []
     assert len(queue_store.list_by_status("completed")) == 1
+
+
+class StaticFaceDetector:
+    def __init__(self, detections: list[dict]) -> None:
+        self._detections = detections
+
+    def detect(self, path):
+        return list(self._detections)
+
+
+class RaisingFaceDetector:
+    def __init__(self, message: str) -> None:
+        self._message = message
+
+    def detect(self, path):
+        raise RuntimeError(self._message)
