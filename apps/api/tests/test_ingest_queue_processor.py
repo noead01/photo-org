@@ -11,7 +11,7 @@ from app.services.ingest_queue_processor import (
     process_pending_ingest_queue,
 )
 from app.storage import faces, photos
-from photoorg_db_schema import ingest_queue
+from photoorg_db_schema import ingest_queue, ingest_run_files, ingest_runs
 
 
 SAMPLE_PAYLOAD = {
@@ -68,6 +68,27 @@ def load_face_rows(database_url: str, photo_id: str) -> list[dict]:
             )
             .where(faces.c.photo_id == photo_id)
             .order_by(faces.c.face_id)
+        ).mappings()
+    return [dict(row) for row in rows]
+
+
+def load_ingest_runs(database_url: str) -> list[dict]:
+    engine = create_engine(database_url, future=True)
+    with engine.connect() as connection:
+        rows = connection.execute(
+            select(ingest_runs).order_by(ingest_runs.c.started_ts, ingest_runs.c.ingest_run_id)
+        ).mappings()
+    return [dict(row) for row in rows]
+
+
+def load_ingest_run_files(database_url: str) -> list[dict]:
+    engine = create_engine(database_url, future=True)
+    with engine.connect() as connection:
+        rows = connection.execute(
+            select(ingest_run_files).order_by(
+                ingest_run_files.c.created_ts,
+                ingest_run_files.c.ingest_run_file_id,
+            )
         ).mappings()
     return [dict(row) for row in rows]
 
@@ -549,3 +570,75 @@ class RaisingFaceDetector:
 
     def detect(self, path):
         raise RuntimeError(self._message)
+
+
+def test_ingest_run_store_persists_run_lifecycle_and_file_outcomes(tmp_path):
+    from app.db import IngestRunFileOutcome, IngestRunStore
+
+    database_url = f"sqlite:///{tmp_path / 'ingest-run-store.db'}"
+    upgrade_database(database_url)
+    queue_store = IngestQueueStore(database_url)
+    run_store = IngestRunStore(database_url)
+
+    queue_id = queue_store.enqueue(
+        payload_type="photo_metadata",
+        payload=SAMPLE_PAYLOAD,
+        idempotency_key="ingest-run-store",
+    )
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        ingest_run_id = run_store.create_run(connection=connection)
+        run_store.append_file_outcome(
+            ingest_run_id,
+            IngestRunFileOutcome(
+                ingest_queue_id=queue_id,
+                path=SAMPLE_PAYLOAD["path"],
+                outcome="completed",
+                error_detail="face detection failed: detector exploded",
+            ),
+            connection=connection,
+        )
+        run_store.finalize_run(
+            ingest_run_id,
+            status="completed",
+            files_seen=1,
+            files_created=1,
+            files_updated=0,
+            error_count=1,
+            error_summary="face detection failed: detector exploded",
+            connection=connection,
+        )
+
+    run_rows = load_ingest_runs(database_url)
+    file_rows = load_ingest_run_files(database_url)
+
+    assert len(run_rows) == 1
+    assert run_rows[0]["ingest_run_id"] == ingest_run_id
+    assert run_rows[0]["status"] == "completed"
+    assert run_rows[0]["completed_ts"] is not None
+    assert run_rows[0]["files_seen"] == 1
+    assert run_rows[0]["files_created"] == 1
+    assert run_rows[0]["files_updated"] == 0
+    assert run_rows[0]["files_missing"] == 0
+    assert run_rows[0]["error_count"] == 1
+    assert run_rows[0]["error_summary"] == "face detection failed: detector exploded"
+
+    assert len(file_rows) == 1
+    assert file_rows[0]["ingest_run_id"] == ingest_run_id
+    assert file_rows[0]["ingest_queue_id"] == queue_id
+    assert file_rows[0]["path"] == SAMPLE_PAYLOAD["path"]
+    assert file_rows[0]["outcome"] == "completed"
+    assert file_rows[0]["error_detail"] == "face detection failed: detector exploded"
+    assert file_rows[0]["created_ts"] is not None
+
+
+def test_ingest_run_store_is_exported_from_app_db(tmp_path):
+    from app.db import IngestRunStore
+
+    database_url = f"sqlite:///{tmp_path / 'ingest-run-store-export.db'}"
+    upgrade_database(database_url)
+
+    store = IngestRunStore(database_url)
+
+    assert isinstance(store, IngestRunStore)
