@@ -4,6 +4,7 @@ from photoorg_db_schema import (
     face_labels,
     faces,
     ingest_runs,
+    ingest_run_files,
     ingest_queue,
     metadata,
     people,
