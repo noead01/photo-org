@@ -12,7 +12,6 @@ from sqlalchemy.engine import Connection
 
 from app.db.queue import IngestQueueStore
 from app.processing.metadata import extract_image_metadata, stat_timestamp_to_iso
-from app.services.worker_queue_trigger import QueueTriggerClient
 from app.storage import create_db_engine, faces, photos
 
 
@@ -58,18 +57,12 @@ def ingest_directory(
     root: str | Path,
     database_url: str | Path | None = None,
     *,
-    queue_commit_chunk_size: int = 100,
-    trigger_client: QueueTriggerClient | None = None,
     face_detector: FaceDetector | None = None,
 ) -> IngestResult:
     source_root = Path(root).expanduser().resolve()
     result = IngestResult()
 
     queue_store = IngestQueueStore(database_url)
-    processing_trigger = trigger_client or QueueTriggerClient(
-        limit=queue_commit_chunk_size
-    )
-    pending_since_last_trigger = 0
 
     for photo_path in iter_photo_files(source_root):
         result.scanned += 1
@@ -81,16 +74,8 @@ def ingest_directory(
                 idempotency_key=payload["idempotency_key"],
             )
             result.enqueued += 1
-            pending_since_last_trigger += 1
-
-            if pending_since_last_trigger >= queue_commit_chunk_size:
-                processing_trigger.process_pending_queue()
-                pending_since_last_trigger = 0
         except Exception as exc:
             result.errors.append(f"{photo_path}: {exc}")
-
-    if pending_since_last_trigger > 0 and result.enqueued > 0:
-        processing_trigger.process_pending_queue()
 
     return result
 
