@@ -13,10 +13,10 @@ from app.storage import faces, photos
 def _resolve_samples_dir() -> Path:
     test_file = Path(__file__).resolve()
     for parent in test_file.parents:
-        candidate = parent / "apps" / "api" / "tests" / "fixtures" / "samples"
+        candidate = parent / "seed-corpus" / "family-events" / "birthday-park"
         if candidate.is_dir():
             return candidate
-    raise FileNotFoundError("Could not locate apps/api/tests/fixtures/samples from test_ingest.py")
+    raise FileNotFoundError("Could not locate seed-corpus/family-events/birthday-park from test_ingest.py")
 
 
 SAMPLES_DIR = _resolve_samples_dir()
@@ -35,8 +35,8 @@ def test_ingest_directory_loads_sample_photos_into_queue(tmp_path):
         trigger_client=trigger_client,
     )
 
-    assert result.scanned == 10
-    assert result.enqueued == 10
+    assert result.scanned == 6
+    assert result.enqueued == 6
     assert result.inserted == 0
     assert result.updated == 0
     assert result.errors == []
@@ -44,21 +44,20 @@ def test_ingest_directory_loads_sample_photos_into_queue(tmp_path):
 
     rows = load_pending_queue_rows(db_url)
 
-    assert len(rows) == 10
+    assert len(rows) == 6
     assert all(row.payload_type == "photo_metadata" for row in rows)
-    assert all(row.payload_json["path"].endswith(".HEIC") for row in rows)
-    assert all("apps/api/tests/fixtures/samples/" in row.payload_json["path"] for row in rows)
-    assert {row.payload_json["ext"] for row in rows} == {"heic"}
+    assert all("seed-corpus/family-events/birthday-park/" in row.payload_json["path"] for row in rows)
+    assert {row.payload_json["ext"] for row in rows} == {"jpg", "jpeg", "heic", "png"}
     assert all(row.payload_json["filesize"] > 0 for row in rows)
     assert all(len(row.payload_json["sha256"]) == 64 for row in rows)
     assert all(row.payload_json["faces_count"] == 0 for row in rows)
-    sample = next(row for row in rows if row.payload_json["path"].endswith("IMG_3015.HEIC"))
-    assert sample.payload_json["shot_ts"] == "2022-10-08T14:47:12.703000-04:00"
-    assert sample.payload_json["shot_ts_source"] == "exif:DateTimeOriginal"
+    sample = next(row for row in rows if row.payload_json["path"].endswith("birthday_park_005.jpg"))
+    assert sample.payload_json["shot_ts"] == "2022-06-14T15:28:00+00:00"
+    assert sample.payload_json["shot_ts_source"] == "exif:DateTime"
     assert sample.payload_json["camera_make"] == "Apple"
     assert sample.payload_json["camera_model"] == "iPhone 12 mini"
-    assert sample.payload_json["gps_latitude"] == pytest.approx(40.0671583, abs=1e-7)
-    assert sample.payload_json["gps_longitude"] == pytest.approx(-82.874, abs=1e-7)
+    assert sample.payload_json["gps_latitude"] is None
+    assert sample.payload_json["gps_longitude"] is None
     assert load_photo_count(db_url) == 0
 
 
@@ -74,10 +73,10 @@ def test_ingest_directory_enqueues_records_without_writing_photos_table(tmp_path
         trigger_client=trigger_client,
     )
 
-    assert result.scanned == 10
-    assert result.enqueued == 10
+    assert result.scanned == 6
+    assert result.enqueued == 6
     assert load_photo_count(db_url) == 0
-    assert load_pending_queue_count(db_url) == 10
+    assert load_pending_queue_count(db_url) == 6
     assert trigger_client.calls == 1
 
 
@@ -89,13 +88,13 @@ def test_ingest_directory_is_idempotent_for_existing_paths(tmp_path):
     first_run = ingest_directory(SAMPLES_DIR, database_url=db_url, trigger_client=trigger_client)
     second_run = ingest_directory(SAMPLES_DIR, database_url=db_url, trigger_client=trigger_client)
 
-    assert first_run.enqueued == 10
-    assert second_run.enqueued == 10
+    assert first_run.enqueued == 6
+    assert second_run.enqueued == 6
     assert second_run.inserted == 0
     assert second_run.updated == 0
     assert second_run.errors == []
     assert load_photo_count(db_url) == 0
-    assert load_pending_queue_count(db_url) == 10
+    assert load_pending_queue_count(db_url) == 6
     assert trigger_client.calls == 2
 
 
@@ -112,10 +111,10 @@ def test_ingest_directory_keeps_domain_tables_unwritten_when_detector_is_enabled
     )
 
     assert result.errors == []
-    assert result.enqueued == 10
+    assert result.enqueued == 6
     assert load_photo_count(db_url) == 0
     assert load_face_count(db_url) == 0
-    assert load_pending_queue_count(db_url) == 10
+    assert load_pending_queue_count(db_url) == 6
     assert trigger_client.calls == 1
 
 

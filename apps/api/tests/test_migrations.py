@@ -9,7 +9,16 @@ from app.processing.ingest import ingest_directory
 from app.storage import photos
 
 
-SAMPLES_DIR = Path("/mnt/d/Projects/photo-org/.worktrees/feature-issue-19-seed-corpus-load-path/apps/api/tests/fixtures/samples")
+def _resolve_samples_dir() -> Path:
+    test_file = Path(__file__).resolve()
+    for parent in test_file.parents:
+        candidate = parent / "seed-corpus" / "family-events" / "birthday-park"
+        if candidate.is_dir():
+            return candidate
+    raise FileNotFoundError("Could not locate seed-corpus/family-events/birthday-park from test_migrations.py")
+
+
+SAMPLES_DIR = _resolve_samples_dir()
 
 
 class NoOpTriggerClient:
@@ -117,13 +126,13 @@ def test_ingest_succeeds_after_running_migrations(tmp_path):
     )
 
     assert result.errors == []
-    assert result.enqueued == 10
+    assert result.enqueued == 6
     assert trigger_client.calls == 1
 
     queue_store = IngestQueueStore(database_url)
     pending_rows = queue_store.list_pending()
 
-    assert len(pending_rows) == 10
+    assert len(pending_rows) == 6
 
     engine = create_engine(database_url, future=True)
     with engine.connect() as connection:
