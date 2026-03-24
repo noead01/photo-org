@@ -686,6 +686,32 @@ def test_process_pending_rows_does_not_reclaim_actively_leased_processing_rows(t
     assert load_ingest_run_files(database_url) == []
 
 
+def test_process_pending_rows_does_not_create_run_when_every_claim_is_lost(
+    tmp_path, monkeypatch
+):
+    database_url = f"sqlite:///{tmp_path / 'queue-processor-claim-race.db'}"
+    upgrade_database(database_url)
+    queue_store = IngestQueueStore(database_url)
+
+    queue_id = queue_store.enqueue(
+        payload_type="photo_metadata",
+        payload=SAMPLE_PAYLOAD,
+        idempotency_key="photo-claim-race",
+    )
+
+    def never_claim(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(IngestQueueStore, "begin_processing_attempt", never_claim)
+
+    result = process_pending_ingest_queue(database_url, limit=10)
+
+    assert result == ingest_queue_processor.ProcessQueueResult()
+    assert queue_store.list_by_status("pending")[0].ingest_queue_id == queue_id
+    assert load_ingest_runs(database_url) == []
+    assert load_ingest_run_files(database_url) == []
+
+
 def test_process_pending_rows_reclaims_processing_rows_only_after_lease_expires(tmp_path):
     database_url = f"sqlite:///{tmp_path / 'queue-processor-stale-lease.db'}"
     upgrade_database(database_url)

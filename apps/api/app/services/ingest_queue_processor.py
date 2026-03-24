@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.engine import Connection
 
 from app.db import IngestRunFileOutcome, IngestRunStore
 from app.db.queue import IngestQueueStore, PROCESSING_LEASE_SECONDS
@@ -36,7 +37,7 @@ def process_pending_ingest_queue(
     engine = create_db_engine(database_url)
     detector = face_detector if face_detector is not None else OpenCvFaceDetector()
     run_store = IngestRunStore(database_url)
-    ingest_run_id = run_store.create_run()
+    ingest_run_id: str | None = None
     processed = 0
     failed = 0
     retryable_errors = 0
@@ -48,6 +49,7 @@ def process_pending_ingest_queue(
     for row in processable_rows:
         claimed_row = None
         claimed_path = _payload_path(row.payload_json)
+        run_created_in_transaction = False
         try:
             with engine.begin() as connection:
                 claimed_row = queue_store.begin_processing_attempt(
@@ -60,6 +62,11 @@ def process_pending_ingest_queue(
                 claimed_path = _payload_path(claimed_row.payload_json)
                 if claimed_row.payload_type != "photo_metadata":
                     error_detail = f"Unsupported payload_type: {claimed_row.payload_type}"
+                    ingest_run_id, run_created_in_transaction = _ensure_ingest_run(
+                        run_store,
+                        ingest_run_id,
+                        connection=connection,
+                    )
                     run_store.append_file_outcome(
                         ingest_run_id,
                         IngestRunFileOutcome(
@@ -83,6 +90,11 @@ def process_pending_ingest_queue(
                     record = payload_to_photo_record(claimed_row.payload_json)
                 except (KeyError, TypeError, ValueError) as exc:
                     error_detail = str(exc)
+                    ingest_run_id, run_created_in_transaction = _ensure_ingest_run(
+                        run_store,
+                        ingest_run_id,
+                        connection=connection,
+                    )
                     run_store.append_file_outcome(
                         ingest_run_id,
                         IngestRunFileOutcome(
@@ -108,6 +120,11 @@ def process_pending_ingest_queue(
                     record,
                     detector,
                 )
+                ingest_run_id, run_created_in_transaction = _ensure_ingest_run(
+                    run_store,
+                    ingest_run_id,
+                    connection=connection,
+                )
                 run_store.append_file_outcome(
                     ingest_run_id,
                     IngestRunFileOutcome(
@@ -132,8 +149,11 @@ def process_pending_ingest_queue(
                     error_messages.append(detection_warning)
             processed += 1
         except IntegrityError as exc:
+            if run_created_in_transaction:
+                ingest_run_id = None
             error_detail = str(exc)
             queue_store.record_permanent_failure(row.ingest_queue_id, error_detail)
+            ingest_run_id, _ = _ensure_ingest_run(run_store, ingest_run_id)
             run_store.append_file_outcome(
                 ingest_run_id,
                 IngestRunFileOutcome(
@@ -147,8 +167,11 @@ def process_pending_ingest_queue(
             failed += 1
             error_messages.append(error_detail)
         except Exception as exc:
+            if run_created_in_transaction:
+                ingest_run_id = None
             error_detail = str(exc)
             queue_store.record_retryable_failure(row.ingest_queue_id, error_detail)
+            ingest_run_id, _ = _ensure_ingest_run(run_store, ingest_run_id)
             run_store.append_file_outcome(
                 ingest_run_id,
                 IngestRunFileOutcome(
@@ -162,6 +185,9 @@ def process_pending_ingest_queue(
             retryable_errors += 1
             error_messages.append(error_detail)
             continue
+
+    if ingest_run_id is None:
+        return result
 
     run_store.finalize_run(
         ingest_run_id,
@@ -214,6 +240,17 @@ def _payload_path(payload: object) -> str:
         if isinstance(path, str) and path:
             return path
     return "<unknown>"
+
+
+def _ensure_ingest_run(
+    run_store: IngestRunStore,
+    ingest_run_id: str | None,
+    *,
+    connection: Connection | None = None,
+) -> tuple[str, bool]:
+    if ingest_run_id is not None:
+        return ingest_run_id, False
+    return run_store.create_run(connection=connection), True
 
 
 def _run_status(file_outcomes: list[str]) -> str:
