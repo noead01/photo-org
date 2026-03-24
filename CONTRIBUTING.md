@@ -71,6 +71,25 @@ Validation should be fast enough for normal developer use but strict enough to p
 The repo has a workspace-level `pyproject.toml` plus package-level `pyproject.toml` files under `apps/` and `packages/`.
 Contributors should prefer the root `Makefile` so the common sync, lint, and test commands run through one documented path.
 
+## Baseline Phase 0 Workflow
+
+Use this as the default contributor path for local Phase 0 work:
+
+1. `make sync`
+2. `make migrate` when a local database is needed
+3. `make seed-corpus-check`
+4. `make seed-corpus-load`
+5. `make check`
+6. `make test-all` and `make test-e2e` before broader changes or handoff
+
+Environment contracts for that path:
+
+- The repo assumes local Python development through `uv`.
+- Generated local artifacts should go under `.local/`.
+- The current supported workflow is backend- and API-oriented.
+- Compose-based stack startup is not yet the supported baseline contributor workflow.
+- The root `Makefile` and `scripts/photo-org` wrapper are the supported command surfaces for this path.
+
 Current high-value targets:
 
 - `make sync`
