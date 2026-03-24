@@ -7,18 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from app.processing.ingest import ingest_directory
-from app.services.ingest_queue_processor import process_pending_ingest_queue
 
 
 @dataclass(frozen=True)
 class SeedCorpusValidationReport:
     asset_count: int
     errors: list[str]
-
-
-class _LocalQueueTrigger:
-    def process_pending_queue(self) -> None:
-        return None
 
 
 def resolve_seed_corpus_root() -> Path:
@@ -65,7 +59,6 @@ def validate_seed_corpus(corpus_root: Path | None = None) -> SeedCorpusValidatio
 def load_seed_corpus_into_database(
     *,
     database_url: str | None = None,
-    queue_limit: int = 100,
 ) -> dict[str, int]:
     report = validate_seed_corpus()
     if report.errors:
@@ -74,19 +67,10 @@ def load_seed_corpus_into_database(
     ingest_result = ingest_directory(
         resolve_seed_corpus_root(),
         database_url=database_url,
-        queue_commit_chunk_size=queue_limit,
-        trigger_client=_LocalQueueTrigger(),
     )
-    processed = 0
-
-    while True:
-        batch = process_pending_ingest_queue(database_url, limit=queue_limit)
-        processed += batch.processed
-        if batch.processed == 0 and batch.retryable_errors == 0:
-            break
 
     return {
         "scanned": ingest_result.scanned,
         "enqueued": ingest_result.enqueued,
-        "processed": processed,
+        "processed": 0,
     }

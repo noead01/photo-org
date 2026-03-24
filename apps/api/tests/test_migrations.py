@@ -1,4 +1,5 @@
 import importlib.util
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,15 +10,28 @@ from app.processing.ingest import ingest_directory
 from app.storage import photos
 
 
-SAMPLES_DIR = Path("/mnt/d/Projects/photo-org/.worktrees/feature-issue-19-seed-corpus-load-path/apps/api/tests/fixtures/samples")
+def _resolve_seed_corpus_dir(start: Path | None = None) -> Path:
+    test_file = (start or Path(__file__)).resolve()
+    for parent in [test_file.parent, *test_file.parents]:
+        candidate = parent / "seed-corpus"
+        if candidate.is_dir():
+            return candidate
+    raise FileNotFoundError("Could not locate seed-corpus from test_migrations.py")
 
 
-class NoOpTriggerClient:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def process_pending_queue(self) -> None:
-        self.calls += 1
+SAMPLES_DIR = _resolve_seed_corpus_dir()
+SEED_CORPUS_SUBSET_PATHS = (
+    "seed-corpus/family-events/birthday-park/birthday_park_001.jpg",
+    "seed-corpus/family-events/birthday-park/birthday_park_002.jpeg",
+    "seed-corpus/family-events/birthday-park/birthday_park_003.heic",
+    "seed-corpus/family-events/birthday-park/birthday_park_004.png",
+    "seed-corpus/family-events/birthday-park/birthday_park_005.jpg",
+    "seed-corpus/family-events/birthday-park/birthday_park_006.jpg",
+    "seed-corpus/family-events/lake-weekend/lake_weekend_001.jpg",
+    "seed-corpus/family-events/lake-weekend/lake_weekend_002.heic",
+    "seed-corpus/family-events/lake-weekend/lake_weekend_003.png",
+    "seed-corpus/family-events/lake-weekend/lake_weekend_004.jpeg",
+)
 
 
 def test_upgrade_database_creates_schema(tmp_path):
@@ -90,17 +104,14 @@ def test_initial_postgresql_migration_does_not_create_vector_extension(monkeypat
 
 def test_ingest_requires_existing_schema(tmp_path):
     database_url = f"sqlite:///{tmp_path / 'missing-schema.db'}"
-    trigger_client = NoOpTriggerClient()
 
     result = ingest_directory(
         SAMPLES_DIR,
         database_url=database_url,
-        trigger_client=trigger_client,
     )
 
     assert result.errors
     assert "no such table: ingest_queue" in result.errors[0]
-    assert trigger_client.calls == 0
 
 
 def test_ingest_succeeds_after_running_migrations(tmp_path):
@@ -108,17 +119,22 @@ def test_ingest_succeeds_after_running_migrations(tmp_path):
 
     database_url = f"sqlite:///{tmp_path / 'ingest.db'}"
     upgrade_database(database_url)
-    trigger_client = NoOpTriggerClient()
+
+    staged_root = tmp_path / "seed-corpus"
+    for asset_path in SEED_CORPUS_SUBSET_PATHS:
+        relative_path = asset_path.removeprefix("seed-corpus/")
+        source = SAMPLES_DIR / relative_path
+        target = staged_root / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
 
     result = ingest_directory(
-        SAMPLES_DIR,
+        staged_root,
         database_url=database_url,
-        trigger_client=trigger_client,
     )
 
     assert result.errors == []
     assert result.enqueued == 10
-    assert trigger_client.calls == 1
 
     queue_store = IngestQueueStore(database_url)
     pending_rows = queue_store.list_pending()

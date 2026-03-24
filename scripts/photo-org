@@ -10,5 +10,6 @@ if [[ ! -x "${python_bin}" ]]; then
 fi
 
 export PYTHONPATH="${repo_root}/apps/api${PYTHONPATH:+:${PYTHONPATH}}"
+export PYTHONPATH="${repo_root}/apps/cli:${PYTHONPATH}"
 
-exec "${python_bin}" -m app.cli "$@"
+exec "${python_bin}" -m cli "$@"

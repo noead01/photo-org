@@ -59,7 +59,7 @@ The intended installation model is:
 - one background worker
 - one PostgreSQL database
 
-The preferred packaging model is Docker Compose.
+The preferred packaging model is Docker Compose, and the default local baseline is the Compose-managed `postgres` plus `db-service` stack.
 
 ### Prerequisites
 
@@ -80,13 +80,12 @@ CREATE EXTENSION IF NOT EXISTS vector;
 At a high level, setup should look like this:
 
 1. configure the application environment
-2. ensure the target PostgreSQL database already has the `vector` extension enabled
-3. run the application database migrations
-4. start the application stack
-5. open the web interface
-6. sign in as an admin
-7. add one or more watched folders
-8. let the system ingest the initial corpus
+2. start the Compose baseline with `make compose-up`
+3. rerun migrations with `make compose-migrate` if you need to repair an existing Compose volume
+4. open the web interface once the service is healthy
+5. sign in as an admin
+6. add one or more watched folders
+7. let the system ingest the initial corpus
 
 Once that is done, users should be able to browse, search, and validate faces from the web UI.
 

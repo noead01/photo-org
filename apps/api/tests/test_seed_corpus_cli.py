@@ -1,8 +1,10 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from app.cli import main
-from app.dev.seed_corpus import load_seed_corpus_into_database, validate_seed_corpus
+import app.dev.seed_corpus as seed_corpus
+from app.dev.seed_corpus import load_seed_corpus_into_database, resolve_seed_corpus_root, validate_seed_corpus
 
 
 def test_seed_corpus_validate_cli_succeeds_for_checked_in_manifest(capsys):
@@ -14,6 +16,20 @@ def test_seed_corpus_validate_cli_succeeds_for_checked_in_manifest(capsys):
     assert "validation=ok" in captured.out
 
 
+def test_resolve_seed_corpus_root_tracks_worktree_layout(tmp_path, monkeypatch):
+    worktree_root = tmp_path / "repo" / ".worktrees" / "issue-18-compose-dev-stack"
+    seed_corpus_dir = worktree_root / "seed-corpus"
+    seed_corpus_dir.mkdir(parents=True)
+
+    fake_module_file = worktree_root / "apps" / "api" / "app" / "dev" / "seed_corpus.py"
+    fake_module_file.parent.mkdir(parents=True)
+    fake_module_file.write_text("")
+
+    monkeypatch.setattr(seed_corpus, "__file__", str(fake_module_file))
+
+    assert resolve_seed_corpus_root() == seed_corpus_dir
+
+
 def test_seed_corpus_load_cli_runs_migrate_and_corpus_loader(tmp_path, monkeypatch):
     database_url = f"sqlite:///{tmp_path / 'seed-corpus.db'}"
     calls: list[tuple[str, str]] = []
@@ -23,9 +39,11 @@ def test_seed_corpus_load_cli_runs_migrate_and_corpus_loader(tmp_path, monkeypat
         lambda url: calls.append(("migrate", url)),
     )
     monkeypatch.setattr(
-        "app.cli.load_seed_corpus_into_database",
-        lambda **kwargs: calls.append(("load", kwargs["database_url"]))
-        or {"scanned": 24, "enqueued": 24, "processed": 24},
+        "app.cli._load_queue_client",
+        lambda: SimpleNamespace(
+            load_seed_corpus_into_queue=lambda **kwargs: calls.append(("load", kwargs["database_url"]))
+            or {"scanned": 24, "enqueued": 24, "processed": 0},
+        ),
     )
 
     exit_code = main(["seed-corpus", "load", "--database-url", database_url])
@@ -73,14 +91,8 @@ def test_validate_seed_corpus_reports_duplicate_file_content(tmp_path):
     assert any("duplicate sha256" in error for error in report.errors)
 
 
-def test_load_seed_corpus_into_database_uses_local_queue_processing(monkeypatch):
+def test_load_seed_corpus_into_database_uses_local_queue_loading(monkeypatch):
     calls: list[tuple[str, object]] = []
-    batches = iter(
-        [
-            type("Batch", (), {"processed": 24, "retryable_errors": 0})(),
-            type("Batch", (), {"processed": 0, "retryable_errors": 0})(),
-        ]
-    )
 
     monkeypatch.setattr(
         "app.dev.seed_corpus.validate_seed_corpus",
@@ -88,22 +100,19 @@ def test_load_seed_corpus_into_database_uses_local_queue_processing(monkeypatch)
     )
     monkeypatch.setattr(
         "app.dev.seed_corpus.ingest_directory",
-        lambda *args, **kwargs: calls.append(("ingest", kwargs.get("trigger_client")))
+        lambda *args, **kwargs: calls.append(("ingest", kwargs))
         or type(
             "Result",
             (),
             {"scanned": 24, "enqueued": 24, "inserted": 0, "updated": 0, "errors": []},
         )(),
     )
-    monkeypatch.setattr(
-        "app.dev.seed_corpus.process_pending_ingest_queue",
-        lambda database_url, limit: calls.append(("process", limit))
-        or next(batches),
-    )
 
-    result = load_seed_corpus_into_database(database_url="sqlite:///seed.db", queue_limit=10)
+    result = load_seed_corpus_into_database(database_url="sqlite:///seed.db")
 
-    assert result == {"scanned": 24, "enqueued": 24, "processed": 24}
+    assert result == {"scanned": 24, "enqueued": 24, "processed": 0}
     assert calls[0][0] == "ingest"
-    assert calls[0][1] is not None
-    assert calls[1:] == [("process", 10), ("process", 10)]
+    assert calls[0][1] == {
+        "database_url": "sqlite:///seed.db",
+    }
+    assert calls[1:] == []

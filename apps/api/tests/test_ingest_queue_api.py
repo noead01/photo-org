@@ -168,3 +168,9 @@ def test_process_queue_endpoint_processes_pending_rows_for_worker_role(
         "failed": 0,
         "retryable_errors": 0,
     }
+
+
+def test_search_endpoint_is_not_exposed_by_runtime_app(client: TestClient):
+    response = client.post("/api/v1/search", json={})
+
+    assert response.status_code == 404
