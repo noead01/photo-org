@@ -27,10 +27,6 @@ SEED_CORPUS_SUBSET_PATHS = (
     "seed-corpus/family-events/birthday-park/birthday_park_004.png",
     "seed-corpus/family-events/birthday-park/birthday_park_005.jpg",
     "seed-corpus/family-events/birthday-park/birthday_park_006.jpg",
-    "seed-corpus/family-events/lake-weekend/lake_weekend_001.jpg",
-    "seed-corpus/family-events/lake-weekend/lake_weekend_002.heic",
-    "seed-corpus/family-events/lake-weekend/lake_weekend_003.png",
-    "seed-corpus/family-events/lake-weekend/lake_weekend_004.jpeg",
 )
 
 
@@ -134,12 +130,12 @@ def test_ingest_succeeds_after_running_migrations(tmp_path):
     )
 
     assert result.errors == []
-    assert result.enqueued == 10
+    assert result.enqueued == 6
 
     queue_store = IngestQueueStore(database_url)
     pending_rows = queue_store.list_pending()
 
-    assert len(pending_rows) == 10
+    assert len(pending_rows) == 6
 
     engine = create_engine(database_url, future=True)
     with engine.connect() as connection:

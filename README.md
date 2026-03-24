@@ -17,6 +17,8 @@ For other audiences:
 - see [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow and contribution standards
 - see [docs/adr/README.md](docs/adr/README.md) for architectural decision records
 
+For contributor setup and validation commands, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## What It Does
 
 Photo Organizer is intended to support a workflow like this:

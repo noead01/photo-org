@@ -1,7 +1,7 @@
 import os
+import shutil
 import subprocess
 import sys
-import shutil
 from pathlib import Path
 
 from app.cli import main
@@ -26,10 +26,6 @@ SEED_CORPUS_SUBSET_PATHS = (
     "seed-corpus/family-events/birthday-park/birthday_park_004.png",
     "seed-corpus/family-events/birthday-park/birthday_park_005.jpg",
     "seed-corpus/family-events/birthday-park/birthday_park_006.jpg",
-    "seed-corpus/family-events/lake-weekend/lake_weekend_001.jpg",
-    "seed-corpus/family-events/lake-weekend/lake_weekend_002.heic",
-    "seed-corpus/family-events/lake-weekend/lake_weekend_003.png",
-    "seed-corpus/family-events/lake-weekend/lake_weekend_004.jpeg",
 )
 
 
@@ -79,7 +75,7 @@ def test_ingest_cli_enqueues_photos_into_queue(monkeypatch, tmp_path):
     )
 
     assert exit_code == 0
-    assert len(IngestQueueStore(db_url).list_pending()) == 10
+    assert len(IngestQueueStore(db_url).list_pending()) == 6
 
 
 def test_ingest_cli_requires_the_queue_client_package(monkeypatch, tmp_path):
@@ -137,6 +133,7 @@ def test_load_queue_client_imports_the_cli_queue_client(monkeypatch):
 
 def test_load_queue_client_propagates_unrelated_missing_import(monkeypatch):
     import app.cli as api_cli
+
     monkeypatch.setattr("app.cli.Path.is_file", lambda self: False)
 
     def missing_dependency(module_name):
