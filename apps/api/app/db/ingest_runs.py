@@ -94,9 +94,14 @@ class IngestRunStore:
             )
         )
         if connection is not None:
-            connection.execute(statement)
+            result = connection.execute(statement)
+            if not result.rowcount:
+                raise LookupError(f"missing ingest run: {ingest_run_id}")
             return
 
         with self._session_factory() as session:
-            session.execute(statement)
+            result = session.execute(statement)
+            if not result.rowcount:
+                session.rollback()
+                raise LookupError(f"missing ingest run: {ingest_run_id}")
             session.commit()

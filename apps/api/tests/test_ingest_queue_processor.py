@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.engine import Connection
 
@@ -642,3 +643,76 @@ def test_ingest_run_store_is_exported_from_app_db(tmp_path):
     store = IngestRunStore(database_url)
 
     assert isinstance(store, IngestRunStore)
+
+
+def test_ingest_run_store_manages_its_own_persistence_without_explicit_connection(tmp_path):
+    from app.db import IngestRunFileOutcome, IngestRunStore
+
+    database_url = f"sqlite:///{tmp_path / 'ingest-run-store-self-managed.db'}"
+    upgrade_database(database_url)
+    queue_store = IngestQueueStore(database_url)
+    run_store = IngestRunStore(database_url)
+
+    queue_id = queue_store.enqueue(
+        payload_type="photo_metadata",
+        payload=SAMPLE_PAYLOAD,
+        idempotency_key="ingest-run-store-self-managed",
+    )
+
+    ingest_run_id = run_store.create_run()
+    run_store.append_file_outcome(
+        ingest_run_id,
+        IngestRunFileOutcome(
+            ingest_queue_id=queue_id,
+            path=SAMPLE_PAYLOAD["path"],
+            outcome="failed",
+            error_detail="unsupported payload",
+        ),
+    )
+    run_store.finalize_run(
+        ingest_run_id,
+        status="failed",
+        files_seen=1,
+        files_created=0,
+        files_updated=0,
+        error_count=1,
+        error_summary="unsupported payload",
+    )
+
+    run_rows = load_ingest_runs(database_url)
+    file_rows = load_ingest_run_files(database_url)
+
+    assert len(run_rows) == 1
+    assert run_rows[0]["ingest_run_id"] == ingest_run_id
+    assert run_rows[0]["status"] == "failed"
+    assert run_rows[0]["completed_ts"] is not None
+    assert run_rows[0]["files_seen"] == 1
+    assert run_rows[0]["files_created"] == 0
+    assert run_rows[0]["files_updated"] == 0
+    assert run_rows[0]["error_count"] == 1
+    assert run_rows[0]["error_summary"] == "unsupported payload"
+
+    assert len(file_rows) == 1
+    assert file_rows[0]["ingest_run_id"] == ingest_run_id
+    assert file_rows[0]["ingest_queue_id"] == queue_id
+    assert file_rows[0]["outcome"] == "failed"
+    assert file_rows[0]["error_detail"] == "unsupported payload"
+
+
+def test_ingest_run_store_finalize_run_raises_when_run_is_missing(tmp_path):
+    from app.db import IngestRunStore
+
+    database_url = f"sqlite:///{tmp_path / 'ingest-run-store-missing-run.db'}"
+    upgrade_database(database_url)
+    run_store = IngestRunStore(database_url)
+
+    with pytest.raises(LookupError, match="missing ingest run"):
+        run_store.finalize_run(
+            "missing-ingest-run-id",
+            status="completed",
+            files_seen=1,
+            files_created=1,
+            files_updated=0,
+            error_count=0,
+            error_summary=None,
+        )
