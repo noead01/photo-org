@@ -84,6 +84,7 @@ def test_upgrade_database_creates_ingest_run_files_table_with_indexes(tmp_path):
 
         tables = set(inspector.get_table_names())
         columns = {column["name"]: column for column in inspector.get_columns("ingest_run_files")}
+        foreign_keys = inspector.get_foreign_keys("ingest_run_files")
         indexes = inspector.get_indexes("ingest_run_files")
 
     assert "ingest_run_files" in tables
@@ -94,10 +95,60 @@ def test_upgrade_database_creates_ingest_run_files_table_with_indexes(tmp_path):
     assert columns["error_detail"]["nullable"] is True
     assert columns["created_ts"]["default"] is not None
     assert {
+        tuple(foreign_key["constrained_columns"]): foreign_key for foreign_key in foreign_keys
+    } == {
+        ("ingest_run_id",): {
+            "name": None,
+            "constrained_columns": ["ingest_run_id"],
+            "referred_schema": None,
+            "referred_table": "ingest_runs",
+            "referred_columns": ["ingest_run_id"],
+            "options": {"ondelete": "CASCADE"},
+        },
+        ("ingest_queue_id",): {
+            "name": None,
+            "constrained_columns": ["ingest_queue_id"],
+            "referred_schema": None,
+            "referred_table": "ingest_queue",
+            "referred_columns": ["ingest_queue_id"],
+            "options": {"ondelete": "CASCADE"},
+        },
+    }
+    assert {
         "idx_ingest_run_files_ingest_run_id",
         "idx_ingest_run_files_ingest_queue_id",
         "idx_ingest_run_files_run_id_outcome",
     } <= {index["name"] for index in indexes}
+
+
+def test_ingest_run_files_migration_downgrade_drops_indexes_before_table(monkeypatch):
+    revision_path = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "20260323_000002_add_ingest_run_files.py"
+    spec = importlib.util.spec_from_file_location("ingest_run_files_revision", revision_path)
+    assert spec is not None
+    assert spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    recorded_calls: list[tuple[str, str, str | None]] = []
+
+    monkeypatch.setattr(
+        migration.op,
+        "drop_index",
+        lambda index_name, table_name=None: recorded_calls.append(("drop_index", index_name, table_name)),
+    )
+    monkeypatch.setattr(
+        migration.op,
+        "drop_table",
+        lambda table_name: recorded_calls.append(("drop_table", table_name, None)),
+    )
+
+    migration.downgrade()
+
+    assert recorded_calls == [
+        ("drop_index", "idx_ingest_run_files_run_id_outcome", "ingest_run_files"),
+        ("drop_index", "idx_ingest_run_files_ingest_queue_id", "ingest_run_files"),
+        ("drop_index", "idx_ingest_run_files_ingest_run_id", "ingest_run_files"),
+        ("drop_table", "ingest_run_files", None),
+    ]
 
 
 def test_initial_postgresql_migration_does_not_create_vector_extension(monkeypatch):
