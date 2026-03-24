@@ -71,6 +71,35 @@ def test_upgrade_database_creates_ingest_queue_table(tmp_path):
     )
 
 
+def test_upgrade_database_creates_ingest_run_files_table_with_indexes(tmp_path):
+    from app.migrations import upgrade_database
+
+    database_url = f"sqlite:///{tmp_path / 'ingest-run-files.db'}"
+
+    upgrade_database(database_url)
+
+    engine = create_engine(database_url, future=True)
+    with engine.connect() as connection:
+        inspector = inspect(connection)
+
+        tables = set(inspector.get_table_names())
+        columns = {column["name"]: column for column in inspector.get_columns("ingest_run_files")}
+        indexes = inspector.get_indexes("ingest_run_files")
+
+    assert "ingest_run_files" in tables
+    assert columns["ingest_run_id"]["nullable"] is False
+    assert columns["ingest_queue_id"]["nullable"] is False
+    assert columns["path"]["nullable"] is False
+    assert columns["outcome"]["nullable"] is False
+    assert columns["error_detail"]["nullable"] is True
+    assert columns["created_ts"]["default"] is not None
+    assert {
+        "idx_ingest_run_files_ingest_run_id",
+        "idx_ingest_run_files_ingest_queue_id",
+        "idx_ingest_run_files_run_id_outcome",
+    } <= {index["name"] for index in indexes}
+
+
 def test_initial_postgresql_migration_does_not_create_vector_extension(monkeypatch):
     revision_path = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "20260321_000001_initial_schema.py"
     spec = importlib.util.spec_from_file_location("initial_schema_revision", revision_path)
