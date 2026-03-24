@@ -132,6 +132,7 @@ class IngestQueueStore:
     def mark_completed(
         self,
         ingest_queue_id: str,
+        last_error: str | None = None,
         *,
         connection: Connection | None = None,
     ) -> None:
@@ -142,7 +143,7 @@ class IngestQueueStore:
             .values(
                 status="completed",
                 processed_ts=datetime.now(tz=UTC),
-                last_error=None,
+                last_error=last_error,
             )
         )
         if connection is not None:

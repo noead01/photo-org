@@ -74,10 +74,16 @@ def test_queue_trigger_client_falls_back_to_builtin_default(monkeypatch):
     ]
 
 
-def test_module_main_exits_with_cli_status(monkeypatch):
-    monkeypatch.setattr("app.cli.main", lambda: 7)
+def test_module_main_runs_uvicorn_with_expected_defaults(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        "uvicorn.run",
+        lambda app, *, host, port: calls.append((app, host, port)),
+    )
 
     with pytest.raises(SystemExit) as exc_info:
         runpy.run_module("app.__main__", run_name="__main__")
 
-    assert exc_info.value.code == 7
+    assert exc_info.value.code is None
+    assert calls == [("app.main:app", "0.0.0.0", 8000)]

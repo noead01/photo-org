@@ -8,7 +8,8 @@ from sqlalchemy.exc import IntegrityError
 
 from app.db.queue import IngestQueueStore, PROCESSING_LEASE_SECONDS
 from app.db.session import create_db_engine
-from app.processing.ingest import PhotoRecord, upsert_photo
+from app.processing.faces import OpenCvFaceDetector
+from app.processing.ingest import PhotoRecord, store_face_detections, upsert_photo
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,7 @@ def process_pending_ingest_queue(
     database_url: str | Path | None = None,
     *,
     limit: int = 100,
+    face_detector=None,
 ) -> ProcessQueueResult:
     queue_store = IngestQueueStore(database_url)
     processable_rows = queue_store.list_processable(limit=limit)
@@ -31,6 +33,7 @@ def process_pending_ingest_queue(
         return result
 
     engine = create_db_engine(database_url)
+    detector = face_detector if face_detector is not None else OpenCvFaceDetector()
     processed = 0
     failed = 0
     retryable_errors = 0
@@ -62,8 +65,14 @@ def process_pending_ingest_queue(
                     failed += 1
                     continue
                 upsert_photo(connection, record)
+                detection_warning = _apply_face_detection(
+                    connection,
+                    record,
+                    detector,
+                )
                 queue_store.mark_completed(
                     claimed_row.ingest_queue_id,
+                    last_error=detection_warning,
                     connection=connection,
                 )
             processed += 1
@@ -108,3 +117,13 @@ def _parse_optional_timestamp(value: str | None) -> datetime | None:
     if value is None:
         return None
     return datetime.fromisoformat(value)
+
+
+def _apply_face_detection(connection, record: PhotoRecord, detector) -> str | None:
+    try:
+        detections = detector.detect(Path(record.path))
+    except Exception as exc:
+        return f"face detection failed: {exc}"
+
+    store_face_detections(connection, record.photo_id, detections)
+    return None

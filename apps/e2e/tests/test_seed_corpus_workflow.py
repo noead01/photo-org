@@ -30,8 +30,14 @@ def test_seed_corpus_can_be_ingested_and_persisted_end_to_end(seed_corpus_databa
     engine = create_db_engine(seed_corpus_database_url)
     with engine.connect() as connection:
         photo_count = connection.execute(select(func.count()).select_from(photos)).scalar_one()
+        detected_photo_count = connection.execute(
+            select(func.count())
+            .select_from(photos)
+            .where(photos.c.faces_detected_ts.is_not(None))
+        ).scalar_one()
 
     assert photo_count == report.asset_count
+    assert detected_photo_count > 0
 
     client = TestClient(app)
     response = client.get("/healthz")
