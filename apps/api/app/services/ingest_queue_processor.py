@@ -6,6 +6,7 @@ from pathlib import Path
 
 from sqlalchemy.exc import IntegrityError
 
+from app.db import IngestRunFileOutcome, IngestRunStore
 from app.db.queue import IngestQueueStore, PROCESSING_LEASE_SECONDS
 from app.db.session import create_db_engine
 from app.processing.faces import OpenCvFaceDetector
@@ -34,10 +35,18 @@ def process_pending_ingest_queue(
 
     engine = create_db_engine(database_url)
     detector = face_detector if face_detector is not None else OpenCvFaceDetector()
+    run_store = IngestRunStore(database_url)
+    ingest_run_id = run_store.create_run()
     processed = 0
     failed = 0
     retryable_errors = 0
+    files_seen = 0
+    files_created = 0
+    files_updated = 0
+    error_messages: list[str] = []
     for row in processable_rows:
+        claimed_row = None
+        claimed_path = _payload_path(row.payload_json)
         try:
             with engine.begin() as connection:
                 claimed_row = queue_store.begin_processing_attempt(
@@ -46,43 +55,117 @@ def process_pending_ingest_queue(
                 )
                 if claimed_row is None:
                     continue
+                files_seen += 1
+                claimed_path = _payload_path(claimed_row.payload_json)
                 if claimed_row.payload_type != "photo_metadata":
+                    error_detail = f"Unsupported payload_type: {claimed_row.payload_type}"
+                    run_store.append_file_outcome(
+                        ingest_run_id,
+                        IngestRunFileOutcome(
+                            ingest_queue_id=claimed_row.ingest_queue_id,
+                            path=claimed_path,
+                            outcome="failed",
+                            error_detail=error_detail,
+                        ),
+                        connection=connection,
+                    )
                     queue_store.mark_failed(
                         claimed_row.ingest_queue_id,
-                        f"Unsupported payload_type: {claimed_row.payload_type}",
+                        error_detail,
                         connection=connection,
                     )
                     failed += 1
+                    error_messages.append(error_detail)
                     continue
                 try:
                     record = payload_to_photo_record(claimed_row.payload_json)
                 except (KeyError, TypeError, ValueError) as exc:
+                    error_detail = str(exc)
+                    run_store.append_file_outcome(
+                        ingest_run_id,
+                        IngestRunFileOutcome(
+                            ingest_queue_id=claimed_row.ingest_queue_id,
+                            path=claimed_path,
+                            outcome="failed",
+                            error_detail=error_detail,
+                        ),
+                        connection=connection,
+                    )
                     queue_store.mark_failed(
                         claimed_row.ingest_queue_id,
-                        str(exc),
+                        error_detail,
                         connection=connection,
                     )
                     failed += 1
+                    error_messages.append(error_detail)
                     continue
-                upsert_photo(connection, record)
+                created = upsert_photo(connection, record)
                 detection_warning = _apply_face_detection(
                     connection,
                     record,
                     detector,
+                )
+                run_store.append_file_outcome(
+                    ingest_run_id,
+                    IngestRunFileOutcome(
+                        ingest_queue_id=claimed_row.ingest_queue_id,
+                        path=record.path,
+                        outcome="completed",
+                        error_detail=detection_warning,
+                    ),
+                    connection=connection,
                 )
                 queue_store.mark_completed(
                     claimed_row.ingest_queue_id,
                     last_error=detection_warning,
                     connection=connection,
                 )
+                if created:
+                    files_created += 1
+                else:
+                    files_updated += 1
+                if detection_warning is not None:
+                    error_messages.append(detection_warning)
             processed += 1
         except IntegrityError as exc:
-            queue_store.record_permanent_failure(row.ingest_queue_id, str(exc))
+            error_detail = str(exc)
+            queue_store.record_permanent_failure(row.ingest_queue_id, error_detail)
+            run_store.append_file_outcome(
+                ingest_run_id,
+                IngestRunFileOutcome(
+                    ingest_queue_id=row.ingest_queue_id,
+                    path=claimed_path,
+                    outcome="failed",
+                    error_detail=error_detail,
+                ),
+            )
             failed += 1
+            error_messages.append(error_detail)
         except Exception as exc:
-            queue_store.record_retryable_failure(row.ingest_queue_id, str(exc))
+            error_detail = str(exc)
+            queue_store.record_retryable_failure(row.ingest_queue_id, error_detail)
+            run_store.append_file_outcome(
+                ingest_run_id,
+                IngestRunFileOutcome(
+                    ingest_queue_id=row.ingest_queue_id,
+                    path=claimed_path,
+                    outcome="retryable_error",
+                    error_detail=error_detail,
+                ),
+            )
             retryable_errors += 1
+            error_messages.append(error_detail)
             continue
+
+    run_store.finalize_run(
+        ingest_run_id,
+        status=_run_status(failed=failed, retryable_errors=retryable_errors),
+        files_seen=files_seen,
+        files_created=files_created,
+        files_updated=files_updated,
+        error_count=len(error_messages),
+        error_summary=_error_summary(error_messages),
+    )
 
     return ProcessQueueResult(
         processed=processed,
@@ -117,6 +200,26 @@ def _parse_optional_timestamp(value: str | None) -> datetime | None:
     if value is None:
         return None
     return datetime.fromisoformat(value)
+
+
+def _payload_path(payload: object) -> str:
+    if isinstance(payload, dict):
+        path = payload.get("path")
+        if isinstance(path, str) and path:
+            return path
+    return "<unknown>"
+
+
+def _run_status(*, failed: int, retryable_errors: int) -> str:
+    if failed or retryable_errors:
+        return "failed"
+    return "completed"
+
+
+def _error_summary(error_messages: list[str]) -> str | None:
+    if not error_messages:
+        return None
+    return "\n".join(error_messages)
 
 
 def _apply_face_detection(connection, record: PhotoRecord, detector) -> str | None:

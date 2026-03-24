@@ -36,6 +36,10 @@ SAMPLE_PAYLOAD = {
 }
 
 
+def build_payload(**overrides):
+    return {**SAMPLE_PAYLOAD, **overrides}
+
+
 def load_photo_paths(database_url: str) -> list[str]:
     engine = create_engine(database_url, future=True)
     with engine.connect() as connection:
@@ -177,6 +181,58 @@ def test_process_pending_rows_is_idempotent_for_repeated_trigger_calls(tmp_path)
     assert second.processed == 0
 
 
+def test_process_pending_rows_records_ingest_run_with_created_updated_counts_and_warnings(
+    tmp_path,
+):
+    database_url = f"sqlite:///{tmp_path / 'queue-processor-ingest-run-success.db'}"
+    upgrade_database(database_url)
+    queue_store = IngestQueueStore(database_url)
+
+    queue_store.enqueue(
+        payload_type="photo_metadata",
+        payload=build_payload(),
+        idempotency_key="photo-created",
+    )
+    queue_store.enqueue(
+        payload_type="photo_metadata",
+        payload=build_payload(filesize=456, modified_ts="2024-01-03T00:00:00+00:00"),
+        idempotency_key="photo-updated",
+    )
+
+    result = process_pending_ingest_queue(
+        database_url,
+        limit=10,
+        face_detector=RaisingFaceDetector("detector exploded"),
+    )
+
+    run_rows = load_ingest_runs(database_url)
+    file_rows = load_ingest_run_files(database_url)
+
+    assert result.processed == 2
+    assert result.failed == 0
+    assert result.retryable_errors == 0
+
+    assert len(run_rows) == 1
+    assert run_rows[0]["status"] == "completed"
+    assert run_rows[0]["completed_ts"] is not None
+    assert run_rows[0]["files_seen"] == 2
+    assert run_rows[0]["files_created"] == 1
+    assert run_rows[0]["files_updated"] == 1
+    assert run_rows[0]["files_missing"] == 0
+    assert run_rows[0]["error_count"] == 2
+    assert "face detection failed: detector exploded" in run_rows[0]["error_summary"]
+
+    assert len(file_rows) == 2
+    assert {row["ingest_queue_id"] for row in file_rows} == {
+        row.ingest_queue_id for row in queue_store.list_by_status("completed")
+    }
+    assert {row["outcome"] for row in file_rows} == {"completed"}
+    assert {
+        row["error_detail"]
+        for row in file_rows
+    } == {"face detection failed: detector exploded"}
+
+
 def test_process_pending_rows_marks_unsupported_payload_failed_without_stranding(tmp_path):
     database_url = f"sqlite:///{tmp_path / 'queue-processor-unsupported.db'}"
     upgrade_database(database_url)
@@ -198,6 +254,68 @@ def test_process_pending_rows_marks_unsupported_payload_failed_without_stranding
     assert len(failed_rows) == 1
     assert failed_rows[0].attempt_count == 1
     assert "Unsupported payload_type" in failed_rows[0].last_error
+
+
+def test_process_pending_rows_records_failed_and_retryable_file_outcomes(tmp_path, monkeypatch):
+    database_url = f"sqlite:///{tmp_path / 'queue-processor-ingest-run-errors.db'}"
+    upgrade_database(database_url)
+    queue_store = IngestQueueStore(database_url)
+
+    unsupported_queue_id = queue_store.enqueue(
+        payload_type="unknown_payload",
+        payload=build_payload(path="queued/unsupported.heic"),
+        idempotency_key="unsupported-payload",
+    )
+    retryable_payload = build_payload(
+        photo_id="photo-retryable",
+        path="queued/retryable.heic",
+    )
+    retryable_queue_id = queue_store.enqueue(
+        payload_type="photo_metadata",
+        payload=retryable_payload,
+        idempotency_key="retryable-payload",
+    )
+
+    original_upsert = ingest_queue_processor.upsert_photo
+
+    def flaky_upsert(connection, record):
+        if record.path == retryable_payload["path"]:
+            raise RuntimeError("transient db outage")
+        return original_upsert(connection, record)
+
+    monkeypatch.setattr(ingest_queue_processor, "upsert_photo", flaky_upsert)
+
+    result = process_pending_ingest_queue(database_url, limit=10)
+
+    run_rows = load_ingest_runs(database_url)
+    file_rows = load_ingest_run_files(database_url)
+    file_rows_by_queue_id = {row["ingest_queue_id"]: row for row in file_rows}
+
+    assert result.processed == 0
+    assert result.failed == 1
+    assert result.retryable_errors == 1
+
+    assert len(run_rows) == 1
+    assert run_rows[0]["status"] == "failed"
+    assert run_rows[0]["completed_ts"] is not None
+    assert run_rows[0]["files_seen"] == 2
+    assert run_rows[0]["files_created"] == 0
+    assert run_rows[0]["files_updated"] == 0
+    assert run_rows[0]["files_missing"] == 0
+    assert run_rows[0]["error_count"] == 2
+    assert "Unsupported payload_type" in run_rows[0]["error_summary"]
+    assert "transient db outage" in run_rows[0]["error_summary"]
+
+    assert len(file_rows) == 2
+    assert file_rows_by_queue_id[unsupported_queue_id]["path"] == "queued/unsupported.heic"
+    assert file_rows_by_queue_id[unsupported_queue_id]["outcome"] == "failed"
+    assert (
+        "Unsupported payload_type"
+        in file_rows_by_queue_id[unsupported_queue_id]["error_detail"]
+    )
+    assert file_rows_by_queue_id[retryable_queue_id]["path"] == retryable_payload["path"]
+    assert file_rows_by_queue_id[retryable_queue_id]["outcome"] == "retryable_error"
+    assert "transient db outage" in file_rows_by_queue_id[retryable_queue_id]["error_detail"]
 
 
 def test_process_pending_rows_persists_detected_faces_for_photo_metadata(tmp_path):
@@ -466,6 +584,8 @@ def test_process_pending_rows_does_not_reclaim_actively_leased_processing_rows(t
     assert load_photo_paths(database_url) == []
     assert len(processing_rows) == 1
     assert processing_rows[0].ingest_queue_id == queue_id
+    assert load_ingest_runs(database_url) == []
+    assert load_ingest_run_files(database_url) == []
 
 
 def test_process_pending_rows_reclaims_processing_rows_only_after_lease_expires(tmp_path):
