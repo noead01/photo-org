@@ -44,6 +44,7 @@ def process_pending_ingest_queue(
     files_created = 0
     files_updated = 0
     error_messages: list[str] = []
+    file_outcomes: list[str] = []
     for row in processable_rows:
         claimed_row = None
         claimed_path = _payload_path(row.payload_json)
@@ -74,6 +75,7 @@ def process_pending_ingest_queue(
                         error_detail,
                         connection=connection,
                     )
+                    file_outcomes.append("failed")
                     failed += 1
                     error_messages.append(error_detail)
                     continue
@@ -96,6 +98,7 @@ def process_pending_ingest_queue(
                         error_detail,
                         connection=connection,
                     )
+                    file_outcomes.append("failed")
                     failed += 1
                     error_messages.append(error_detail)
                     continue
@@ -120,6 +123,7 @@ def process_pending_ingest_queue(
                     last_error=detection_warning,
                     connection=connection,
                 )
+                file_outcomes.append("completed")
                 if created:
                     files_created += 1
                 else:
@@ -139,6 +143,7 @@ def process_pending_ingest_queue(
                     error_detail=error_detail,
                 ),
             )
+            file_outcomes.append("failed")
             failed += 1
             error_messages.append(error_detail)
         except Exception as exc:
@@ -153,13 +158,14 @@ def process_pending_ingest_queue(
                     error_detail=error_detail,
                 ),
             )
+            file_outcomes.append("retryable_error")
             retryable_errors += 1
             error_messages.append(error_detail)
             continue
 
     run_store.finalize_run(
         ingest_run_id,
-        status=_run_status(failed=failed, retryable_errors=retryable_errors),
+        status=_run_status(file_outcomes),
         files_seen=files_seen,
         files_created=files_created,
         files_updated=files_updated,
@@ -210,16 +216,36 @@ def _payload_path(payload: object) -> str:
     return "<unknown>"
 
 
-def _run_status(*, failed: int, retryable_errors: int) -> str:
-    if failed or retryable_errors:
+def _run_status(file_outcomes: list[str]) -> str:
+    if file_outcomes and all(outcome == "completed" for outcome in file_outcomes):
+        return "completed"
+    if file_outcomes and all(outcome == "failed" for outcome in file_outcomes):
         return "failed"
-    return "completed"
+    return "partial"
 
 
 def _error_summary(error_messages: list[str]) -> str | None:
     if not error_messages:
         return None
-    return "\n".join(error_messages)
+    distinct_messages = _distinct_error_messages(error_messages)
+    max_summary_entries = 3
+    summary_entries = distinct_messages[:max_summary_entries]
+    if len(distinct_messages) > max_summary_entries:
+        summary_entries.append(
+            f"(+{len(distinct_messages) - max_summary_entries} more distinct errors)"
+        )
+    return "\n".join(summary_entries)
+
+
+def _distinct_error_messages(error_messages: list[str]) -> list[str]:
+    seen: set[str] = set()
+    distinct_messages: list[str] = []
+    for error_message in error_messages:
+        if error_message in seen:
+            continue
+        seen.add(error_message)
+        distinct_messages.append(error_message)
+    return distinct_messages
 
 
 def _apply_face_detection(connection, record: PhotoRecord, detector) -> str | None:

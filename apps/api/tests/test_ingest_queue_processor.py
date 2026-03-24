@@ -116,6 +116,21 @@ def mark_queue_row_processing(
         )
 
 
+def set_queue_row_enqueued_ts(
+    database_url: str,
+    queue_id: str,
+    *,
+    enqueued_ts: datetime,
+) -> None:
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            update(ingest_queue)
+            .where(ingest_queue.c.ingest_queue_id == queue_id)
+            .values(enqueued_ts=enqueued_ts)
+        )
+
+
 def seed_existing_photo_with_same_photo_id(database_url: str) -> None:
     engine = create_engine(database_url, future=True)
     with engine.begin() as connection:
@@ -220,7 +235,7 @@ def test_process_pending_rows_records_ingest_run_with_created_updated_counts_and
     assert run_rows[0]["files_updated"] == 1
     assert run_rows[0]["files_missing"] == 0
     assert run_rows[0]["error_count"] == 2
-    assert "face detection failed: detector exploded" in run_rows[0]["error_summary"]
+    assert run_rows[0]["error_summary"] == "face detection failed: detector exploded"
 
     assert len(file_rows) == 2
     assert {row["ingest_queue_id"] for row in file_rows} == {
@@ -254,6 +269,16 @@ def test_process_pending_rows_marks_unsupported_payload_failed_without_stranding
     assert len(failed_rows) == 1
     assert failed_rows[0].attempt_count == 1
     assert "Unsupported payload_type" in failed_rows[0].last_error
+    run_rows = load_ingest_runs(database_url)
+    file_rows = load_ingest_run_files(database_url)
+    assert len(run_rows) == 1
+    assert run_rows[0]["status"] == "failed"
+    assert run_rows[0]["files_seen"] == 1
+    assert run_rows[0]["error_count"] == 1
+    assert run_rows[0]["error_summary"] == "Unsupported payload_type: unknown_payload"
+    assert len(file_rows) == 1
+    assert file_rows[0]["outcome"] == "failed"
+    assert file_rows[0]["error_detail"] == "Unsupported payload_type: unknown_payload"
 
 
 def test_process_pending_rows_records_failed_and_retryable_file_outcomes(tmp_path, monkeypatch):
@@ -276,6 +301,14 @@ def test_process_pending_rows_records_failed_and_retryable_file_outcomes(tmp_pat
         idempotency_key="retryable-payload",
     )
 
+    base_time = datetime(2024, 1, 1, tzinfo=UTC)
+    set_queue_row_enqueued_ts(database_url, unsupported_queue_id, enqueued_ts=base_time)
+    set_queue_row_enqueued_ts(
+        database_url,
+        retryable_queue_id,
+        enqueued_ts=base_time + timedelta(seconds=1),
+    )
+
     original_upsert = ingest_queue_processor.upsert_photo
 
     def flaky_upsert(connection, record):
@@ -296,15 +329,17 @@ def test_process_pending_rows_records_failed_and_retryable_file_outcomes(tmp_pat
     assert result.retryable_errors == 1
 
     assert len(run_rows) == 1
-    assert run_rows[0]["status"] == "failed"
+    assert run_rows[0]["status"] == "partial"
     assert run_rows[0]["completed_ts"] is not None
     assert run_rows[0]["files_seen"] == 2
     assert run_rows[0]["files_created"] == 0
     assert run_rows[0]["files_updated"] == 0
     assert run_rows[0]["files_missing"] == 0
     assert run_rows[0]["error_count"] == 2
-    assert "Unsupported payload_type" in run_rows[0]["error_summary"]
-    assert "transient db outage" in run_rows[0]["error_summary"]
+    assert (
+        run_rows[0]["error_summary"]
+        == "Unsupported payload_type: unknown_payload\ntransient db outage"
+    )
 
     assert len(file_rows) == 2
     assert file_rows_by_queue_id[unsupported_queue_id]["path"] == "queued/unsupported.heic"
@@ -316,6 +351,69 @@ def test_process_pending_rows_records_failed_and_retryable_file_outcomes(tmp_pat
     assert file_rows_by_queue_id[retryable_queue_id]["path"] == retryable_payload["path"]
     assert file_rows_by_queue_id[retryable_queue_id]["outcome"] == "retryable_error"
     assert "transient db outage" in file_rows_by_queue_id[retryable_queue_id]["error_detail"]
+
+
+def test_process_pending_rows_summarizes_distinct_errors_in_first_seen_order(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'queue-processor-ingest-run-summary.db'}"
+    upgrade_database(database_url)
+    queue_store = IngestQueueStore(database_url)
+
+    queue_id_a = queue_store.enqueue(
+        payload_type="unsupported_a",
+        payload=build_payload(path="queued/a.heic"),
+        idempotency_key="unsupported-a",
+    )
+    queue_id_b = queue_store.enqueue(
+        payload_type="unsupported_b",
+        payload=build_payload(path="queued/b.heic", photo_id="photo-b"),
+        idempotency_key="unsupported-b",
+    )
+    queue_id_c = queue_store.enqueue(
+        payload_type="unsupported_c",
+        payload=build_payload(path="queued/c.heic", photo_id="photo-c"),
+        idempotency_key="unsupported-c",
+    )
+    queue_id_d = queue_store.enqueue(
+        payload_type="unsupported_d",
+        payload=build_payload(path="queued/d.heic", photo_id="photo-d"),
+        idempotency_key="unsupported-d",
+    )
+
+    base_time = datetime(2024, 1, 1, tzinfo=UTC)
+    set_queue_row_enqueued_ts(database_url, queue_id_a, enqueued_ts=base_time)
+    set_queue_row_enqueued_ts(
+        database_url,
+        queue_id_b,
+        enqueued_ts=base_time + timedelta(seconds=1),
+    )
+    set_queue_row_enqueued_ts(
+        database_url,
+        queue_id_c,
+        enqueued_ts=base_time + timedelta(seconds=2),
+    )
+    set_queue_row_enqueued_ts(
+        database_url,
+        queue_id_d,
+        enqueued_ts=base_time + timedelta(seconds=3),
+    )
+
+    result = process_pending_ingest_queue(database_url, limit=10)
+
+    run_rows = load_ingest_runs(database_url)
+
+    assert result.processed == 0
+    assert result.failed == 4
+    assert result.retryable_errors == 0
+    assert len(run_rows) == 1
+    assert run_rows[0]["status"] == "failed"
+    assert run_rows[0]["error_count"] == 4
+    assert (
+        run_rows[0]["error_summary"]
+        == "Unsupported payload_type: unsupported_a\n"
+        "Unsupported payload_type: unsupported_b\n"
+        "Unsupported payload_type: unsupported_c\n"
+        "(+1 more distinct errors)"
+    )
 
 
 def test_process_pending_rows_persists_detected_faces_for_photo_metadata(tmp_path):
