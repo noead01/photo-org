@@ -167,6 +167,23 @@ ingest_runs = Table(
     Column("error_summary", Text),
 )
 
+ingest_run_files = Table(
+    "ingest_run_files",
+    metadata,
+    Column("ingest_run_file_id", String(36), primary_key=True),
+    Column("ingest_run_id", String(36), ForeignKey("ingest_runs.ingest_run_id", ondelete="CASCADE"), nullable=False),
+    Column("ingest_queue_id", String(36), ForeignKey("ingest_queue.ingest_queue_id", ondelete="SET NULL"), nullable=False),
+    Column("path", Text, nullable=False),
+    Column("outcome", String, nullable=False),
+    Column("error_detail", Text),
+    Column(
+        "created_ts",
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+)
+
 ingest_queue = Table(
     "ingest_queue",
     metadata,
@@ -195,6 +212,9 @@ Index("idx_photo_tags_photo_id", photo_tags.c.photo_id)
 Index("idx_face_labels_face_id", face_labels.c.face_id)
 Index("idx_face_labels_person_id", face_labels.c.person_id)
 Index("idx_ingest_runs_watched_folder_id", ingest_runs.c.watched_folder_id)
+Index("idx_ingest_run_files_ingest_run_id", ingest_run_files.c.ingest_run_id)
+Index("idx_ingest_run_files_ingest_queue_id", ingest_run_files.c.ingest_queue_id)
+Index("idx_ingest_run_files_ingest_run_id_outcome", ingest_run_files.c.ingest_run_id, ingest_run_files.c.outcome)
 Index("idx_ingest_queue_status_enqueued_ts", ingest_queue.c.status, ingest_queue.c.enqueued_ts)
 
 
