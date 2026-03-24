@@ -172,7 +172,7 @@ ingest_run_files = Table(
     metadata,
     Column("ingest_run_file_id", String(36), primary_key=True),
     Column("ingest_run_id", String(36), ForeignKey("ingest_runs.ingest_run_id", ondelete="CASCADE"), nullable=False),
-    Column("ingest_queue_id", String(36), ForeignKey("ingest_queue.ingest_queue_id", ondelete="SET NULL"), nullable=False),
+    Column("ingest_queue_id", String(36), ForeignKey("ingest_queue.ingest_queue_id", ondelete="CASCADE"), nullable=False),
     Column("path", Text, nullable=False),
     Column("outcome", String, nullable=False),
     Column("error_detail", Text),
@@ -214,7 +214,7 @@ Index("idx_face_labels_person_id", face_labels.c.person_id)
 Index("idx_ingest_runs_watched_folder_id", ingest_runs.c.watched_folder_id)
 Index("idx_ingest_run_files_ingest_run_id", ingest_run_files.c.ingest_run_id)
 Index("idx_ingest_run_files_ingest_queue_id", ingest_run_files.c.ingest_queue_id)
-Index("idx_ingest_run_files_ingest_run_id_outcome", ingest_run_files.c.ingest_run_id, ingest_run_files.c.outcome)
+Index("idx_ingest_run_files_run_id_outcome", ingest_run_files.c.ingest_run_id, ingest_run_files.c.outcome)
 Index("idx_ingest_queue_status_enqueued_ts", ingest_queue.c.status, ingest_queue.c.enqueued_ts)
 
 

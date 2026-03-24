@@ -48,12 +48,25 @@ def test_phase_zero_schema_applies_core_constraints():
     assert [fk.column.table.name for fk in ingest_run_files.c.ingest_queue_id.foreign_keys] == [
         "ingest_queue"
     ]
+    assert ingest_run_files.c.ingest_queue_id.nullable is False
+    assert [fk.ondelete for fk in ingest_run_files.c.ingest_queue_id.foreign_keys] == ["CASCADE"]
+
+
+def test_ingest_run_files_indexes_are_defined_in_shared_metadata():
+    ingest_run_files = metadata.tables["ingest_run_files"]
+
+    assert {
+        "idx_ingest_run_files_ingest_run_id",
+        "idx_ingest_run_files_ingest_queue_id",
+        "idx_ingest_run_files_run_id_outcome",
+    } <= {index.name for index in ingest_run_files.indexes}
 
 def test_shared_metadata_defines_phase_zero_tables(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'schema.db'}", future=True)
     metadata.create_all(engine)
 
     tables = set(inspect(engine).get_table_names())
+    ingest_run_files_indexes = {index["name"] for index in inspect(engine).get_indexes("ingest_run_files")}
 
     assert {
         "photos",
@@ -66,3 +79,8 @@ def test_shared_metadata_defines_phase_zero_tables(tmp_path):
         "ingest_queue",
         "ingest_run_files",
     } <= tables
+    assert {
+        "idx_ingest_run_files_ingest_run_id",
+        "idx_ingest_run_files_ingest_queue_id",
+        "idx_ingest_run_files_run_id_outcome",
+    } <= ingest_run_files_indexes
