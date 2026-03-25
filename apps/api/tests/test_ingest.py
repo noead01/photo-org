@@ -287,6 +287,33 @@ def test_reconcile_directory_marks_watched_folder_unreachable_when_root_scan_fai
     assert row["last_successful_scan_ts"] == healthy_now
 
 
+@pytest.mark.parametrize(
+    ("root_kind", "expected_root_path"),
+    [
+        ("missing", "missing-root"),
+        ("file", "single-file-root.txt"),
+    ],
+)
+def test_reconcile_directory_marks_missing_or_non_directory_root_unreachable(
+    tmp_path, monkeypatch, root_kind, expected_root_path
+):
+    monkeypatch.chdir(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'reconcile-folder-unmounted.db'}"
+    upgrade_database(db_url)
+
+    if root_kind == "missing":
+        root = tmp_path / "missing-root"
+    else:
+        root = _create_non_directory_root(tmp_path)
+
+    reconcile_directory(root, database_url=db_url, now=datetime(2026, 3, 24, tzinfo=UTC))
+
+    row = load_watched_folder_row(db_url, expected_root_path)
+    assert row["availability_state"] == "unreachable"
+    assert row["last_failure_reason"] == "folder_unmounted"
+    assert row["last_successful_scan_ts"] is None
+
+
 def test_reconcile_directory_does_not_advance_file_lifecycle_when_root_scan_fails(
     tmp_path, monkeypatch
 ):
@@ -587,6 +614,12 @@ def seed_deleted_photo_with_file_instance(database_url: str, *, deleted_ts: date
 
 def _fail_root_scan(_: Path):
     raise PermissionError("root unavailable")
+
+
+def _create_non_directory_root(tmp_path: Path) -> Path:
+    root = tmp_path / "single-file-root.txt"
+    root.write_text("not a directory")
+    return root
 
 
 class UnusedFaceDetector:

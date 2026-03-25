@@ -4,6 +4,7 @@ import hashlib
 from datetime import UTC, datetime
 from dataclasses import dataclass, field
 from pathlib import Path
+from stat import S_ISDIR
 from typing import Iterable, Protocol
 from uuid import NAMESPACE_URL, uuid5
 
@@ -101,6 +102,7 @@ def reconcile_directory(
     grace_period_days = resolve_missing_file_grace_period_days(missing_file_grace_period_days)
 
     try:
+        _validate_scan_root(source_root)
         scanned_paths = list(iter_photo_files(source_root))
     except OSError as exc:
         engine = create_db_engine(database_url)
@@ -160,6 +162,11 @@ def reconcile_directory(
         refresh_photo_deleted_timestamps(connection, photo_ids=touched_photo_ids, now=at)
 
     return result
+
+
+def _validate_scan_root(root: Path) -> None:
+    if not S_ISDIR(root.stat().st_mode):
+        raise NotADirectoryError(str(root))
 
 
 def _classify_root_scan_failure(exc: OSError) -> str:
