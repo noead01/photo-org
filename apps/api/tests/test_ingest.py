@@ -9,10 +9,8 @@ from app.db.queue import IngestQueueStore
 from app.migrations import upgrade_database
 from app.processing import ingest as ingest_module
 from app.processing.ingest import ingest_directory, reconcile_directory
-from app.services import file_reconciliation as file_reconciliation_module
 from app.services.file_reconciliation import (
     activate_observed_file,
-    ensure_watched_folder,
     reconcile_watched_folder,
     refresh_photo_deleted_timestamps,
 )
@@ -290,36 +288,19 @@ def test_reconcile_directory_marks_watched_folder_unreachable_when_root_scan_fai
 
 
 def test_reconcile_directory_preserves_last_successful_scan_ts_when_root_scan_fails(
-    tmp_path,
+    tmp_path, monkeypatch
 ):
+    monkeypatch.chdir(tmp_path)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
     db_url = f"sqlite:///{tmp_path / 'reconcile-preserve-successful-scan-ts.db'}"
     upgrade_database(db_url)
 
     healthy_now = datetime(2026, 3, 24, tzinfo=UTC)
     failure_now = healthy_now + timedelta(minutes=1)
-    engine = create_engine(db_url, future=True)
+    reconcile_directory(staged_corpus_dir, database_url=db_url, now=healthy_now)
 
-    with engine.begin() as connection:
-        watched_folder_id = ensure_watched_folder(
-            connection,
-            root_path="seed-corpus",
-            now=healthy_now,
-        )
-
-    record_scan_failure = getattr(
-        file_reconciliation_module,
-        "record_watched_folder_scan_failure",
-        None,
-    )
-    assert callable(record_scan_failure)
-
-    with engine.begin() as connection:
-        record_scan_failure(
-            connection,
-            watched_folder_id=watched_folder_id,
-            reason="permission_denied",
-            now=failure_now,
-        )
+    monkeypatch.setattr("app.processing.ingest.iter_photo_files", _fail_root_scan)
+    reconcile_directory(staged_corpus_dir, database_url=db_url, now=failure_now)
 
     row = load_watched_folder_row(db_url, "seed-corpus")
     assert row["availability_state"] == "unreachable"
