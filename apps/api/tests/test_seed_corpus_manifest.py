@@ -45,6 +45,8 @@ def test_seed_corpus_docs_reference_make_targets_and_fixture_boundary():
     assert "make seed-corpus-check" in contributing
     assert "make seed-corpus-load" in contributing
     assert "make test-e2e" in contributing
+    assert "missing-file reconciliation" in contributing
+    assert "`uv run python -m pytest apps/api/tests/test_ingest.py -q`" in contributing
     assert "Generated local artifacts should go under `.local/`." in contributing
     assert "Compose-based stack startup is not yet the supported baseline contributor workflow." in contributing
     assert "For contributor setup and validation commands, see [CONTRIBUTING.md](CONTRIBUTING.md)." in readme

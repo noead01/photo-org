@@ -7,12 +7,18 @@ the repository and facet computation services.
 
 import pytest
 from unittest.mock import Mock
-from datetime import datetime
+from datetime import UTC, datetime
 
+from sqlalchemy import create_engine, insert
+from sqlalchemy.orm import Session
+
+from app.migrations import upgrade_database
+from app.repositories.photos_repo import PhotosRepository
 from app.services.search_service import SearchService
 from app.schemas.search_request import SearchRequest, SearchFilters, SortSpec, PageSpec, DateFilter
 from app.schemas.search_response import SearchResponse, Hits, PhotoHit
 from app.core.enums import FilesizeRange
+from app.storage import photos
 
 
 class TestSearchServiceExecution:
@@ -365,3 +371,141 @@ class TestSearchServiceIntegration:
                 page=page_spec,
                 text_query=None
             )
+
+
+class TestPhotosRepositorySoftDeleteFiltering:
+    def test_search_repository_excludes_soft_deleted_photos_by_default(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-soft-delete.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        now = datetime(2026, 3, 24, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            connection.execute(
+                insert(photos),
+                [
+                    {
+                        "photo_id": "active-photo",
+                        "path": "photos/active-photo.jpg",
+                        "sha256": "a" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                    {
+                        "photo_id": "deleted-photo",
+                        "path": "photos/deleted-photo.jpg",
+                        "sha256": "b" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": now,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                ],
+            )
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            items, total, cursor = repo.search_photos(
+                filters=SearchFilters(),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+            )
+
+        assert [item["photo_id"] for item in items] == ["active-photo"]
+        assert total == 1
+        assert cursor is not None
+
+    def test_get_filtered_photo_ids_excludes_soft_deleted_photos(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-filtered-ids.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        now = datetime(2026, 3, 24, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            connection.execute(
+                insert(photos),
+                [
+                    {
+                        "photo_id": "active-photo",
+                        "path": "photos/active-photo.jpg",
+                        "sha256": "c" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                    {
+                        "photo_id": "deleted-photo",
+                        "path": "photos/deleted-photo.jpg",
+                        "sha256": "d" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": now,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                ],
+            )
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            photo_ids = repo.get_filtered_photo_ids(SearchFilters())
+
+        assert photo_ids == ["active-photo"]
