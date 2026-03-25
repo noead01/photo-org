@@ -1,13 +1,19 @@
+from datetime import UTC, datetime, timedelta
 import shutil
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, func, insert, select
 
 from app.db.queue import IngestQueueStore
 from app.migrations import upgrade_database
-from app.processing.ingest import ingest_directory
-from app.storage import faces, photos
+from app.processing.ingest import ingest_directory, reconcile_directory
+from app.services.file_reconciliation import (
+    activate_observed_file,
+    reconcile_watched_folder,
+    refresh_photo_deleted_timestamps,
+)
+from app.storage import faces, photo_files, photos
 
 
 def _resolve_seed_corpus_dir(start: Path | None = None) -> Path:
@@ -176,6 +182,146 @@ def test_upgrade_database_creates_search_tables(tmp_path):
     assert {"photos", "faces", "photo_tags", "people", "face_labels"} <= tables
 
 
+def test_reconcile_directory_marks_absent_files_missing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'reconcile-missing.db'}"
+    upgrade_database(db_url)
+
+    reconcile_directory(staged_corpus_dir, database_url=db_url)
+
+    missing_path = staged_corpus_dir / "family-events" / "birthday-park" / "birthday_park_006.jpg"
+    missing_path.unlink()
+
+    reconcile_directory(staged_corpus_dir, database_url=db_url)
+
+    row = load_photo_file_row(
+        db_url,
+        "seed-corpus/family-events/birthday-park/birthday_park_006.jpg",
+    )
+    assert row["lifecycle_state"] == "missing"
+    assert row["missing_ts"] is not None
+    assert row["deleted_ts"] is None
+
+
+def test_reconcile_directory_deletes_missing_file_after_grace_period(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'reconcile-grace.db'}"
+    upgrade_database(db_url)
+
+    now = datetime(2026, 3, 24, tzinfo=UTC)
+    reconcile_directory(staged_corpus_dir, database_url=db_url, now=now)
+
+    missing_path = staged_corpus_dir / "family-events" / "birthday-park" / "birthday_park_006.jpg"
+    missing_path.unlink()
+
+    reconcile_directory(staged_corpus_dir, database_url=db_url, now=now)
+    reconcile_directory(
+        staged_corpus_dir,
+        database_url=db_url,
+        now=now + timedelta(days=1, seconds=1),
+    )
+
+    row = load_photo_file_row(
+        db_url,
+        "seed-corpus/family-events/birthday-park/birthday_park_006.jpg",
+    )
+    assert row["lifecycle_state"] == "deleted"
+    assert row["missing_ts"] == now
+    assert row["deleted_ts"] == now + timedelta(days=1, seconds=1)
+
+
+def test_reconcile_directory_with_zero_day_grace_immediately_deletes_missing_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'reconcile-zero-grace.db'}"
+    upgrade_database(db_url)
+
+    now = datetime(2026, 3, 24, tzinfo=UTC)
+    reconcile_directory(
+        staged_corpus_dir,
+        database_url=db_url,
+        now=now,
+        missing_file_grace_period_days=0,
+    )
+
+    missing_path = staged_corpus_dir / "family-events" / "birthday-park" / "birthday_park_006.jpg"
+    missing_path.unlink()
+
+    reconcile_directory(
+        staged_corpus_dir,
+        database_url=db_url,
+        now=now,
+        missing_file_grace_period_days=0,
+    )
+
+    row = load_photo_file_row(
+        db_url,
+        "seed-corpus/family-events/birthday-park/birthday_park_006.jpg",
+    )
+    assert row["lifecycle_state"] == "deleted"
+    assert row["missing_ts"] == now
+    assert row["deleted_ts"] == now
+
+
+def test_photo_is_soft_deleted_only_when_all_file_instances_are_deleted(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'photo-soft-delete.db'}"
+    upgrade_database(database_url)
+    seed_photo_with_file_instances(database_url)
+
+    now = datetime(2026, 3, 24, tzinfo=UTC)
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        touched_photo_ids = reconcile_watched_folder(
+            connection,
+            watched_folder_id="watched-folder-1",
+            observed_relative_paths={"seed-corpus/family-events/birthday-park/birthday_park_001.jpg"},
+            now=now,
+            missing_file_grace_period_days=0,
+        )
+        refresh_photo_deleted_timestamps(connection, photo_ids=touched_photo_ids, now=now)
+
+    assert load_photo_deleted_ts(database_url, "photo-1") is None
+
+    with engine.begin() as connection:
+        touched_photo_ids = reconcile_watched_folder(
+            connection,
+            watched_folder_id="watched-folder-1",
+            observed_relative_paths=set(),
+            now=now,
+            missing_file_grace_period_days=0,
+        )
+        refresh_photo_deleted_timestamps(connection, photo_ids=touched_photo_ids, now=now)
+
+    assert load_photo_deleted_ts(database_url, "photo-1") == now
+
+
+def test_reappearing_file_clears_parent_photo_deleted_timestamp(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'photo-recover.db'}"
+    upgrade_database(database_url)
+    now = datetime(2026, 3, 24, tzinfo=UTC)
+    seed_deleted_photo_with_file_instance(database_url, deleted_ts=now)
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        activate_observed_file(
+            connection,
+            watched_folder_id="watched-folder-1",
+            photo_id="photo-1",
+            relative_path="seed-corpus/family-events/birthday-park/birthday_park_001.jpg",
+            filename="birthday_park_001.jpg",
+            extension="jpg",
+            filesize=100,
+            created_ts=now,
+            modified_ts=now,
+            now=now,
+        )
+        refresh_photo_deleted_timestamps(connection, photo_ids={"photo-1"}, now=now)
+
+    assert load_photo_deleted_ts(database_url, "photo-1") is None
+
+
 def load_photo_count(database_url: str) -> int:
     engine = create_engine(database_url, future=True)
     with engine.connect() as connection:
@@ -196,6 +342,150 @@ def load_face_count(database_url: str) -> int:
     engine = create_engine(database_url, future=True)
     with engine.connect() as connection:
         return connection.execute(select(func.count()).select_from(faces)).scalar_one()
+
+
+def load_photo_file_row(database_url: str, relative_path: str) -> dict:
+    engine = create_engine(database_url, future=True)
+    with engine.connect() as connection:
+        row = connection.execute(
+            select(photo_files).where(photo_files.c.relative_path == relative_path)
+        ).mappings().one()
+    payload = dict(row)
+    for key in ("created_ts", "modified_ts", "first_seen_ts", "last_seen_ts", "missing_ts", "deleted_ts"):
+        value = payload.get(key)
+        if isinstance(value, datetime) and value.tzinfo is None:
+            payload[key] = value.replace(tzinfo=UTC)
+    return payload
+
+
+def load_photo_deleted_ts(database_url: str, photo_id: str) -> datetime | None:
+    engine = create_engine(database_url, future=True)
+    with engine.connect() as connection:
+        deleted_ts = connection.execute(
+            select(photos.c.deleted_ts).where(photos.c.photo_id == photo_id)
+        ).scalar_one()
+    if isinstance(deleted_ts, datetime) and deleted_ts.tzinfo is None:
+        return deleted_ts.replace(tzinfo=UTC)
+    return deleted_ts
+
+
+def seed_photo_with_file_instances(database_url: str) -> None:
+    now = datetime(2026, 3, 24, tzinfo=UTC)
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(photos).values(
+                photo_id="photo-1",
+                path="seed-corpus/family-events/birthday-park/birthday_park_001.jpg",
+                sha256="a" * 64,
+                phash=None,
+                filesize=100,
+                ext="jpg",
+                created_ts=now,
+                modified_ts=now,
+                shot_ts=None,
+                shot_ts_source=None,
+                camera_make=None,
+                camera_model=None,
+                software=None,
+                orientation=None,
+                gps_latitude=None,
+                gps_longitude=None,
+                gps_altitude=None,
+                updated_ts=now,
+                deleted_ts=None,
+                faces_count=0,
+                faces_detected_ts=None,
+            )
+        )
+        connection.execute(
+            insert(photo_files),
+            [
+                {
+                    "photo_file_id": "photo-file-1",
+                    "photo_id": "photo-1",
+                    "watched_folder_id": "watched-folder-1",
+                    "relative_path": "seed-corpus/family-events/birthday-park/birthday_park_001.jpg",
+                    "filename": "birthday_park_001.jpg",
+                    "extension": "jpg",
+                    "filesize": 100,
+                    "created_ts": now,
+                    "modified_ts": now,
+                    "first_seen_ts": now,
+                    "last_seen_ts": now,
+                    "missing_ts": None,
+                    "deleted_ts": None,
+                    "lifecycle_state": "active",
+                    "absence_reason": None,
+                },
+                {
+                    "photo_file_id": "photo-file-2",
+                    "photo_id": "photo-1",
+                    "watched_folder_id": "watched-folder-1",
+                    "relative_path": "seed-corpus/family-events/birthday-park/birthday_park_002.jpeg",
+                    "filename": "birthday_park_002.jpeg",
+                    "extension": "jpeg",
+                    "filesize": 100,
+                    "created_ts": now,
+                    "modified_ts": now,
+                    "first_seen_ts": now,
+                    "last_seen_ts": now,
+                    "missing_ts": None,
+                    "deleted_ts": None,
+                    "lifecycle_state": "active",
+                    "absence_reason": None,
+                },
+            ],
+        )
+
+
+def seed_deleted_photo_with_file_instance(database_url: str, *, deleted_ts: datetime) -> None:
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(photos).values(
+                photo_id="photo-1",
+                path="seed-corpus/family-events/birthday-park/birthday_park_001.jpg",
+                sha256="b" * 64,
+                phash=None,
+                filesize=100,
+                ext="jpg",
+                created_ts=deleted_ts,
+                modified_ts=deleted_ts,
+                shot_ts=None,
+                shot_ts_source=None,
+                camera_make=None,
+                camera_model=None,
+                software=None,
+                orientation=None,
+                gps_latitude=None,
+                gps_longitude=None,
+                gps_altitude=None,
+                updated_ts=deleted_ts,
+                deleted_ts=deleted_ts,
+                faces_count=0,
+                faces_detected_ts=None,
+            )
+        )
+        connection.execute(
+            insert(photo_files).values(
+                photo_file_id="photo-file-1",
+                photo_id="photo-1",
+                watched_folder_id="watched-folder-1",
+                relative_path="seed-corpus/family-events/birthday-park/birthday_park_001.jpg",
+                filename="birthday_park_001.jpg",
+                extension="jpg",
+                filesize=100,
+                created_ts=deleted_ts,
+                modified_ts=deleted_ts,
+                first_seen_ts=deleted_ts,
+                last_seen_ts=deleted_ts,
+                missing_ts=deleted_ts,
+                deleted_ts=deleted_ts,
+                lifecycle_state="deleted",
+                absence_reason="path_removed",
+            )
+        )
 
 
 class UnusedFaceDetector:

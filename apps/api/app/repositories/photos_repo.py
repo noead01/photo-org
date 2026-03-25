@@ -71,7 +71,7 @@ class PhotosRepository:
 
     def _apply_filters(self, query: Select, filters: SearchFilters, text_query: Optional[str] = None) -> Select:
         """Apply all filters to the query."""
-        where_conditions = []
+        where_conditions = [self.photos.c.deleted_ts.is_(None)]
         
         # Date filters
         if filters.date:

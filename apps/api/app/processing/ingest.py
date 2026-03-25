@@ -10,7 +10,15 @@ from uuid import NAMESPACE_URL, uuid5
 from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.engine import Connection
 
+from app.db.config import resolve_missing_file_grace_period_days
 from app.db.queue import IngestQueueStore
+from app.services.file_reconciliation import (
+    activate_observed_file,
+    ensure_watched_folder,
+    refresh_photo_deleted_timestamps,
+    reconcile_watched_folder,
+    utc_now,
+)
 from app.processing.metadata import extract_image_metadata, stat_timestamp_to_iso
 from app.storage import create_db_engine, faces, photos
 
@@ -76,6 +84,67 @@ def ingest_directory(
             result.enqueued += 1
         except Exception as exc:
             result.errors.append(f"{photo_path}: {exc}")
+
+    return result
+
+
+def reconcile_directory(
+    root: str | Path,
+    database_url: str | Path | None = None,
+    *,
+    now: datetime | None = None,
+    missing_file_grace_period_days: int | None = None,
+) -> IngestResult:
+    source_root = Path(root).expanduser().resolve()
+    result = IngestResult()
+    at = now if now is not None else utc_now()
+    grace_period_days = resolve_missing_file_grace_period_days(missing_file_grace_period_days)
+
+    engine = create_db_engine(database_url)
+    with engine.begin() as connection:
+        watched_folder_id = ensure_watched_folder(
+            connection,
+            root_path=_display_path(source_root),
+            now=at,
+        )
+        observed_relative_paths: set[str] = set()
+        touched_photo_ids: set[str] = set()
+
+        for photo_path in iter_photo_files(source_root):
+            result.scanned += 1
+            record = build_photo_record(photo_path)
+            relative_path = _display_path(photo_path)
+            observed_relative_paths.add(relative_path)
+            created = upsert_photo(connection, record)
+            if created:
+                result.inserted += 1
+            else:
+                result.updated += 1
+            touched_photo_ids.add(
+                activate_observed_file(
+                    connection,
+                    watched_folder_id=watched_folder_id,
+                    photo_id=record.photo_id,
+                    relative_path=relative_path,
+                    filename=photo_path.name,
+                    extension=record.ext,
+                    filesize=record.filesize,
+                    created_ts=record.created_ts,
+                    modified_ts=record.modified_ts,
+                    now=at,
+                )
+            )
+
+        touched_photo_ids.update(
+            reconcile_watched_folder(
+                connection,
+                watched_folder_id=watched_folder_id,
+                observed_relative_paths=observed_relative_paths,
+                now=at,
+                missing_file_grace_period_days=grace_period_days,
+            )
+        )
+        refresh_photo_deleted_timestamps(connection, photo_ids=touched_photo_ids, now=at)
 
     return result
 

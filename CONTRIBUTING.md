@@ -185,6 +185,9 @@ The default local seed-corpus load target writes its generated SQLite database u
 
 Synthetic fixtures remain preferred for unit tests and BDD scenarios. The checked-in corpus is the fixed real-file dataset for the end-to-end workflow.
 
+For missing-file reconciliation verification, run `uv run python -m pytest apps/api/tests/test_ingest.py -q`.
+That targeted suite exercises a temporary watched-folder fixture and simulated time so contributors can verify `active`, `missing`, `deleted`, and recovery transitions without bringing up the full worker stack.
+
 ### Automated Version Updates
 
 Packaging and release workflows should update versions automatically in a controlled way rather than relying on manual edits scattered across the repo.
