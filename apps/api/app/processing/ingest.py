@@ -9,6 +9,7 @@ from typing import Iterable, Protocol
 from uuid import NAMESPACE_URL, uuid5
 
 from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy.engine import Connection
 
 from app.db.config import resolve_missing_file_grace_period_days
 from app.db.queue import IngestQueueStore
