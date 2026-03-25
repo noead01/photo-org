@@ -20,7 +20,7 @@ from app.services.file_reconciliation import (
     utc_now,
 )
 from app.processing.metadata import extract_image_metadata, stat_timestamp_to_iso
-from app.storage import create_db_engine, faces, photos
+from app.storage import create_db_engine, faces, photos, watched_folders
 
 
 SUPPORTED_EXTENSIONS = {".heic", ".heif", ".jpeg", ".jpg", ".png"}
@@ -100,6 +100,19 @@ def reconcile_directory(
     at = now if now is not None else utc_now()
     grace_period_days = resolve_missing_file_grace_period_days(missing_file_grace_period_days)
 
+    try:
+        scanned_paths = list(iter_photo_files(source_root))
+    except OSError as exc:
+        engine = create_db_engine(database_url)
+        with engine.begin() as connection:
+            _mark_watched_folder_unreachable(
+                connection,
+                root_path=_display_path(source_root),
+                reason=_classify_root_scan_failure(exc),
+                now=at,
+            )
+        return result
+
     engine = create_db_engine(database_url)
     with engine.begin() as connection:
         watched_folder_id = ensure_watched_folder(
@@ -110,7 +123,7 @@ def reconcile_directory(
         observed_relative_paths: set[str] = set()
         touched_photo_ids: set[str] = set()
 
-        for photo_path in iter_photo_files(source_root):
+        for photo_path in scanned_paths:
             result.scanned += 1
             record = build_photo_record(photo_path)
             relative_path = _display_path(photo_path)
@@ -147,6 +160,53 @@ def reconcile_directory(
         refresh_photo_deleted_timestamps(connection, photo_ids=touched_photo_ids, now=at)
 
     return result
+
+
+def _classify_root_scan_failure(exc: OSError) -> str:
+    if isinstance(exc, PermissionError):
+        return "permission_denied"
+    if isinstance(exc, (FileNotFoundError, NotADirectoryError)):
+        return "folder_unmounted"
+    return "io_error"
+
+
+def _mark_watched_folder_unreachable(
+    connection: Connection,
+    *,
+    root_path: str,
+    reason: str,
+    now: datetime,
+) -> None:
+    watched_folder_id = str(uuid5(NAMESPACE_URL, f"watched-folder:{root_path}"))
+    row = connection.execute(
+        select(watched_folders.c.watched_folder_id).where(
+            watched_folders.c.watched_folder_id == watched_folder_id
+        )
+    ).first()
+    values = {
+        "availability_state": "unreachable",
+        "last_failure_reason": reason,
+        "updated_ts": now,
+    }
+    if row is None:
+        connection.execute(
+            insert(watched_folders).values(
+                watched_folder_id=watched_folder_id,
+                root_path=root_path,
+                display_name=root_path,
+                is_enabled=1,
+                last_successful_scan_ts=None,
+                created_ts=now,
+                **values,
+            )
+        )
+        return
+
+    connection.execute(
+        update(watched_folders)
+        .where(watched_folders.c.watched_folder_id == watched_folder_id)
+        .values(**values)
+    )
 
 
 def iter_photo_files(root: Path) -> Iterable[Path]:

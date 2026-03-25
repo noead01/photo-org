@@ -7,6 +7,7 @@ from sqlalchemy import create_engine, func, insert, select
 
 from app.db.queue import IngestQueueStore
 from app.migrations import upgrade_database
+from app.processing import ingest as ingest_module
 from app.processing.ingest import ingest_directory, reconcile_directory
 from app.services.file_reconciliation import (
     activate_observed_file,
@@ -314,6 +315,37 @@ def test_reconcile_directory_does_not_advance_file_lifecycle_when_root_scan_fail
     assert after["lifecycle_state"] == before["lifecycle_state"]
     assert after["missing_ts"] == before["missing_ts"]
     assert after["deleted_ts"] == before["deleted_ts"]
+
+
+def test_reconcile_directory_clears_unreachable_state_after_later_healthy_scan(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'reconcile-recovery.db'}"
+    upgrade_database(db_url)
+
+    healthy_now = datetime(2026, 3, 24, tzinfo=UTC)
+    reconcile_directory(staged_corpus_dir, database_url=db_url, now=healthy_now)
+
+    original_iter_photo_files = ingest_module.iter_photo_files
+    monkeypatch.setattr("app.processing.ingest.iter_photo_files", _fail_root_scan)
+
+    failure_now = healthy_now + timedelta(minutes=1)
+    reconcile_directory(staged_corpus_dir, database_url=db_url, now=failure_now)
+
+    monkeypatch.setattr(
+        "app.processing.ingest.iter_photo_files",
+        original_iter_photo_files,
+    )
+
+    recovered_now = healthy_now + timedelta(minutes=2)
+    reconcile_directory(staged_corpus_dir, database_url=db_url, now=recovered_now)
+
+    row = load_watched_folder_row(db_url, "seed-corpus")
+    assert row["availability_state"] == "active"
+    assert row["last_failure_reason"] is None
+    assert row["last_successful_scan_ts"] == recovered_now
 
 
 def test_photo_is_soft_deleted_only_when_all_file_instances_are_deleted(tmp_path):
