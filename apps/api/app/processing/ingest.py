@@ -9,19 +9,20 @@ from typing import Iterable, Protocol
 from uuid import NAMESPACE_URL, uuid5
 
 from sqlalchemy import delete, func, insert, select, update
-from sqlalchemy.engine import Connection
 
 from app.db.config import resolve_missing_file_grace_period_days
 from app.db.queue import IngestQueueStore
 from app.services.file_reconciliation import (
     activate_observed_file,
-    ensure_watched_folder,
+    ensure_watched_folder_exists,
+    record_watched_folder_scan_failure,
+    record_watched_folder_scan_success,
     refresh_photo_deleted_timestamps,
     reconcile_watched_folder,
     utc_now,
 )
 from app.processing.metadata import extract_image_metadata, stat_timestamp_to_iso
-from app.storage import create_db_engine, faces, photos, watched_folders
+from app.storage import create_db_engine, faces, photos
 
 
 SUPPORTED_EXTENSIONS = {".heic", ".heif", ".jpeg", ".jpg", ".png"}
@@ -107,9 +108,14 @@ def reconcile_directory(
     except OSError as exc:
         engine = create_db_engine(database_url)
         with engine.begin() as connection:
-            _mark_watched_folder_unreachable(
+            watched_folder_id = ensure_watched_folder_exists(
                 connection,
                 root_path=_display_path(source_root),
+                now=at,
+            )
+            record_watched_folder_scan_failure(
+                connection,
+                watched_folder_id=watched_folder_id,
                 reason=_classify_root_scan_failure(exc),
                 now=at,
             )
@@ -117,9 +123,14 @@ def reconcile_directory(
 
     engine = create_db_engine(database_url)
     with engine.begin() as connection:
-        watched_folder_id = ensure_watched_folder(
+        watched_folder_id = ensure_watched_folder_exists(
             connection,
             root_path=_display_path(source_root),
+            now=at,
+        )
+        record_watched_folder_scan_success(
+            connection,
+            watched_folder_id=watched_folder_id,
             now=at,
         )
         observed_relative_paths: set[str] = set()
@@ -175,45 +186,6 @@ def _classify_root_scan_failure(exc: OSError) -> str:
     if isinstance(exc, (FileNotFoundError, NotADirectoryError)):
         return "folder_unmounted"
     return "io_error"
-
-
-def _mark_watched_folder_unreachable(
-    connection: Connection,
-    *,
-    root_path: str,
-    reason: str,
-    now: datetime,
-) -> None:
-    watched_folder_id = str(uuid5(NAMESPACE_URL, f"watched-folder:{root_path}"))
-    row = connection.execute(
-        select(watched_folders.c.watched_folder_id).where(
-            watched_folders.c.watched_folder_id == watched_folder_id
-        )
-    ).first()
-    values = {
-        "availability_state": "unreachable",
-        "last_failure_reason": reason,
-        "updated_ts": now,
-    }
-    if row is None:
-        connection.execute(
-            insert(watched_folders).values(
-                watched_folder_id=watched_folder_id,
-                root_path=root_path,
-                display_name=root_path,
-                is_enabled=1,
-                last_successful_scan_ts=None,
-                created_ts=now,
-                **values,
-            )
-        )
-        return
-
-    connection.execute(
-        update(watched_folders)
-        .where(watched_folders.c.watched_folder_id == watched_folder_id)
-        .values(**values)
-    )
 
 
 def iter_photo_files(root: Path) -> Iterable[Path]:

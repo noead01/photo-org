@@ -9,13 +9,17 @@ from sqlalchemy.engine import Connection
 from app.storage import photo_files, photos, watched_folders
 
 
-def ensure_watched_folder(
+def _watched_folder_id_for_root(root_path: str) -> str:
+    return str(uuid5(NAMESPACE_URL, f"watched-folder:{root_path}"))
+
+
+def ensure_watched_folder_exists(
     connection: Connection,
     *,
     root_path: str,
     now: datetime,
 ) -> str:
-    watched_folder_id = str(uuid5(NAMESPACE_URL, f"watched-folder:{root_path}"))
+    watched_folder_id = _watched_folder_id_for_root(root_path)
     row = connection.execute(
         select(watched_folders.c.watched_folder_id).where(
             watched_folders.c.watched_folder_id == watched_folder_id
@@ -30,13 +34,22 @@ def ensure_watched_folder(
                 is_enabled=1,
                 availability_state="active",
                 last_failure_reason=None,
-                last_successful_scan_ts=now,
+                last_successful_scan_ts=None,
                 created_ts=now,
                 updated_ts=now,
             )
         )
         return watched_folder_id
 
+    return watched_folder_id
+
+
+def record_watched_folder_scan_success(
+    connection: Connection,
+    *,
+    watched_folder_id: str,
+    now: datetime,
+) -> None:
     connection.execute(
         update(watched_folders)
         .where(watched_folders.c.watched_folder_id == watched_folder_id)
@@ -46,6 +59,42 @@ def ensure_watched_folder(
             last_successful_scan_ts=now,
             updated_ts=now,
         )
+    )
+
+
+def record_watched_folder_scan_failure(
+    connection: Connection,
+    *,
+    watched_folder_id: str,
+    reason: str,
+    now: datetime,
+) -> None:
+    connection.execute(
+        update(watched_folders)
+        .where(watched_folders.c.watched_folder_id == watched_folder_id)
+        .values(
+            availability_state="unreachable",
+            last_failure_reason=reason,
+            updated_ts=now,
+        )
+    )
+
+
+def ensure_watched_folder(
+    connection: Connection,
+    *,
+    root_path: str,
+    now: datetime,
+) -> str:
+    watched_folder_id = ensure_watched_folder_exists(
+        connection,
+        root_path=root_path,
+        now=now,
+    )
+    record_watched_folder_scan_success(
+        connection,
+        watched_folder_id=watched_folder_id,
+        now=now,
     )
     return watched_folder_id
 
