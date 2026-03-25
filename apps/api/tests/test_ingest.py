@@ -385,6 +385,46 @@ def test_reconcile_directory_does_not_advance_file_lifecycle_when_root_scan_fail
     assert after["deleted_ts"] == before["deleted_ts"]
 
 
+def test_reconcile_directory_preserves_parent_photo_deleted_timestamp_when_root_scan_fails(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'reconcile-root-failure-parent-photo.db'}"
+    upgrade_database(db_url)
+
+    now = datetime(2026, 3, 24, tzinfo=UTC)
+    reconcile_directory(staged_corpus_dir, database_url=db_url, now=now)
+
+    missing_path = staged_corpus_dir / "family-events" / "birthday-park" / "birthday_park_006.jpg"
+    missing_path.unlink()
+
+    reconcile_directory(staged_corpus_dir, database_url=db_url, now=now)
+    deleted_now = now + timedelta(days=1, seconds=1)
+    reconcile_directory(staged_corpus_dir, database_url=db_url, now=deleted_now)
+
+    deleted_row = load_photo_file_row(
+        db_url,
+        "seed-corpus/family-events/birthday-park/birthday_park_006.jpg",
+    )
+    deleted_before = load_photo_deleted_ts(
+        db_url,
+        deleted_row["photo_id"],
+    )
+    assert deleted_before == deleted_now
+
+    monkeypatch.setattr("app.processing.ingest.iter_photo_files", _fail_root_scan)
+
+    failure_now = deleted_now + timedelta(minutes=1)
+    reconcile_directory(staged_corpus_dir, database_url=db_url, now=failure_now)
+
+    deleted_after = load_photo_deleted_ts(
+        db_url,
+        deleted_row["photo_id"],
+    )
+    assert deleted_after == deleted_before
+
+
 def test_reconcile_directory_clears_unreachable_state_after_later_healthy_scan(
     tmp_path, monkeypatch
 ):
