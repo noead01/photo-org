@@ -204,6 +204,11 @@ def test_reconcile_directory_marks_absent_files_missing(tmp_path, monkeypatch):
     assert row["missing_ts"] is not None
     assert row["deleted_ts"] is None
 
+    watched_folder = load_watched_folder_row(db_url, "seed-corpus")
+    assert watched_folder["availability_state"] == "active"
+    assert watched_folder["last_failure_reason"] is None
+    assert watched_folder["last_successful_scan_ts"] is not None
+
 
 def test_reconcile_directory_deletes_missing_file_after_grace_period(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
@@ -231,6 +236,11 @@ def test_reconcile_directory_deletes_missing_file_after_grace_period(tmp_path, m
     assert row["lifecycle_state"] == "deleted"
     assert row["missing_ts"] == now
     assert row["deleted_ts"] == now + timedelta(days=1, seconds=1)
+
+    watched_folder = load_watched_folder_row(db_url, "seed-corpus")
+    assert watched_folder["availability_state"] == "active"
+    assert watched_folder["last_failure_reason"] is None
+    assert watched_folder["last_successful_scan_ts"] == now + timedelta(days=1, seconds=1)
 
 
 def test_reconcile_directory_with_zero_day_grace_immediately_deletes_missing_file(tmp_path, monkeypatch):
@@ -265,6 +275,11 @@ def test_reconcile_directory_with_zero_day_grace_immediately_deletes_missing_fil
     assert row["missing_ts"] == now
     assert row["deleted_ts"] == now
 
+    watched_folder = load_watched_folder_row(db_url, "seed-corpus")
+    assert watched_folder["availability_state"] == "active"
+    assert watched_folder["last_failure_reason"] is None
+    assert watched_folder["last_successful_scan_ts"] == now
+
 
 def test_reconcile_directory_marks_watched_folder_unreachable_when_root_scan_fails(
     tmp_path, monkeypatch
@@ -276,6 +291,11 @@ def test_reconcile_directory_marks_watched_folder_unreachable_when_root_scan_fai
 
     healthy_now = datetime(2026, 3, 24, tzinfo=UTC)
     reconcile_directory(staged_corpus_dir, database_url=db_url, now=healthy_now)
+
+    watched_folder = load_watched_folder_row(db_url, "seed-corpus")
+    assert watched_folder["availability_state"] == "active"
+    assert watched_folder["last_failure_reason"] is None
+    assert watched_folder["last_successful_scan_ts"] == healthy_now
 
     monkeypatch.setattr("app.processing.ingest.iter_photo_files", _fail_root_scan)
 
