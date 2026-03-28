@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 from app.cli import main
 import app.dev.seed_corpus as seed_corpus
@@ -39,11 +38,9 @@ def test_seed_corpus_load_cli_runs_migrate_and_corpus_loader(tmp_path, monkeypat
         lambda url: calls.append(("migrate", url)),
     )
     monkeypatch.setattr(
-        "app.cli._load_queue_client",
-        lambda: SimpleNamespace(
-            load_seed_corpus_into_queue=lambda **kwargs: calls.append(("load", kwargs["database_url"]))
-            or {"scanned": 24, "enqueued": 24, "processed": 0},
-        ),
+        "app.cli.load_seed_corpus_into_database",
+        lambda **kwargs: calls.append(("load", kwargs["database_url"]))
+        or {"scanned": 24, "enqueued": 24, "processed": 0},
     )
 
     exit_code = main(["seed-corpus", "load", "--database-url", database_url])

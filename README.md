@@ -47,7 +47,7 @@ The default deployment model is a self-hosted installation on one machine in the
 - browser-based photo search and browsing
 - metadata-based filtering such as date and location
 - person-based search using detected and validated faces
-- admin management of watched folders
+- admin management of storage sources and watched folders
 - background ingestion of newly added photos
 - ingestion status and operational visibility
 
@@ -71,7 +71,7 @@ Each environment is created once with an immutable storage mode, either `persist
 - a PostgreSQL database with the `vector` extension enabled
 - access from the server to the folders that contain the photo library
 
-The API/UI container must mount the photo library at a stable in-container path. When ingesting a watched folder, use that in-container mount path as the folder's `--container-mount-path` so the stored `photos.path` values match what the running container can actually read later.
+The server still needs runtime access to the photo library, but watched-folder registration is now modeled under registered storage sources. Operators should register a source root first, then add watched folders relative to that source boundary instead of treating container mount paths as the user-facing identity contract.
 
 If you already have PostgreSQL running separately, the application can use that existing database instead of starting another one.
 
@@ -91,8 +91,9 @@ At a high level, setup should look like this:
 4. rerun migrations with `PHOTO_ORG_ENVIRONMENT=dev make compose-migrate` if you need to repair its database
 5. open the web interface once the service is healthy
 6. sign in as an admin
-7. add one or more watched folders
-8. let the system ingest the initial corpus
+7. register one or more storage sources
+8. add one or more watched folders under those sources
+9. let the system ingest the initial corpus
 
 Once that is done, users should be able to browse, search, and validate faces from the web UI.
 
@@ -107,13 +108,13 @@ For local operations:
 - `make compose-e2e-smoke` creates a random ephemeral environment, runs `compose-smoke`, runs the checked-in e2e suite against that environment's Compose database, and tears it down automatically
 - `PHOTO_ORG_ENV_FILE=/path/to/file.env` can be added when you want a local command to load extra environment-specific settings
 
-The default Compose file now bind-mounts `${PHOTO_ORG_PHOTO_LIBRARY_HOST_PATH}` into `${PHOTO_ORG_PHOTO_LIBRARY_CONTAINER_PATH}` for `db-service`, defaulting to `./seed-corpus` mounted at `/photos`. Watched folders should use paths inside that container mount, not workstation-local paths.
+The default Compose file now bind-mounts `${PHOTO_ORG_PHOTO_LIBRARY_HOST_PATH}` into `${PHOTO_ORG_PHOTO_LIBRARY_CONTAINER_PATH}` for `db-service`, defaulting to `./seed-corpus` mounted at `/photos`. That runtime mount remains an internal deployment concern; watched-folder registration should stay relative to a registered source root.
 
 ## Basic Usage
 
 Typical usage is expected to be:
 
-- admin users add, remove, or disable watched folders
+- admin users register sources, then add, remove, or disable watched folders under those sources
 - the system ingests new photos in the background
 - users search for photos by person, date, and location
 - authorized users confirm or correct face associations
