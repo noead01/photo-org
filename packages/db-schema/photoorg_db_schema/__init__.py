@@ -11,6 +11,8 @@ from .schema import (
     photo_files,
     photo_tags,
     photos,
+    storage_source_aliases,
+    storage_sources,
     watched_folders,
     configure_embedding_column,
 )
@@ -29,5 +31,7 @@ __all__ = [
     "photo_files",
     "photo_tags",
     "photos",
+    "storage_source_aliases",
+    "storage_sources",
     "watched_folders",
 ]

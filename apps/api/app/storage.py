@@ -11,6 +11,8 @@ from photoorg_db_schema import (
     photo_files,
     photo_tags,
     photos,
+    storage_source_aliases,
+    storage_sources,
     watched_folders,
 )
 from app.db.config import DEFAULT_DATABASE_URL, DEFAULT_SQLITE_PATH, resolve_database_url
