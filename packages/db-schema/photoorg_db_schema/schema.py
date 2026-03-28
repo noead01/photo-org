@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.engine import Connection, Engine
@@ -69,12 +70,47 @@ photos = Table(
     Column("faces_detected_ts", TIMESTAMP(timezone=True)),
 )
 
+storage_sources = Table(
+    "storage_sources",
+    metadata,
+    Column("storage_source_id", String(36), primary_key=True),
+    Column("display_name", String, nullable=False),
+    Column("marker_filename", String, nullable=False),
+    Column("marker_version", Integer, nullable=False, server_default=text("1")),
+    Column("availability_state", String, nullable=False, server_default=text("'unknown'")),
+    Column("last_failure_reason", String),
+    Column("last_validated_ts", TIMESTAMP(timezone=True)),
+    Column("created_ts", TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+    Column("updated_ts", TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+)
+
+storage_source_aliases = Table(
+    "storage_source_aliases",
+    metadata,
+    Column("storage_source_alias_id", String(36), primary_key=True),
+    Column(
+        "storage_source_id",
+        String(36),
+        ForeignKey("storage_sources.storage_source_id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("alias_path", Text, nullable=False, unique=True),
+    Column("created_ts", TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+    Column("updated_ts", TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+)
+
 watched_folders = Table(
     "watched_folders",
     metadata,
     Column("watched_folder_id", String(36), primary_key=True),
     Column("scan_path", Text, nullable=False, unique=True),
     Column("container_mount_path", Text, nullable=False, unique=True),
+    Column(
+        "storage_source_id",
+        String(36),
+        ForeignKey("storage_sources.storage_source_id", ondelete="SET NULL"),
+    ),
+    Column("relative_path", Text),
     Column("display_name", String),
     Column("is_enabled", Integer, nullable=False, server_default=text("1")),
     Column("availability_state", String, nullable=False, server_default=text("'active'")),
@@ -82,6 +118,7 @@ watched_folders = Table(
     Column("last_successful_scan_ts", TIMESTAMP(timezone=True)),
     Column("created_ts", TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
     Column("updated_ts", TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+    UniqueConstraint("storage_source_id", "relative_path", name="uq_watched_folders_source_relative_path"),
 )
 
 photo_files = Table(
@@ -207,6 +244,8 @@ ingest_queue = Table(
 
 Index("idx_photos_shot_ts", photos.c.shot_ts)
 Index("idx_photos_sha256", photos.c.sha256)
+Index("idx_storage_sources_availability_state", storage_sources.c.availability_state)
+Index("idx_storage_source_aliases_source_id", storage_source_aliases.c.storage_source_id)
 Index("idx_faces_photo_id", faces.c.photo_id)
 Index("idx_photo_files_photo_id", photo_files.c.photo_id)
 Index("idx_photo_tags_photo_id", photo_tags.c.photo_id)

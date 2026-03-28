@@ -51,10 +51,76 @@ def upgrade() -> None:
     op.create_index("idx_photos_sha256", "photos", ["sha256"], unique=False)
 
     op.create_table(
+        "storage_sources",
+        sa.Column("storage_source_id", sa.String(36), primary_key=True),
+        sa.Column("display_name", sa.String(), nullable=False),
+        sa.Column("marker_filename", sa.String(), nullable=False),
+        sa.Column("marker_version", sa.Integer(), nullable=False, server_default=sa.text("1")),
+        sa.Column("availability_state", sa.String(), nullable=False, server_default=sa.text("'unknown'")),
+        sa.Column("last_failure_reason", sa.String(), nullable=True),
+        sa.Column("last_validated_ts", sa.TIMESTAMP(timezone=True), nullable=True),
+        sa.Column(
+            "created_ts",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+        sa.Column(
+            "updated_ts",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+    )
+    op.create_index(
+        "idx_storage_sources_availability_state",
+        "storage_sources",
+        ["availability_state"],
+        unique=False,
+    )
+
+    op.create_table(
+        "storage_source_aliases",
+        sa.Column("storage_source_alias_id", sa.String(36), primary_key=True),
+        sa.Column(
+            "storage_source_id",
+            sa.String(36),
+            sa.ForeignKey("storage_sources.storage_source_id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("alias_path", sa.Text(), nullable=False, unique=True),
+        sa.Column(
+            "created_ts",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+        sa.Column(
+            "updated_ts",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+    )
+    op.create_index(
+        "idx_storage_source_aliases_source_id",
+        "storage_source_aliases",
+        ["storage_source_id"],
+        unique=False,
+    )
+
+    op.create_table(
         "watched_folders",
         sa.Column("watched_folder_id", sa.String(36), primary_key=True),
         sa.Column("scan_path", sa.Text(), nullable=False, unique=True),
         sa.Column("container_mount_path", sa.Text(), nullable=False, unique=True),
+        sa.Column(
+            "storage_source_id",
+            sa.String(36),
+            sa.ForeignKey("storage_sources.storage_source_id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+        sa.Column("relative_path", sa.Text(), nullable=True),
         sa.Column("display_name", sa.String(), nullable=True),
         sa.Column("is_enabled", sa.Integer(), nullable=False, server_default=sa.text("1")),
         sa.Column("availability_state", sa.String(), nullable=False, server_default=sa.text("'active'")),
@@ -62,6 +128,11 @@ def upgrade() -> None:
         sa.Column("last_successful_scan_ts", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.Column("created_ts", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
         sa.Column("updated_ts", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.UniqueConstraint(
+            "storage_source_id",
+            "relative_path",
+            name="uq_watched_folders_source_relative_path",
+        ),
     )
 
     op.create_table(
@@ -228,6 +299,10 @@ def downgrade() -> None:
     op.drop_index("idx_photo_files_photo_id", table_name="photo_files")
     op.drop_table("photo_files")
     op.drop_table("watched_folders")
+    op.drop_index("idx_storage_source_aliases_source_id", table_name="storage_source_aliases")
+    op.drop_table("storage_source_aliases")
+    op.drop_index("idx_storage_sources_availability_state", table_name="storage_sources")
+    op.drop_table("storage_sources")
     op.drop_index("idx_photos_sha256", table_name="photos")
     op.drop_index("idx_photos_shot_ts", table_name="photos")
     op.drop_table("photos")
