@@ -292,8 +292,30 @@ def build_ingest_submission(
 
 def upsert_photo(connection: Connection, record: PhotoRecord) -> bool:
     existing = connection.execute(
-        select(photos.c.photo_id).where(photos.c.path == record.path)
-    ).first()
+        select(
+            photos.c.photo_id,
+            photos.c.thumbnail_jpeg,
+            photos.c.thumbnail_mime_type,
+            photos.c.thumbnail_width,
+            photos.c.thumbnail_height,
+        ).where(photos.c.path == record.path)
+    ).mappings().first()
+
+    thumbnail_jpeg = record.thumbnail_jpeg
+    thumbnail_mime_type = record.thumbnail_mime_type
+    thumbnail_width = record.thumbnail_width
+    thumbnail_height = record.thumbnail_height
+    if (
+        existing is not None
+        and thumbnail_jpeg is None
+        and thumbnail_mime_type is None
+        and thumbnail_width is None
+        and thumbnail_height is None
+    ):
+        thumbnail_jpeg = existing["thumbnail_jpeg"]
+        thumbnail_mime_type = existing["thumbnail_mime_type"]
+        thumbnail_width = existing["thumbnail_width"]
+        thumbnail_height = existing["thumbnail_height"]
 
     payload = {
         "photo_id": record.photo_id,
@@ -313,10 +335,10 @@ def upsert_photo(connection: Connection, record: PhotoRecord) -> bool:
         "gps_latitude": record.gps_latitude,
         "gps_longitude": record.gps_longitude,
         "gps_altitude": record.gps_altitude,
-        "thumbnail_jpeg": record.thumbnail_jpeg,
-        "thumbnail_mime_type": record.thumbnail_mime_type,
-        "thumbnail_width": record.thumbnail_width,
-        "thumbnail_height": record.thumbnail_height,
+        "thumbnail_jpeg": thumbnail_jpeg,
+        "thumbnail_mime_type": thumbnail_mime_type,
+        "thumbnail_width": thumbnail_width,
+        "thumbnail_height": thumbnail_height,
         "updated_ts": record.modified_ts,
         "faces_count": record.faces_count,
         "faces_detected_ts": None,

@@ -58,6 +58,15 @@ def load_photo_detection_state(database_url: str, photo_id: str) -> tuple[int, d
     return row[0], row[1]
 
 
+def load_photo_row(database_url: str, photo_id: str) -> dict:
+    engine = create_engine(database_url, future=True)
+    with engine.connect() as connection:
+        row = connection.execute(
+            select(photos).where(photos.c.photo_id == photo_id)
+        ).mappings().one()
+    return dict(row)
+
+
 def load_face_rows(database_url: str, photo_id: str) -> list[dict]:
     engine = create_engine(database_url, future=True)
     with engine.connect() as connection:
@@ -497,6 +506,62 @@ def test_process_pending_rows_marks_detection_complete_when_no_faces_found(tmp_p
     completed_rows = queue_store.list_by_status("completed")
     assert len(completed_rows) == 1
     assert completed_rows[0].last_error is None
+
+
+def test_process_pending_rows_preserves_existing_thumbnail_when_queue_payload_has_no_thumbnail_data(
+    tmp_path,
+):
+    database_url = f"sqlite:///{tmp_path / 'queue-processor-preserve-thumbnail.db'}"
+    upgrade_database(database_url)
+    queue_store = IngestQueueStore(database_url)
+    now = datetime.now(tz=UTC)
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            photos.insert().values(
+                photo_id=SAMPLE_PAYLOAD["photo_id"],
+                path=SAMPLE_PAYLOAD["path"],
+                sha256=SAMPLE_PAYLOAD["sha256"],
+                phash=None,
+                filesize=999,
+                ext=SAMPLE_PAYLOAD["ext"],
+                created_ts=now,
+                modified_ts=now,
+                shot_ts=None,
+                shot_ts_source=None,
+                camera_make=None,
+                camera_model=None,
+                software=None,
+                orientation=None,
+                gps_latitude=None,
+                gps_longitude=None,
+                gps_altitude=None,
+                thumbnail_jpeg=b"existing-thumbnail",
+                thumbnail_mime_type="image/jpeg",
+                thumbnail_width=64,
+                thumbnail_height=48,
+                updated_ts=now,
+                faces_count=0,
+                faces_detected_ts=None,
+            )
+        )
+
+    queue_store.enqueue(
+        payload_type="photo_metadata",
+        payload=build_payload(filesize=456, modified_ts="2024-01-03T00:00:00+00:00"),
+        idempotency_key="photo-preserve-thumbnail",
+    )
+
+    result = process_pending_ingest_queue(database_url, limit=10)
+
+    assert result.processed == 1
+    photo_row = load_photo_row(database_url, SAMPLE_PAYLOAD["photo_id"])
+    assert photo_row["filesize"] == 456
+    assert photo_row["thumbnail_jpeg"] == b"existing-thumbnail"
+    assert photo_row["thumbnail_mime_type"] == "image/jpeg"
+    assert photo_row["thumbnail_width"] == 64
+    assert photo_row["thumbnail_height"] == 48
 
 
 def test_process_pending_rows_keeps_photo_ingest_successful_when_detection_fails(tmp_path):
