@@ -134,7 +134,7 @@ The default local DB-service workflow is Compose-based:
 - `make compose-smoke` brings the stack up, enqueues the checked-in seed corpus through the host CLI, processes the queue through the db-service endpoint, and tears the stack back down
 
 The Compose baseline publishes Postgres on host port `5432` by default.
-If you need a different port, override `POSTGRES_PORT` and the matching `COMPOSE_DATABASE_URL`.
+If you need a different port, override `POSTGRES_PORT`, keep `DB_SERVICE_DATABASE_URL` pointed at the `postgres` Compose service, and update the matching host-side `COMPOSE_DATABASE_URL`.
 
 Generated local artifacts should go under `.local/`.
 
