@@ -1,6 +1,13 @@
 from pathlib import Path
 
 
+def test_compose_db_service_uses_dedicated_database_url_env_var():
+    compose = Path("compose.yaml").read_text(encoding="utf-8")
+
+    assert "DB_SERVICE_DATABASE_URL" in compose
+    assert "${DATABASE_URL:-" not in compose
+
+
 def test_makefile_documents_compose_targets():
     makefile = Path("Makefile").read_text(encoding="utf-8")
     assert "compose-up:" in makefile
