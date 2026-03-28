@@ -6,8 +6,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-photoorg}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-photoorg}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${PHOTO_ORG_POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
+      - postgres_data:/var/lib/postgresql/data
       - ./apps/api/docker/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test:
@@ -24,9 +25,12 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     environment:
-      DATABASE_URL: ${DB_SERVICE_DATABASE_URL:-postgresql+psycopg://photoorg:photoorg@postgres:5432/photoorg}
+      DATABASE_URL: ${PHOTO_ORG_DB_SERVICE_DATABASE_URL:-postgresql+psycopg://photoorg:photoorg@postgres:5432/photoorg}
     depends_on:
       postgres:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "${PHOTO_ORG_API_HOST_PORT:-8000}:8000"
+
+volumes:
+  postgres_data:
