@@ -721,3 +721,124 @@ class TestPhotosRepositoryOfflineBrowseIntegration:
         assert response.hits.total == 1
         hit = response.hits.items[0]
         assert hit.original is None
+
+    def test_search_repository_prefers_watched_folder_health_over_storage_source_state(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-watched-folder-availability-precedence.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        now = datetime(2026, 3, 28, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            connection.execute(
+                insert(storage_sources).values(
+                    storage_source_id="source-1",
+                    display_name="Family NAS",
+                    marker_filename=".photo-org-source.json",
+                    marker_version=1,
+                    availability_state="active",
+                    last_failure_reason=None,
+                    last_validated_ts=now,
+                    created_ts=now,
+                    updated_ts=now,
+                )
+            )
+            connection.execute(
+                insert(watched_folders).values(
+                    [
+                        {
+                            "watched_folder_id": "watched-folder-healthy",
+                            "scan_path": "/photos/healthy",
+                            "container_mount_path": "/photos/healthy",
+                            "storage_source_id": "source-1",
+                            "relative_path": "healthy",
+                            "display_name": "Healthy Folder",
+                            "is_enabled": 1,
+                            "availability_state": "active",
+                            "last_failure_reason": None,
+                            "last_successful_scan_ts": now,
+                            "created_ts": now,
+                            "updated_ts": now,
+                        },
+                        {
+                            "watched_folder_id": "watched-folder-unreachable",
+                            "scan_path": "/photos/offline",
+                            "container_mount_path": "/photos/offline",
+                            "storage_source_id": "source-1",
+                            "relative_path": "offline",
+                            "display_name": "Offline Folder",
+                            "is_enabled": 1,
+                            "availability_state": "unreachable",
+                            "last_failure_reason": "permission_denied",
+                            "last_successful_scan_ts": now,
+                            "created_ts": now,
+                            "updated_ts": now,
+                        },
+                    ]
+                )
+            )
+            connection.execute(
+                insert(photos).values(
+                    photo_id="photo-1",
+                    path="/photos/offline/family-events/birthday-park/birthday_park_001.jpg",
+                    sha256="f" * 64,
+                    phash=None,
+                    filesize=100,
+                    ext="jpg",
+                    created_ts=now,
+                    modified_ts=now,
+                    shot_ts=now,
+                    shot_ts_source=None,
+                    camera_make="Apple",
+                    camera_model=None,
+                    software=None,
+                    orientation=None,
+                    gps_latitude=None,
+                    gps_longitude=None,
+                    gps_altitude=None,
+                    thumbnail_jpeg=b"thumbnail-bytes",
+                    thumbnail_mime_type="image/jpeg",
+                    thumbnail_width=64,
+                    thumbnail_height=48,
+                    updated_ts=now,
+                    deleted_ts=None,
+                    faces_count=0,
+                    faces_detected_ts=None,
+                )
+            )
+            connection.execute(
+                insert(photo_files).values(
+                    photo_file_id="photo-file-1",
+                    photo_id="photo-1",
+                    watched_folder_id="watched-folder-unreachable",
+                    relative_path="family-events/birthday-park/birthday_park_001.jpg",
+                    filename="birthday_park_001.jpg",
+                    extension="jpg",
+                    filesize=100,
+                    created_ts=now,
+                    modified_ts=now,
+                    first_seen_ts=now,
+                    last_seen_ts=now,
+                    missing_ts=None,
+                    deleted_ts=None,
+                    lifecycle_state="active",
+                    absence_reason=None,
+                )
+            )
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            service = SearchService(repo=repo)
+            response = service.execute(
+                SearchRequest(
+                    filters=SearchFilters(),
+                    sort=SortSpec(by="shot_ts", dir="desc"),
+                    page=PageSpec(limit=50),
+                )
+            )
+
+        assert response.hits.total == 1
+        hit = response.hits.items[0]
+        assert hit.original is not None
+        assert hit.original.is_available is False
+        assert hit.original.availability_state == "unreachable"
+        assert hit.original.last_failure_reason == "permission_denied"

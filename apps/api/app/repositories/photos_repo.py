@@ -290,13 +290,13 @@ class PhotosRepository:
             if photo_id in availability:
                 continue
             state = (
-                row["storage_source_availability_state"]
-                or row["watched_folder_availability_state"]
+                row["watched_folder_availability_state"]
+                or row["storage_source_availability_state"]
                 or "unknown"
             )
             reason = (
-                row["storage_source_last_failure_reason"]
-                or row["watched_folder_last_failure_reason"]
+                row["watched_folder_last_failure_reason"]
+                or row["storage_source_last_failure_reason"]
             )
             availability[photo_id] = {
                 "is_available": state == "active",
