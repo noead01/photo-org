@@ -160,7 +160,7 @@ compose-smoke: ensure-environment
 		fi; \
 		sleep 1; \
 	done; \
-	./scripts/photo-org ingest seed-corpus --container-mount-path /photos --database-url "$(PHOTO_ORG_COMPOSE_DATABASE_URL)"; \
+	./scripts/photo-org seed-corpus load --database-url "$(PHOTO_ORG_COMPOSE_DATABASE_URL)"; \
 	processed="$$( $(COMPOSE_STACK) exec -T db-service python -c "import json, urllib.request; req = urllib.request.Request('http://localhost:8000/api/v1/internal/ingest-queue/process', data=b'{\"limit\": 1000}', headers={'Content-Type': 'application/json', 'X-Worker-Role': 'ingest-processor'}); print(json.load(urllib.request.urlopen(req))['processed'])" )"; \
 	printf 'processed=%s\n' "$$processed"
 

@@ -34,42 +34,19 @@ def test_cli_wrapper_delegates_main(monkeypatch):
 
     monkeypatch.setattr(api_cli, "main", lambda argv=None: argv)
 
-    assert cli_main.main(["ingest"]) == ["ingest"]
+    assert cli_main.main(["migrate"]) == ["migrate"]
 
 
-def test_ingest_command_parses_root_and_database_url(monkeypatch, tmp_path):
+def test_ingest_command_is_not_supported_anymore(monkeypatch, tmp_path):
     cli_main, api_cli = _import_cli_modules(monkeypatch)
-    calls: list[tuple[Path, dict]] = []
-
-    monkeypatch.setattr(
-        api_cli,
-        "_load_queue_client",
-        lambda: SimpleNamespace(
-            enqueue_directory=lambda root, **kwargs: calls.append((Path(root), kwargs))
-            or SimpleNamespace(scanned=3, enqueued=3, inserted=0, updated=0, errors=[]),
-        ),
-    )
     monkeypatch.setattr(api_cli, "resolve_database_url", lambda database_url: database_url)
 
-    exit_code = cli_main.main(
-        [
-            "ingest",
-            str(tmp_path),
-            "--database-url",
-            "sqlite:///cli.db",
-        ]
-    )
-
-    assert exit_code == 0
-    assert calls == [
-        (
-            tmp_path,
-            {
-                "database_url": "sqlite:///cli.db",
-                "face_detector": None,
-            },
-        )
-    ]
+    try:
+        cli_main.main(["ingest", str(tmp_path)])
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:
+        raise AssertionError("expected ingest command to be rejected")
 
 
 def test_seed_corpus_load_command_parses_database_url(monkeypatch):
@@ -83,11 +60,9 @@ def test_seed_corpus_load_command_parses_database_url(monkeypatch):
     )
     monkeypatch.setattr(
         api_cli,
-        "_load_queue_client",
-        lambda: SimpleNamespace(
-            load_seed_corpus_into_queue=lambda **kwargs: calls.append(("load", kwargs))
-            or {"scanned": 2, "enqueued": 2, "processed": 0},
-        ),
+        "load_seed_corpus_into_database",
+        lambda **kwargs: calls.append(("load", kwargs))
+        or {"scanned": 2, "enqueued": 2, "processed": 0},
     )
     monkeypatch.setattr(api_cli, "resolve_database_url", lambda database_url: database_url)
 
@@ -135,7 +110,7 @@ def test_script_help_text_exposes_expected_commands():
     )
 
     assert result.returncode == 0
-    assert "ingest" in result.stdout
     assert "seed-corpus" in result.stdout
     assert "migrate" in result.stdout
+    assert "ingest" not in result.stdout
     assert "triggering queue processing" not in result.stdout

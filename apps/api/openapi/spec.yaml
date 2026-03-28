@@ -36,6 +36,132 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/storage-sources/{storage_source_id}/watched-folders:
+    get:
+      tags:
+      - storage-sources
+      summary: List Storage Source Watched Folders
+      operationId: list_storage_source_watched_folders_api_v1_storage_sources__storage_source_id__watched_folders_get
+      parameters:
+      - name: storage_source_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Storage Source Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WatchedFolderResponse'
+                title: Response List Storage Source Watched Folders Api V1 Storage
+                  Sources  Storage Source Id  Watched Folders Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - storage-sources
+      summary: Create Storage Source Watched Folder
+      operationId: create_storage_source_watched_folder_api_v1_storage_sources__storage_source_id__watched_folders_post
+      parameters:
+      - name: storage_source_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Storage Source Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWatchedFolderRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WatchedFolderResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/storage-sources/{storage_source_id}/watched-folders/{watched_folder_id}:
+    patch:
+      tags:
+      - storage-sources
+      summary: Update Storage Source Watched Folder
+      operationId: update_storage_source_watched_folder_api_v1_storage_sources__storage_source_id__watched_folders__watched_folder_id__patch
+      parameters:
+      - name: storage_source_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Storage Source Id
+      - name: watched_folder_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Watched Folder Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateWatchedFolderRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WatchedFolderResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - storage-sources
+      summary: Delete Storage Source Watched Folder
+      operationId: delete_storage_source_watched_folder_api_v1_storage_sources__storage_source_id__watched_folders__watched_folder_id__delete
+      parameters:
+      - name: storage_source_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Storage Source Id
+      - name: watched_folder_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Watched Folder Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /healthz:
     get:
       summary: Healthz
@@ -48,6 +174,24 @@ paths:
               schema: {}
 components:
   schemas:
+    CreateWatchedFolderRequest:
+      properties:
+        alias_path:
+          type: string
+          title: Alias Path
+        watched_path:
+          type: string
+          title: Watched Path
+        display_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Display Name
+      type: object
+      required:
+      - alias_path
+      - watched_path
+      title: CreateWatchedFolderRequest
     HTTPValidationError:
       properties:
         detail:
@@ -84,6 +228,15 @@ components:
       - failed
       - retryable_errors
       title: ProcessQueueResponse
+    UpdateWatchedFolderRequest:
+      properties:
+        is_enabled:
+          type: boolean
+          title: Is Enabled
+      type: object
+      required:
+      - is_enabled
+      title: UpdateWatchedFolderRequest
     ValidationError:
       properties:
         loc:
@@ -110,3 +263,54 @@ components:
       - msg
       - type
       title: ValidationError
+    WatchedFolderResponse:
+      properties:
+        watched_folder_id:
+          type: string
+          title: Watched Folder Id
+        storage_source_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Storage Source Id
+        scan_path:
+          type: string
+          title: Scan Path
+        container_mount_path:
+          type: string
+          title: Container Mount Path
+        relative_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Relative Path
+        display_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Display Name
+        is_enabled:
+          type: integer
+          title: Is Enabled
+        availability_state:
+          type: string
+          title: Availability State
+        last_failure_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Last Failure Reason
+        last_successful_scan_ts:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Last Successful Scan Ts
+      type: object
+      required:
+      - watched_folder_id
+      - scan_path
+      - container_mount_path
+      - is_enabled
+      - availability_state
+      title: WatchedFolderResponse

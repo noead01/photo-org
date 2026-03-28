@@ -156,7 +156,7 @@ def test_makefile_documents_compose_smoke_workflow():
     assert "compose-smoke:" in makefile
     assert "compose-e2e-smoke:" in makefile
     assert "compose.ephemeral.yaml" in makefile
-    assert "./scripts/photo-org ingest seed-corpus" in makefile
+    assert "./scripts/photo-org seed-corpus load" in makefile
     assert "/api/v1/internal/ingest-queue/process" in makefile
     assert "make test-e2e" in makefile
     assert "compose-down-volumes" in makefile
