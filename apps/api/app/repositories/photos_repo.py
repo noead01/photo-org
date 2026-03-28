@@ -280,6 +280,7 @@ class PhotosRepository:
             )
             .where(self.photo_files.c.photo_id.in_(photo_ids))
             .where(self.photo_files.c.deleted_ts.is_(None))
+            .where(self.photo_files.c.lifecycle_state == "active")
             .order_by(self.photo_files.c.photo_id, self.photo_files.c.last_seen_ts.desc())
         ).mappings()
 
