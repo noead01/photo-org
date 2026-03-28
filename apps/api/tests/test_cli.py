@@ -4,6 +4,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from app.cli import main
 from app.db.queue import IngestQueueStore
 from app.migrations import upgrade_database
@@ -27,6 +29,7 @@ SEED_CORPUS_SUBSET_PATHS = (
     "seed-corpus/family-events/birthday-park/birthday_park_005.jpg",
     "seed-corpus/family-events/birthday-park/birthday_park_006.jpg",
 )
+SEED_CORPUS_CONTAINER_PATH = "/photos/seed-corpus"
 
 
 def test_resolve_seed_corpus_dir_finds_a_worktree_layout(tmp_path):
@@ -69,6 +72,8 @@ def test_ingest_cli_enqueues_photos_into_queue(monkeypatch, tmp_path):
         [
             "ingest",
             str(staged_corpus_dir),
+            "--container-mount-path",
+            SEED_CORPUS_CONTAINER_PATH,
             "--database-url",
             db_url,
         ]
@@ -95,6 +100,8 @@ def test_ingest_cli_requires_the_queue_client_package(monkeypatch, tmp_path):
             [
                 "ingest",
                 str(staged_corpus_dir),
+                "--container-mount-path",
+                SEED_CORPUS_CONTAINER_PATH,
                 "--database-url",
                 db_url,
             ]
@@ -103,6 +110,26 @@ def test_ingest_cli_requires_the_queue_client_package(monkeypatch, tmp_path):
         assert exc.name == "cli.queue_client"
     else:
         raise AssertionError("expected queue-client import to fail fast")
+
+
+def test_ingest_cli_requires_container_mount_path(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    _use_supported_cli_runtime(monkeypatch)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'cli-ingest.db'}"
+    upgrade_database(db_url)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(
+            [
+                "ingest",
+                str(staged_corpus_dir),
+                "--database-url",
+                db_url,
+            ]
+        )
+
+    assert exc_info.value.code == 2
 
 
 def test_load_queue_client_imports_the_cli_queue_client(monkeypatch):

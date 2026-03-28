@@ -13,6 +13,11 @@ from sqlalchemy.engine import Connection
 
 from app.db.config import resolve_missing_file_grace_period_days
 from app.db.queue import IngestQueueStore
+from app.path_contract import (
+    build_canonical_photo_path,
+    normalize_container_mount_path,
+    relative_photo_path,
+)
 from app.services.file_reconciliation import (
     activate_observed_file,
     ensure_watched_folder_exists,
@@ -68,9 +73,11 @@ def ingest_directory(
     root: str | Path,
     database_url: str | Path | None = None,
     *,
+    container_mount_path: str | Path | None = None,
     face_detector: FaceDetector | None = None,
 ) -> IngestResult:
     source_root = Path(root).expanduser().resolve()
+    canonical_root = normalize_container_mount_path(container_mount_path or source_root)
     result = IngestResult()
 
     queue_store = IngestQueueStore(database_url)
@@ -78,7 +85,11 @@ def ingest_directory(
     for photo_path in iter_photo_files(source_root):
         result.scanned += 1
         try:
-            payload = build_ingest_submission(photo_path)
+            payload = build_ingest_submission(
+                photo_path,
+                scan_root=source_root,
+                container_mount_path=canonical_root,
+            )
             queue_store.enqueue(
                 payload_type="photo_metadata",
                 payload=payload,
@@ -95,10 +106,12 @@ def reconcile_directory(
     root: str | Path,
     database_url: str | Path | None = None,
     *,
+    container_mount_path: str | Path | None = None,
     now: datetime | None = None,
     missing_file_grace_period_days: int | None = None,
 ) -> IngestResult:
     source_root = Path(root).expanduser().resolve()
+    canonical_root = normalize_container_mount_path(container_mount_path or source_root)
     result = IngestResult()
     at = now if now is not None else utc_now()
     grace_period_days = resolve_missing_file_grace_period_days(missing_file_grace_period_days)
@@ -111,7 +124,8 @@ def reconcile_directory(
         with engine.begin() as connection:
             watched_folder_id = ensure_watched_folder_exists(
                 connection,
-                root_path=_display_path(source_root),
+                scan_path=source_root.as_posix(),
+                container_mount_path=canonical_root,
                 now=at,
             )
             record_watched_folder_scan_failure(
@@ -126,7 +140,8 @@ def reconcile_directory(
     with engine.begin() as connection:
         watched_folder_id = ensure_watched_folder_exists(
             connection,
-            root_path=_display_path(source_root),
+            scan_path=source_root.as_posix(),
+            container_mount_path=canonical_root,
             now=at,
         )
         record_watched_folder_scan_success(
@@ -139,8 +154,11 @@ def reconcile_directory(
 
         for photo_path in scanned_paths:
             result.scanned += 1
-            record = build_photo_record(photo_path)
-            relative_path = _display_path(photo_path)
+            relative_path = relative_photo_path(source_root, photo_path)
+            record = build_photo_record(
+                photo_path,
+                canonical_path=build_canonical_photo_path(canonical_root, relative_path),
+            )
             observed_relative_paths.add(relative_path)
             created = upsert_photo(connection, record)
             if created:
@@ -193,18 +211,15 @@ def iter_photo_files(root: Path) -> Iterable[Path]:
     for path in sorted(root.rglob("*")):
         if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
             yield path
-
-
-def build_photo_record(path: Path) -> PhotoRecord:
+def build_photo_record(path: Path, *, canonical_path: str) -> PhotoRecord:
     stat = path.stat()
     image_metadata = extract_image_metadata(path)
-    stored_path = _display_path(path)
     sha256 = _sha256_file(path)
-    photo_id = str(uuid5(NAMESPACE_URL, f"{stored_path}:{sha256}"))
+    photo_id = str(uuid5(NAMESPACE_URL, f"{canonical_path}:{sha256}"))
 
     return PhotoRecord(
         photo_id=photo_id,
-        path=stored_path,
+        path=canonical_path,
         sha256=sha256,
         filesize=stat.st_size,
         ext=path.suffix.lower().lstrip("."),
@@ -222,8 +237,17 @@ def build_photo_record(path: Path) -> PhotoRecord:
     )
 
 
-def build_ingest_submission(path: Path) -> dict:
-    record = build_photo_record(path)
+def build_ingest_submission(
+    path: Path,
+    *,
+    scan_root: Path,
+    container_mount_path: str | Path,
+) -> dict:
+    relative_path = relative_photo_path(scan_root, path)
+    record = build_photo_record(
+        path,
+        canonical_path=build_canonical_photo_path(container_mount_path, relative_path),
+    )
     payload = {
         "photo_id": record.photo_id,
         "path": record.path,
@@ -321,15 +345,6 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def _display_path(path: Path) -> str:
-    try:
-        return path.resolve().relative_to(Path.cwd()).as_posix()
-    except ValueError:
-        return str(path.resolve())
-
-
 def _parse_timestamp(value: str | None) -> datetime | None:
     if value is None:
         return None

@@ -36,7 +36,8 @@ def test_phase_zero_schema_applies_core_constraints():
     ingest_run_files = metadata.tables["ingest_run_files"]
 
     assert photos.c.sha256.unique is True
-    assert watched_folders.c.root_path.unique is True
+    assert watched_folders.c.scan_path.unique is True
+    assert watched_folders.c.container_mount_path.unique is True
     assert [fk.column.table.name for fk in photo_files.c.photo_id.foreign_keys] == ["photos"]
     assert [fk.column.table.name for fk in faces.c.photo_id.foreign_keys] == ["photos"]
     assert ingest_queue.c.idempotency_key.unique is True

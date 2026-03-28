@@ -6,20 +6,23 @@ from uuid import NAMESPACE_URL, uuid5
 from sqlalchemy import insert, select, update
 from sqlalchemy.engine import Connection
 
+from app.path_contract import normalize_container_mount_path
 from app.storage import photo_files, photos, watched_folders
 
 
-def _watched_folder_id_for_root(root_path: str) -> str:
-    return str(uuid5(NAMESPACE_URL, f"watched-folder:{root_path}"))
+def _watched_folder_id_for_scan_path(scan_path: str) -> str:
+    return str(uuid5(NAMESPACE_URL, f"watched-folder:{scan_path}"))
 
 
 def ensure_watched_folder_exists(
     connection: Connection,
     *,
-    root_path: str,
+    scan_path: str,
+    container_mount_path: str,
     now: datetime,
 ) -> str:
-    watched_folder_id = _watched_folder_id_for_root(root_path)
+    normalized_mount_path = normalize_container_mount_path(container_mount_path)
+    watched_folder_id = _watched_folder_id_for_scan_path(scan_path)
     row = connection.execute(
         select(watched_folders.c.watched_folder_id).where(
             watched_folders.c.watched_folder_id == watched_folder_id
@@ -29,8 +32,9 @@ def ensure_watched_folder_exists(
         connection.execute(
             insert(watched_folders).values(
                 watched_folder_id=watched_folder_id,
-                root_path=root_path,
-                display_name=root_path,
+                scan_path=scan_path,
+                container_mount_path=normalized_mount_path,
+                display_name=normalized_mount_path,
                 is_enabled=1,
                 availability_state="active",
                 last_failure_reason=None,
@@ -41,6 +45,14 @@ def ensure_watched_folder_exists(
         )
         return watched_folder_id
 
+    connection.execute(
+        update(watched_folders)
+        .where(watched_folders.c.watched_folder_id == watched_folder_id)
+        .values(
+            container_mount_path=normalized_mount_path,
+            updated_ts=now,
+        )
+    )
     return watched_folder_id
 
 
@@ -83,12 +95,14 @@ def record_watched_folder_scan_failure(
 def ensure_watched_folder(
     connection: Connection,
     *,
-    root_path: str,
+    scan_path: str,
+    container_mount_path: str,
     now: datetime,
 ) -> str:
     watched_folder_id = ensure_watched_folder_exists(
         connection,
-        root_path=root_path,
+        scan_path=scan_path,
+        container_mount_path=container_mount_path,
         now=now,
     )
     record_watched_folder_scan_success(

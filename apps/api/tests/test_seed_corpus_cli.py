@@ -114,5 +114,6 @@ def test_load_seed_corpus_into_database_uses_local_queue_loading(monkeypatch):
     assert calls[0][0] == "ingest"
     assert calls[0][1] == {
         "database_url": "sqlite:///seed.db",
+        "container_mount_path": seed_corpus.resolve_seed_corpus_root(),
     }
     assert calls[1:] == []
