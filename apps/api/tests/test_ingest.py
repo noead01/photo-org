@@ -4,7 +4,7 @@ from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
 import pytest
-from sqlalchemy import create_engine, func, insert, select
+from sqlalchemy import create_engine, event, func, insert, select
 
 from app.db.queue import IngestQueueStore
 from app.migrations import upgrade_database
@@ -650,6 +650,92 @@ def test_reconcile_directory_reports_thumbnail_failures_without_marking_source_u
         f"{SEED_CORPUS_CONTAINER_PATH}/family-events/birthday-park/birthday_park_001.jpg",
     )
     assert photo["thumbnail_jpeg"] is None
+
+
+def test_upsert_photo_skips_thumbnail_lookup_when_record_has_fresh_thumbnail(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'upsert-photo-thumbnail-fast-path.db'}"
+    upgrade_database(database_url)
+    now = datetime(2026, 3, 28, 20, 0, tzinfo=UTC)
+    path = f"{SEED_CORPUS_CONTAINER_PATH}/family-events/birthday-park/birthday_park_001.jpg"
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(photos).values(
+                photo_id="photo-1",
+                path=path,
+                sha256="a" * 64,
+                phash=None,
+                filesize=100,
+                ext="jpg",
+                created_ts=now,
+                modified_ts=now,
+                shot_ts=None,
+                shot_ts_source=None,
+                camera_make=None,
+                camera_model=None,
+                software=None,
+                orientation=None,
+                gps_latitude=None,
+                gps_longitude=None,
+                gps_altitude=None,
+                thumbnail_jpeg=b"old-thumbnail",
+                thumbnail_mime_type="image/jpeg",
+                thumbnail_width=64,
+                thumbnail_height=48,
+                updated_ts=now,
+                faces_count=0,
+                faces_detected_ts=None,
+            )
+        )
+
+    statements: list[str] = []
+
+    @event.listens_for(engine, "before_execute")
+    def capture_sql(conn, clauseelement, multiparams, params, execution_options):
+        statements.append(str(clauseelement))
+
+    try:
+        with engine.begin() as connection:
+            ingest_module.upsert_photo(
+                connection,
+                ingest_module.PhotoRecord(
+                    photo_id="photo-1",
+                    path=path,
+                    sha256="b" * 64,
+                    filesize=101,
+                    ext="jpg",
+                    created_ts=now,
+                    modified_ts=now + timedelta(minutes=1),
+                    shot_ts=None,
+                    shot_ts_source=None,
+                    camera_make=None,
+                    camera_model=None,
+                    software=None,
+                    orientation=None,
+                    gps_latitude=None,
+                    gps_longitude=None,
+                    gps_altitude=None,
+                    thumbnail_jpeg=b"new-thumbnail",
+                    thumbnail_mime_type="image/jpeg",
+                    thumbnail_width=80,
+                    thumbnail_height=60,
+                    faces_count=0,
+                ),
+            )
+    finally:
+        event.remove(engine, "before_execute", capture_sql)
+
+    photo = load_photo_row(database_url, path)
+    assert photo["thumbnail_jpeg"] == b"new-thumbnail"
+    assert photo["thumbnail_width"] == 80
+    assert photo["thumbnail_height"] == 60
+    thumbnail_selects = [
+        statement
+        for statement in statements
+        if "SELECT" in statement and "thumbnail_jpeg" in statement
+    ]
+    assert thumbnail_selects == []
 
 
 def test_photo_is_soft_deleted_only_when_all_file_instances_are_deleted(tmp_path):

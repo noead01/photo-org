@@ -292,13 +292,7 @@ def build_ingest_submission(
 
 def upsert_photo(connection: Connection, record: PhotoRecord) -> bool:
     existing = connection.execute(
-        select(
-            photos.c.photo_id,
-            photos.c.thumbnail_jpeg,
-            photos.c.thumbnail_mime_type,
-            photos.c.thumbnail_width,
-            photos.c.thumbnail_height,
-        ).where(photos.c.path == record.path)
+        select(photos.c.photo_id).where(photos.c.path == record.path)
     ).mappings().first()
 
     thumbnail_jpeg = record.thumbnail_jpeg
@@ -312,10 +306,18 @@ def upsert_photo(connection: Connection, record: PhotoRecord) -> bool:
         and thumbnail_width is None
         and thumbnail_height is None
     ):
-        thumbnail_jpeg = existing["thumbnail_jpeg"]
-        thumbnail_mime_type = existing["thumbnail_mime_type"]
-        thumbnail_width = existing["thumbnail_width"]
-        thumbnail_height = existing["thumbnail_height"]
+        existing_thumbnail = connection.execute(
+            select(
+                photos.c.thumbnail_jpeg,
+                photos.c.thumbnail_mime_type,
+                photos.c.thumbnail_width,
+                photos.c.thumbnail_height,
+            ).where(photos.c.path == record.path)
+        ).mappings().one()
+        thumbnail_jpeg = existing_thumbnail["thumbnail_jpeg"]
+        thumbnail_mime_type = existing_thumbnail["thumbnail_mime_type"]
+        thumbnail_width = existing_thumbnail["thumbnail_width"]
+        thumbnail_height = existing_thumbnail["thumbnail_height"]
 
     payload = {
         "photo_id": record.photo_id,
