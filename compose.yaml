@@ -26,6 +26,10 @@ services:
       dockerfile: apps/api/Dockerfile
     environment:
       DATABASE_URL: ${PHOTO_ORG_DB_SERVICE_DATABASE_URL:-postgresql+psycopg://photoorg:photoorg@postgres:5432/photoorg}
+    volumes:
+      - type: bind
+        source: ${PHOTO_ORG_PHOTO_LIBRARY_HOST_PATH:-./seed-corpus}
+        target: ${PHOTO_ORG_PHOTO_LIBRARY_CONTAINER_PATH:-/photos}
     depends_on:
       postgres:
         condition: service_healthy

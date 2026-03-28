@@ -121,9 +121,9 @@ def test_upgrade_database_creates_ingest_run_files_table_with_indexes(tmp_path):
     } <= {index["name"] for index in indexes}
 
 
-def test_ingest_run_files_migration_downgrade_drops_indexes_before_table(monkeypatch):
-    revision_path = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "20260323_000002_add_ingest_run_files.py"
-    spec = importlib.util.spec_from_file_location("ingest_run_files_revision", revision_path)
+def test_initial_migration_downgrade_drops_ingest_run_files_indexes_before_table(monkeypatch):
+    revision_path = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "20260321_000001_initial_schema.py"
+    spec = importlib.util.spec_from_file_location("initial_schema_revision", revision_path)
     assert spec is not None
     assert spec.loader is not None
     migration = importlib.util.module_from_spec(spec)
@@ -143,7 +143,7 @@ def test_ingest_run_files_migration_downgrade_drops_indexes_before_table(monkeyp
 
     migration.downgrade()
 
-    assert recorded_calls == [
+    assert recorded_calls[:4] == [
         ("drop_index", "idx_ingest_run_files_run_id_outcome", "ingest_run_files"),
         ("drop_index", "idx_ingest_run_files_ingest_queue_id", "ingest_run_files"),
         ("drop_index", "idx_ingest_run_files_ingest_run_id", "ingest_run_files"),
@@ -207,6 +207,7 @@ def test_ingest_succeeds_after_running_migrations(tmp_path):
     result = ingest_directory(
         staged_root,
         database_url=database_url,
+        container_mount_path="/photos/seed-corpus",
     )
 
     assert result.errors == []

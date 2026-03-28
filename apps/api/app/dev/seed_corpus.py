@@ -67,6 +67,7 @@ def load_seed_corpus_into_database(
     ingest_result = ingest_directory(
         resolve_seed_corpus_root(),
         database_url=database_url,
+        container_mount_path=resolve_seed_corpus_root(),
     )
 
     return {

@@ -71,6 +71,8 @@ Each environment is created once with an immutable storage mode, either `persist
 - a PostgreSQL database with the `vector` extension enabled
 - access from the server to the folders that contain the photo library
 
+The API/UI container must mount the photo library at a stable in-container path. When ingesting a watched folder, use that in-container mount path as the folder's `--container-mount-path` so the stored `photos.path` values match what the running container can actually read later.
+
 If you already have PostgreSQL running separately, the application can use that existing database instead of starting another one.
 
 For PostgreSQL environments managed outside the application stack, a database administrator should enable the extension before running application migrations:
@@ -103,6 +105,8 @@ For local operations:
 - `PHOTO_ORG_ENVIRONMENT=<name> make compose-down-volumes` removes containers and deletes a persistent environment's local Postgres volume
 - `PHOTO_ORG_ENVIRONMENT=<name> make compose-smoke` verifies the selected environment using its registered storage mode
 - `PHOTO_ORG_ENV_FILE=/path/to/file.env` can be added when you want a local command to load extra environment-specific settings
+
+The default Compose file now bind-mounts `${PHOTO_ORG_PHOTO_LIBRARY_HOST_PATH}` into `${PHOTO_ORG_PHOTO_LIBRARY_CONTAINER_PATH}` for `db-service`, defaulting to `./seed-corpus` mounted at `/photos`. Watched folders should use paths inside that container mount, not workstation-local paths.
 
 ## Basic Usage
 

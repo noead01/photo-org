@@ -18,6 +18,11 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_parser = subparsers.add_parser("ingest", help="Ingest photos into the configured database")
     ingest_parser.add_argument("root", help="Directory containing photos")
     ingest_parser.add_argument(
+        "--container-mount-path",
+        required=True,
+        help="Absolute path to this watched folder as mounted inside the web/API container.",
+    )
+    ingest_parser.add_argument(
         "--database-url",
         default=None,
         help="SQLAlchemy database URL. Defaults to DATABASE_URL.",
@@ -90,6 +95,7 @@ def main(argv: list[str] | None = None) -> int:
         result = _load_queue_client().enqueue_directory(
             args.root,
             database_url=args.database_url,
+            container_mount_path=args.container_mount_path,
             face_detector=detector,
         )
         database_url = resolve_database_url(args.database_url)
