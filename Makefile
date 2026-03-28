@@ -49,7 +49,7 @@ export PHOTO_ORG_API_HOST_PORT
 export PHOTO_ORG_DB_SERVICE_DATABASE_URL
 export PHOTO_ORG_COMPOSE_DATABASE_URL
 
-.PHONY: help sync lint test test-all test-e2e check pre-push migrate env-create compose-up compose-migrate compose-down compose-down-volumes compose-smoke seed-corpus-check seed-corpus-load ensure-environment
+.PHONY: help sync lint test test-all test-e2e check pre-push migrate env-create compose-up compose-migrate compose-down compose-down-volumes compose-smoke compose-e2e-smoke print-compose-db-url seed-corpus-check seed-corpus-load ensure-environment
 
 help:
 	@printf '%s\n' \
@@ -67,6 +67,7 @@ help:
 		'make compose-down PHOTO_ORG_ENVIRONMENT=<name> - stop and remove the selected environment while preserving named volumes' \
 		'make compose-down-volumes PHOTO_ORG_ENVIRONMENT=<name> - stop and remove the selected environment plus named volumes' \
 		'make compose-smoke PHOTO_ORG_ENVIRONMENT=<name> - verify the selected registered environment using its immutable storage mode' \
+		'make compose-e2e-smoke - create a random ephemeral environment, run compose smoke plus the checked-in e2e suite, then tear it down' \
 		'make seed-corpus-check - validate the checked-in seed corpus' \
 		'make seed-corpus-load  - migrate and load the checked-in seed corpus'
 
@@ -146,7 +147,11 @@ compose-down-volumes: ensure-environment
 
 compose-smoke: ensure-environment
 	@set -e; \
-	trap '$(COMPOSE_STACK) down -v >/dev/null 2>&1 || true' EXIT; \
+	cleanup_cmd='$(COMPOSE_STACK) down -v >/dev/null 2>&1 || true'; \
+	if [ "$(PHOTO_ORG_COMPOSE_SMOKE_KEEP_RUNNING)" = "1" ]; then \
+		cleanup_cmd=':'; \
+	fi; \
+	trap "$$cleanup_cmd" EXIT; \
 	$(COMPOSE_STACK) up --build -d; \
 	until $(COMPOSE_STACK) exec -T db-service python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz').read()" >/dev/null 2>&1; do \
 		if $(COMPOSE_STACK) ps --status exited --services | grep -q '^db-service$$'; then \
@@ -155,9 +160,28 @@ compose-smoke: ensure-environment
 		fi; \
 		sleep 1; \
 	done; \
-	./scripts/photo-org ingest seed-corpus --database-url "$(PHOTO_ORG_COMPOSE_DATABASE_URL)"; \
+	./scripts/photo-org ingest seed-corpus --container-mount-path /photos --database-url "$(PHOTO_ORG_COMPOSE_DATABASE_URL)"; \
 	processed="$$( $(COMPOSE_STACK) exec -T db-service python -c "import json, urllib.request; req = urllib.request.Request('http://localhost:8000/api/v1/internal/ingest-queue/process', data=b'{\"limit\": 1000}', headers={'Content-Type': 'application/json', 'X-Worker-Role': 'ingest-processor'}); print(json.load(urllib.request.urlopen(req))['processed'])" )"; \
 	printf 'processed=%s\n' "$$processed"
+
+print-compose-db-url:
+	@printf '%s\n' "$(PHOTO_ORG_COMPOSE_DATABASE_URL)"
+
+compose-e2e-smoke:
+	@set -eu; \
+	env_name="smoke-$$(date +%Y%m%d%H%M%S)-$$$$"; \
+	env_slug="$$(printf '%s' "$$env_name" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$$//')"; \
+	registry_file="$(PHOTO_ORG_ENV_REGISTRY_DIR)/$$env_slug.mk"; \
+	cleanup() { \
+		env -u PHOTO_ORG_ENVIRONMENT -u PHOTO_ORG_ENV_STORAGE_MODE -u PHOTO_ORG_ENV_REGISTRY_FILE -u PHOTO_ORG_COMPOSE_PROJECT_NAME -u PHOTO_ORG_POSTGRES_HOST_PORT -u PHOTO_ORG_API_HOST_PORT -u PHOTO_ORG_DB_SERVICE_DATABASE_URL -u PHOTO_ORG_COMPOSE_DATABASE_URL $(MAKE) --no-print-directory compose-down-volumes PHOTO_ORG_ENVIRONMENT="$$env_name" PHOTO_ORG_ENV_REGISTRY_DIR="$(PHOTO_ORG_ENV_REGISTRY_DIR)" >/dev/null 2>&1 || true; \
+		rm -f "$$registry_file"; \
+	}; \
+	trap cleanup EXIT; \
+	printf 'smoke_environment=%s\n' "$$env_name"; \
+	env -u PHOTO_ORG_ENVIRONMENT -u PHOTO_ORG_ENV_STORAGE_MODE -u PHOTO_ORG_ENV_REGISTRY_FILE -u PHOTO_ORG_COMPOSE_PROJECT_NAME -u PHOTO_ORG_POSTGRES_HOST_PORT -u PHOTO_ORG_API_HOST_PORT -u PHOTO_ORG_DB_SERVICE_DATABASE_URL -u PHOTO_ORG_COMPOSE_DATABASE_URL $(MAKE) --no-print-directory env-create PHOTO_ORG_ENVIRONMENT="$$env_name" PHOTO_ORG_ENV_STORAGE_MODE=ephemeral PHOTO_ORG_ENV_REGISTRY_DIR="$(PHOTO_ORG_ENV_REGISTRY_DIR)"; \
+	env -u PHOTO_ORG_ENVIRONMENT -u PHOTO_ORG_ENV_STORAGE_MODE -u PHOTO_ORG_ENV_REGISTRY_FILE -u PHOTO_ORG_COMPOSE_PROJECT_NAME -u PHOTO_ORG_POSTGRES_HOST_PORT -u PHOTO_ORG_API_HOST_PORT -u PHOTO_ORG_DB_SERVICE_DATABASE_URL -u PHOTO_ORG_COMPOSE_DATABASE_URL $(MAKE) --no-print-directory compose-smoke PHOTO_ORG_ENVIRONMENT="$$env_name" PHOTO_ORG_ENV_REGISTRY_DIR="$(PHOTO_ORG_ENV_REGISTRY_DIR)" PHOTO_ORG_COMPOSE_SMOKE_KEEP_RUNNING=1; \
+	database_url="$$( env -u PHOTO_ORG_ENVIRONMENT -u PHOTO_ORG_ENV_STORAGE_MODE -u PHOTO_ORG_ENV_REGISTRY_FILE -u PHOTO_ORG_COMPOSE_PROJECT_NAME -u PHOTO_ORG_POSTGRES_HOST_PORT -u PHOTO_ORG_API_HOST_PORT -u PHOTO_ORG_DB_SERVICE_DATABASE_URL -u PHOTO_ORG_COMPOSE_DATABASE_URL $(MAKE) --no-print-directory -s print-compose-db-url PHOTO_ORG_ENVIRONMENT="$$env_name" PHOTO_ORG_ENV_REGISTRY_DIR="$(PHOTO_ORG_ENV_REGISTRY_DIR)" )"; \
+	PHOTO_ORG_E2E_DATABASE_URL="$$database_url" env -u PHOTO_ORG_ENVIRONMENT -u PHOTO_ORG_ENV_STORAGE_MODE -u PHOTO_ORG_ENV_REGISTRY_FILE -u PHOTO_ORG_COMPOSE_PROJECT_NAME -u PHOTO_ORG_POSTGRES_HOST_PORT -u PHOTO_ORG_API_HOST_PORT -u PHOTO_ORG_DB_SERVICE_DATABASE_URL -u PHOTO_ORG_COMPOSE_DATABASE_URL $(MAKE) --no-print-directory test-e2e PHOTO_ORG_ENVIRONMENT="$$env_name" PHOTO_ORG_ENV_REGISTRY_DIR="$(PHOTO_ORG_ENV_REGISTRY_DIR)"
 
 seed-corpus-check:
 	./scripts/photo-org seed-corpus validate

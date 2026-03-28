@@ -14,6 +14,12 @@ def test_seed_corpus_can_be_ingested_and_persisted_end_to_end(seed_corpus_databa
     assert report.errors == []
 
     upgrade_database(seed_corpus_database_url)
+    engine = create_db_engine(seed_corpus_database_url)
+    with engine.connect() as connection:
+        initial_photo_count = connection.execute(
+            select(func.count()).select_from(photos)
+        ).scalar_one()
+
     load_result = load_seed_corpus_into_database(database_url=seed_corpus_database_url)
 
     assert load_result["processed"] == 0
@@ -25,9 +31,12 @@ def test_seed_corpus_can_be_ingested_and_persisted_end_to_end(seed_corpus_databa
         if batch.processed == 0 and batch.retryable_errors == 0:
             break
 
-    assert processed == report.asset_count
+    if initial_photo_count == 0:
+        assert processed == report.asset_count
+    else:
+        assert initial_photo_count == report.asset_count
+        assert processed == 0
 
-    engine = create_db_engine(seed_corpus_database_url)
     with engine.connect() as connection:
         photo_count = connection.execute(select(func.count()).select_from(photos)).scalar_one()
         detected_photo_count = connection.execute(

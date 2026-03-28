@@ -120,6 +120,8 @@ Current high-value targets:
   - stop and remove the selected environment plus the local Postgres volume
 - `make compose-smoke`
   - verify the selected environment by enqueueing work from the host CLI and processing it through the db-service using that environment's immutable storage mode
+- `make compose-e2e-smoke`
+  - create a random ephemeral environment, run `compose-smoke`, run the checked-in e2e suite against that environment's Compose database, then tear everything back down
 - `make seed-corpus-check`
   - validate the checked-in `seed-corpus/` inventory and manifest
 - `make seed-corpus-load`
@@ -151,6 +153,7 @@ Examples:
 - `PHOTO_ORG_ENVIRONMENT=<name> make compose-down` stops and removes that environment's local Compose stack while preserving the named Postgres volume for persistent environments
 - `PHOTO_ORG_ENVIRONMENT=<name> make compose-down-volumes` stops and removes that environment's local Compose stack and deletes the named Postgres volume for persistent environments
 - `PHOTO_ORG_ENVIRONMENT=<name> make compose-smoke` brings the stack up, enqueues the checked-in seed corpus through the host CLI, processes the queue through the db-service endpoint, and tears the stack back down using the environment's registered storage mode
+- `make compose-e2e-smoke` creates a random ephemeral environment, runs `compose-smoke`, runs `make test-e2e` with `PHOTO_ORG_E2E_DATABASE_URL` pointed at that environment's Compose database, and removes the environment plus its registry file on exit
 
 At environment creation time, the selected environment derives and records its own Compose project name plus host Postgres and API ports from `PHOTO_ORG_ENVIRONMENT`.
 If you need to override those defaults, provide `PHOTO_ORG_POSTGRES_HOST_PORT`, `PHOTO_ORG_API_HOST_PORT`, `PHOTO_ORG_DB_SERVICE_DATABASE_URL`, and `PHOTO_ORG_COMPOSE_DATABASE_URL` when running `make env-create`.

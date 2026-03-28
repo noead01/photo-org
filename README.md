@@ -104,6 +104,7 @@ For local operations:
 - `PHOTO_ORG_ENVIRONMENT=<name> make compose-down` removes containers while preserving a persistent environment's named Postgres volume
 - `PHOTO_ORG_ENVIRONMENT=<name> make compose-down-volumes` removes containers and deletes a persistent environment's local Postgres volume
 - `PHOTO_ORG_ENVIRONMENT=<name> make compose-smoke` verifies the selected environment using its registered storage mode
+- `make compose-e2e-smoke` creates a random ephemeral environment, runs `compose-smoke`, runs the checked-in e2e suite against that environment's Compose database, and tears it down automatically
 - `PHOTO_ORG_ENV_FILE=/path/to/file.env` can be added when you want a local command to load extra environment-specific settings
 
 The default Compose file now bind-mounts `${PHOTO_ORG_PHOTO_LIBRARY_HOST_PATH}` into `${PHOTO_ORG_PHOTO_LIBRARY_CONTAINER_PATH}` for `db-service`, defaulting to `./seed-corpus` mounted at `/photos`. Watched folders should use paths inside that container mount, not workstation-local paths.
