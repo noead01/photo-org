@@ -7,13 +7,14 @@ from sqlalchemy import create_engine, func, insert, select
 
 from app.db.queue import IngestQueueStore
 from app.migrations import upgrade_database
+from app.processing import ingest as ingest_module
 from app.processing.ingest import ingest_directory, reconcile_directory
 from app.services.file_reconciliation import (
     activate_observed_file,
     reconcile_watched_folder,
     refresh_photo_deleted_timestamps,
 )
-from app.storage import faces, photo_files, photos
+from app.storage import faces, photo_files, photos, watched_folders
 
 
 def _resolve_seed_corpus_dir(start: Path | None = None) -> Path:
@@ -203,6 +204,11 @@ def test_reconcile_directory_marks_absent_files_missing(tmp_path, monkeypatch):
     assert row["missing_ts"] is not None
     assert row["deleted_ts"] is None
 
+    watched_folder = load_watched_folder_row(db_url, "seed-corpus")
+    assert watched_folder["availability_state"] == "active"
+    assert watched_folder["last_failure_reason"] is None
+    assert watched_folder["last_successful_scan_ts"] is not None
+
 
 def test_reconcile_directory_deletes_missing_file_after_grace_period(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
@@ -230,6 +236,11 @@ def test_reconcile_directory_deletes_missing_file_after_grace_period(tmp_path, m
     assert row["lifecycle_state"] == "deleted"
     assert row["missing_ts"] == now
     assert row["deleted_ts"] == now + timedelta(days=1, seconds=1)
+
+    watched_folder = load_watched_folder_row(db_url, "seed-corpus")
+    assert watched_folder["availability_state"] == "active"
+    assert watched_folder["last_failure_reason"] is None
+    assert watched_folder["last_successful_scan_ts"] == now + timedelta(days=1, seconds=1)
 
 
 def test_reconcile_directory_with_zero_day_grace_immediately_deletes_missing_file(tmp_path, monkeypatch):
@@ -263,6 +274,186 @@ def test_reconcile_directory_with_zero_day_grace_immediately_deletes_missing_fil
     assert row["lifecycle_state"] == "deleted"
     assert row["missing_ts"] == now
     assert row["deleted_ts"] == now
+
+    watched_folder = load_watched_folder_row(db_url, "seed-corpus")
+    assert watched_folder["availability_state"] == "active"
+    assert watched_folder["last_failure_reason"] is None
+    assert watched_folder["last_successful_scan_ts"] == now
+
+
+def test_reconcile_directory_marks_watched_folder_unreachable_when_root_scan_fails(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'reconcile-unreachable.db'}"
+    upgrade_database(db_url)
+
+    healthy_now = datetime(2026, 3, 24, tzinfo=UTC)
+    reconcile_directory(staged_corpus_dir, database_url=db_url, now=healthy_now)
+
+    watched_folder = load_watched_folder_row(db_url, "seed-corpus")
+    assert watched_folder["availability_state"] == "active"
+    assert watched_folder["last_failure_reason"] is None
+    assert watched_folder["last_successful_scan_ts"] == healthy_now
+
+    monkeypatch.setattr("app.processing.ingest.iter_photo_files", _fail_root_scan)
+
+    failure_now = healthy_now + timedelta(minutes=1)
+    reconcile_directory(staged_corpus_dir, database_url=db_url, now=failure_now)
+
+    row = load_watched_folder_row(db_url, "seed-corpus")
+    assert row["availability_state"] == "unreachable"
+    assert row["last_successful_scan_ts"] == healthy_now
+
+
+def test_reconcile_directory_preserves_last_successful_scan_ts_when_root_scan_fails(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'reconcile-preserve-successful-scan-ts.db'}"
+    upgrade_database(db_url)
+
+    healthy_now = datetime(2026, 3, 24, tzinfo=UTC)
+    failure_now = healthy_now + timedelta(minutes=1)
+    reconcile_directory(staged_corpus_dir, database_url=db_url, now=healthy_now)
+
+    monkeypatch.setattr("app.processing.ingest.iter_photo_files", _fail_root_scan)
+    reconcile_directory(staged_corpus_dir, database_url=db_url, now=failure_now)
+
+    row = load_watched_folder_row(db_url, "seed-corpus")
+    assert row["availability_state"] == "unreachable"
+    assert row["last_failure_reason"] == "permission_denied"
+    assert row["last_successful_scan_ts"] == healthy_now
+
+
+@pytest.mark.parametrize(
+    ("root_kind", "expected_root_path"),
+    [
+        ("missing", "missing-root"),
+        ("file", "single-file-root.txt"),
+    ],
+)
+def test_reconcile_directory_marks_missing_or_non_directory_root_unreachable(
+    tmp_path, monkeypatch, root_kind, expected_root_path
+):
+    monkeypatch.chdir(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'reconcile-folder-unmounted.db'}"
+    upgrade_database(db_url)
+
+    if root_kind == "missing":
+        root = tmp_path / "missing-root"
+    else:
+        root = _create_non_directory_root(tmp_path)
+
+    reconcile_directory(root, database_url=db_url, now=datetime(2026, 3, 24, tzinfo=UTC))
+
+    row = load_watched_folder_row(db_url, expected_root_path)
+    assert row["availability_state"] == "unreachable"
+    assert row["last_failure_reason"] == "folder_unmounted"
+    assert row["last_successful_scan_ts"] is None
+
+
+def test_reconcile_directory_does_not_advance_file_lifecycle_when_root_scan_fails(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'reconcile-root-failure.db'}"
+    upgrade_database(db_url)
+
+    healthy_now = datetime(2026, 3, 24, tzinfo=UTC)
+    reconcile_directory(staged_corpus_dir, database_url=db_url, now=healthy_now)
+
+    before = load_photo_file_row(
+        db_url,
+        "seed-corpus/family-events/birthday-park/birthday_park_006.jpg",
+    )
+
+    monkeypatch.setattr("app.processing.ingest.iter_photo_files", _fail_root_scan)
+
+    failure_now = healthy_now + timedelta(minutes=1)
+    reconcile_directory(staged_corpus_dir, database_url=db_url, now=failure_now)
+
+    after = load_photo_file_row(
+        db_url,
+        "seed-corpus/family-events/birthday-park/birthday_park_006.jpg",
+    )
+    assert after["lifecycle_state"] == before["lifecycle_state"]
+    assert after["missing_ts"] == before["missing_ts"]
+    assert after["deleted_ts"] == before["deleted_ts"]
+
+
+def test_reconcile_directory_preserves_parent_photo_deleted_timestamp_when_root_scan_fails(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'reconcile-root-failure-parent-photo.db'}"
+    upgrade_database(db_url)
+
+    now = datetime(2026, 3, 24, tzinfo=UTC)
+    reconcile_directory(staged_corpus_dir, database_url=db_url, now=now)
+
+    missing_path = staged_corpus_dir / "family-events" / "birthday-park" / "birthday_park_006.jpg"
+    missing_path.unlink()
+
+    reconcile_directory(staged_corpus_dir, database_url=db_url, now=now)
+    deleted_now = now + timedelta(days=1, seconds=1)
+    reconcile_directory(staged_corpus_dir, database_url=db_url, now=deleted_now)
+
+    deleted_row = load_photo_file_row(
+        db_url,
+        "seed-corpus/family-events/birthday-park/birthday_park_006.jpg",
+    )
+    deleted_before = load_photo_deleted_ts(
+        db_url,
+        deleted_row["photo_id"],
+    )
+    assert deleted_before == deleted_now
+
+    monkeypatch.setattr("app.processing.ingest.iter_photo_files", _fail_root_scan)
+
+    failure_now = deleted_now + timedelta(minutes=1)
+    reconcile_directory(staged_corpus_dir, database_url=db_url, now=failure_now)
+
+    deleted_after = load_photo_deleted_ts(
+        db_url,
+        deleted_row["photo_id"],
+    )
+    assert deleted_after == deleted_before
+
+
+def test_reconcile_directory_clears_unreachable_state_after_later_healthy_scan(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'reconcile-recovery.db'}"
+    upgrade_database(db_url)
+
+    healthy_now = datetime(2026, 3, 24, tzinfo=UTC)
+    reconcile_directory(staged_corpus_dir, database_url=db_url, now=healthy_now)
+
+    original_iter_photo_files = ingest_module.iter_photo_files
+    monkeypatch.setattr("app.processing.ingest.iter_photo_files", _fail_root_scan)
+
+    failure_now = healthy_now + timedelta(minutes=1)
+    reconcile_directory(staged_corpus_dir, database_url=db_url, now=failure_now)
+
+    monkeypatch.setattr(
+        "app.processing.ingest.iter_photo_files",
+        original_iter_photo_files,
+    )
+
+    recovered_now = healthy_now + timedelta(minutes=2)
+    reconcile_directory(staged_corpus_dir, database_url=db_url, now=recovered_now)
+
+    row = load_watched_folder_row(db_url, "seed-corpus")
+    assert row["availability_state"] == "active"
+    assert row["last_failure_reason"] is None
+    assert row["last_successful_scan_ts"] == recovered_now
 
 
 def test_photo_is_soft_deleted_only_when_all_file_instances_are_deleted(tmp_path):
@@ -326,6 +517,20 @@ def load_photo_count(database_url: str) -> int:
     engine = create_engine(database_url, future=True)
     with engine.connect() as connection:
         return connection.execute(select(func.count()).select_from(photos)).scalar_one()
+
+
+def load_watched_folder_row(database_url: str, root_path: str) -> dict:
+    engine = create_engine(database_url, future=True)
+    with engine.connect() as connection:
+        row = connection.execute(
+            select(watched_folders).where(watched_folders.c.root_path == root_path)
+        ).mappings().one()
+    payload = dict(row)
+    for key in ("created_ts", "updated_ts", "last_successful_scan_ts"):
+        value = payload.get(key)
+        if isinstance(value, datetime) and value.tzinfo is None:
+            payload[key] = value.replace(tzinfo=UTC)
+    return payload
 
 
 def load_pending_queue_count(database_url: str) -> int:
@@ -486,6 +691,16 @@ def seed_deleted_photo_with_file_instance(database_url: str, *, deleted_ts: date
                 absence_reason="path_removed",
             )
         )
+
+
+def _fail_root_scan(_: Path):
+    raise PermissionError("root unavailable")
+
+
+def _create_non_directory_root(tmp_path: Path) -> Path:
+    root = tmp_path / "single-file-root.txt"
+    root.write_text("not a directory")
+    return root
 
 
 class UnusedFaceDetector:

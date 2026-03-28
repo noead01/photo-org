@@ -4,6 +4,7 @@ import hashlib
 from datetime import UTC, datetime
 from dataclasses import dataclass, field
 from pathlib import Path
+from stat import S_ISDIR
 from typing import Iterable, Protocol
 from uuid import NAMESPACE_URL, uuid5
 
@@ -14,7 +15,9 @@ from app.db.config import resolve_missing_file_grace_period_days
 from app.db.queue import IngestQueueStore
 from app.services.file_reconciliation import (
     activate_observed_file,
-    ensure_watched_folder,
+    ensure_watched_folder_exists,
+    record_watched_folder_scan_failure,
+    record_watched_folder_scan_success,
     refresh_photo_deleted_timestamps,
     reconcile_watched_folder,
     utc_now,
@@ -100,17 +103,41 @@ def reconcile_directory(
     at = now if now is not None else utc_now()
     grace_period_days = resolve_missing_file_grace_period_days(missing_file_grace_period_days)
 
+    try:
+        _validate_scan_root(source_root)
+        scanned_paths = list(iter_photo_files(source_root))
+    except OSError as exc:
+        engine = create_db_engine(database_url)
+        with engine.begin() as connection:
+            watched_folder_id = ensure_watched_folder_exists(
+                connection,
+                root_path=_display_path(source_root),
+                now=at,
+            )
+            record_watched_folder_scan_failure(
+                connection,
+                watched_folder_id=watched_folder_id,
+                reason=_classify_root_scan_failure(exc),
+                now=at,
+            )
+        return result
+
     engine = create_db_engine(database_url)
     with engine.begin() as connection:
-        watched_folder_id = ensure_watched_folder(
+        watched_folder_id = ensure_watched_folder_exists(
             connection,
             root_path=_display_path(source_root),
+            now=at,
+        )
+        record_watched_folder_scan_success(
+            connection,
+            watched_folder_id=watched_folder_id,
             now=at,
         )
         observed_relative_paths: set[str] = set()
         touched_photo_ids: set[str] = set()
 
-        for photo_path in iter_photo_files(source_root):
+        for photo_path in scanned_paths:
             result.scanned += 1
             record = build_photo_record(photo_path)
             relative_path = _display_path(photo_path)
@@ -147,6 +174,19 @@ def reconcile_directory(
         refresh_photo_deleted_timestamps(connection, photo_ids=touched_photo_ids, now=at)
 
     return result
+
+
+def _validate_scan_root(root: Path) -> None:
+    if not S_ISDIR(root.stat().st_mode):
+        raise NotADirectoryError(str(root))
+
+
+def _classify_root_scan_failure(exc: OSError) -> str:
+    if isinstance(exc, PermissionError):
+        return "permission_denied"
+    if isinstance(exc, (FileNotFoundError, NotADirectoryError)):
+        return "folder_unmounted"
+    return "io_error"
 
 
 def iter_photo_files(root: Path) -> Iterable[Path]:
