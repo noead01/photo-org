@@ -108,14 +108,18 @@ Current high-value targets:
   - run the local validation path expected before pushing changes
 - `make migrate`
   - apply database migrations from the repo root through the wrapper script
+- `make env-create`
+  - register a local environment with an immutable storage mode and derived local runtime settings
 - `make compose-up`
-  - build and start the Compose baseline with postgres plus db-service
+  - build and start the registered Compose runtime for the selected `PHOTO_ORG_ENVIRONMENT`
 - `make compose-migrate`
-  - rerun database migrations against the Compose baseline without starting the app server
+  - rerun database migrations against the registered Compose runtime for the selected `PHOTO_ORG_ENVIRONMENT`
 - `make compose-down`
-  - stop and remove the Compose baseline
+  - stop and remove the selected environment while preserving named volumes
+- `make compose-down-volumes`
+  - stop and remove the selected environment plus the local Postgres volume
 - `make compose-smoke`
-  - verify the Compose baseline by enqueueing work from the host CLI and processing it through the db-service
+  - verify the selected environment by enqueueing work from the host CLI and processing it through the db-service using that environment's immutable storage mode
 - `make seed-corpus-check`
   - validate the checked-in `seed-corpus/` inventory and manifest
 - `make seed-corpus-load`
@@ -126,15 +130,30 @@ Current high-value targets:
 The `pre-push` target is intentionally scoped to checks that are currently expected to pass on this repo state.
 As broader lint and type-check coverage is cleaned up, that target should expand rather than drift into a second undocumented workflow.
 
-The default local DB-service workflow is Compose-based:
+The default local DB-service workflow is Compose-based and environment-aware.
 
-- `make compose-up` starts postgres and the db-service container
-- `make compose-migrate` reruns schema migration against an existing Compose volume
-- `make compose-down` stops and removes the local Compose stack
-- `make compose-smoke` brings the stack up, enqueues the checked-in seed corpus through the host CLI, processes the queue through the db-service endpoint, and tears the stack back down
+Public local runtime variables are namespaced with `PHOTO_ORG_` so they do not collide with other systems on the same workstation.
+Use `PHOTO_ORG_ENVIRONMENT=<name>` to select a registered local environment, and `make env-create` to create one.
+Environment definitions live under `.local/environments/` and are the authoritative local registry for immutable runtime settings, including storage mode.
+Optionally provide `PHOTO_ORG_ENV_FILE=/path/to/file.env` to load extra configuration for that environment without changing the registry-backed settings.
 
-The Compose baseline publishes Postgres on host port `5432` by default.
-If you need a different port, override `POSTGRES_PORT`, keep `DB_SERVICE_DATABASE_URL` pointed at the `postgres` Compose service, and update the matching host-side `COMPOSE_DATABASE_URL`.
+Examples:
+
+- `make env-create PHOTO_ORG_ENVIRONMENT=dev PHOTO_ORG_ENV_STORAGE_MODE=persistent`
+- `make env-create PHOTO_ORG_ENVIRONMENT=scratch PHOTO_ORG_ENV_STORAGE_MODE=ephemeral`
+- `PHOTO_ORG_ENVIRONMENT=dev make compose-up`
+- `PHOTO_ORG_ENVIRONMENT=alice make compose-up`
+- `PHOTO_ORG_ENVIRONMENT=alice make compose-down`
+- `PHOTO_ORG_ENVIRONMENT=alice PHOTO_ORG_ENV_FILE=.env.alice make compose-migrate`
+
+- `PHOTO_ORG_ENVIRONMENT=<name> make compose-up` starts postgres and the db-service container for that environment
+- `PHOTO_ORG_ENVIRONMENT=<name> make compose-migrate` reruns schema migration against that environment's Compose-managed database
+- `PHOTO_ORG_ENVIRONMENT=<name> make compose-down` stops and removes that environment's local Compose stack while preserving the named Postgres volume for persistent environments
+- `PHOTO_ORG_ENVIRONMENT=<name> make compose-down-volumes` stops and removes that environment's local Compose stack and deletes the named Postgres volume for persistent environments
+- `PHOTO_ORG_ENVIRONMENT=<name> make compose-smoke` brings the stack up, enqueues the checked-in seed corpus through the host CLI, processes the queue through the db-service endpoint, and tears the stack back down using the environment's registered storage mode
+
+At environment creation time, the selected environment derives and records its own Compose project name plus host Postgres and API ports from `PHOTO_ORG_ENVIRONMENT`.
+If you need to override those defaults, provide `PHOTO_ORG_POSTGRES_HOST_PORT`, `PHOTO_ORG_API_HOST_PORT`, `PHOTO_ORG_DB_SERVICE_DATABASE_URL`, and `PHOTO_ORG_COMPOSE_DATABASE_URL` when running `make env-create`.
 
 Generated local artifacts should go under `.local/`.
 

@@ -61,7 +61,9 @@ The intended installation model is:
 - one background worker
 - one PostgreSQL database
 
-The preferred packaging model is Docker Compose, and the default local baseline is the Compose-managed `postgres` plus `db-service` stack.
+The preferred packaging model is Docker Compose, and local operation should support multiple named Photo Organizer environments on one machine.
+Each local environment is an isolated Compose-managed `postgres` plus `db-service` stack selected with `PHOTO_ORG_ENVIRONMENT=<name>`.
+Each environment is created once with an immutable storage mode, either `persistent` or `ephemeral`.
 
 ### Prerequisites
 
@@ -82,14 +84,25 @@ CREATE EXTENSION IF NOT EXISTS vector;
 At a high level, setup should look like this:
 
 1. configure the application environment
-2. start the Compose baseline with `make compose-up`
-3. rerun migrations with `make compose-migrate` if you need to repair an existing Compose volume
-4. open the web interface once the service is healthy
-5. sign in as an admin
-6. add one or more watched folders
-7. let the system ingest the initial corpus
+2. create an environment with `make env-create PHOTO_ORG_ENVIRONMENT=dev PHOTO_ORG_ENV_STORAGE_MODE=persistent`
+3. start it with `PHOTO_ORG_ENVIRONMENT=dev make compose-up`
+4. rerun migrations with `PHOTO_ORG_ENVIRONMENT=dev make compose-migrate` if you need to repair its database
+5. open the web interface once the service is healthy
+6. sign in as an admin
+7. add one or more watched folders
+8. let the system ingest the initial corpus
 
 Once that is done, users should be able to browse, search, and validate faces from the web UI.
+
+For local operations:
+
+- `make env-create PHOTO_ORG_ENVIRONMENT=<name> PHOTO_ORG_ENV_STORAGE_MODE=persistent` registers a persistent environment with its own named Postgres volume
+- `make env-create PHOTO_ORG_ENVIRONMENT=<name> PHOTO_ORG_ENV_STORAGE_MODE=ephemeral` registers an ephemeral environment whose database lives only for the container lifecycle
+- `PHOTO_ORG_ENVIRONMENT=<name> make compose-up` starts the selected registered environment
+- `PHOTO_ORG_ENVIRONMENT=<name> make compose-down` removes containers while preserving a persistent environment's named Postgres volume
+- `PHOTO_ORG_ENVIRONMENT=<name> make compose-down-volumes` removes containers and deletes a persistent environment's local Postgres volume
+- `PHOTO_ORG_ENVIRONMENT=<name> make compose-smoke` verifies the selected environment using its registered storage mode
+- `PHOTO_ORG_ENV_FILE=/path/to/file.env` can be added when you want a local command to load extra environment-specific settings
 
 ## Basic Usage
 

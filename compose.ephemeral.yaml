@@ -1,0 +1,6 @@
+services:
+  postgres:
+    volumes:
+      - type: tmpfs
+        target: /var/lib/postgresql/data
+      - ./apps/api/docker/initdb:/docker-entrypoint-initdb.d:ro
