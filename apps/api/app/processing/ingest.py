@@ -28,6 +28,7 @@ from app.services.file_reconciliation import (
     utc_now,
 )
 from app.processing.metadata import extract_image_metadata, stat_timestamp_to_iso
+from app.services.thumbnails import generate_thumbnail
 from app.storage import create_db_engine, faces, photos
 
 
@@ -57,6 +58,10 @@ class PhotoRecord:
     gps_latitude: float | None
     gps_longitude: float | None
     gps_altitude: float | None
+    thumbnail_jpeg: bytes | None = None
+    thumbnail_mime_type: str | None = None
+    thumbnail_width: int | None = None
+    thumbnail_height: int | None = None
     faces_count: int = 0
 
 
@@ -159,6 +164,20 @@ def reconcile_directory(
                 photo_path,
                 canonical_path=build_canonical_photo_path(canonical_root, relative_path),
             )
+            try:
+                thumbnail = generate_thumbnail(photo_path)
+            except Exception as exc:
+                result.errors.append(f"{photo_path}: thumbnail generation failed: {exc}")
+            else:
+                record = PhotoRecord(
+                    **{
+                        **record.__dict__,
+                        "thumbnail_jpeg": thumbnail.jpeg_bytes,
+                        "thumbnail_mime_type": thumbnail.mime_type,
+                        "thumbnail_width": thumbnail.width,
+                        "thumbnail_height": thumbnail.height,
+                    }
+                )
             observed_relative_paths.add(relative_path)
             created = upsert_photo(connection, record)
             if created:
@@ -274,7 +293,31 @@ def build_ingest_submission(
 def upsert_photo(connection: Connection, record: PhotoRecord) -> bool:
     existing = connection.execute(
         select(photos.c.photo_id).where(photos.c.path == record.path)
-    ).first()
+    ).mappings().first()
+
+    thumbnail_jpeg = record.thumbnail_jpeg
+    thumbnail_mime_type = record.thumbnail_mime_type
+    thumbnail_width = record.thumbnail_width
+    thumbnail_height = record.thumbnail_height
+    if (
+        existing is not None
+        and thumbnail_jpeg is None
+        and thumbnail_mime_type is None
+        and thumbnail_width is None
+        and thumbnail_height is None
+    ):
+        existing_thumbnail = connection.execute(
+            select(
+                photos.c.thumbnail_jpeg,
+                photos.c.thumbnail_mime_type,
+                photos.c.thumbnail_width,
+                photos.c.thumbnail_height,
+            ).where(photos.c.path == record.path)
+        ).mappings().one()
+        thumbnail_jpeg = existing_thumbnail["thumbnail_jpeg"]
+        thumbnail_mime_type = existing_thumbnail["thumbnail_mime_type"]
+        thumbnail_width = existing_thumbnail["thumbnail_width"]
+        thumbnail_height = existing_thumbnail["thumbnail_height"]
 
     payload = {
         "photo_id": record.photo_id,
@@ -294,6 +337,10 @@ def upsert_photo(connection: Connection, record: PhotoRecord) -> bool:
         "gps_latitude": record.gps_latitude,
         "gps_longitude": record.gps_longitude,
         "gps_altitude": record.gps_altitude,
+        "thumbnail_jpeg": thumbnail_jpeg,
+        "thumbnail_mime_type": thumbnail_mime_type,
+        "thumbnail_width": thumbnail_width,
+        "thumbnail_height": thumbnail_height,
         "updated_ts": record.modified_ts,
         "faces_count": record.faces_count,
         "faces_detected_ts": None,

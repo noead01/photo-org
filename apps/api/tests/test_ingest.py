@@ -1,9 +1,10 @@
 from datetime import UTC, datetime, timedelta
 import shutil
 from pathlib import Path
+from uuid import NAMESPACE_URL, uuid5
 
 import pytest
-from sqlalchemy import create_engine, func, insert, select
+from sqlalchemy import create_engine, event, func, insert, select
 
 from app.db.queue import IngestQueueStore
 from app.migrations import upgrade_database
@@ -14,7 +15,8 @@ from app.services.file_reconciliation import (
     reconcile_watched_folder,
     refresh_photo_deleted_timestamps,
 )
-from app.storage import faces, photo_files, photos, watched_folders
+from app.services.storage_sources import create_storage_source
+from app.storage import faces, photo_files, photos, storage_sources, watched_folders
 
 
 def _resolve_seed_corpus_dir(start: Path | None = None) -> Path:
@@ -549,6 +551,193 @@ def test_reconcile_directory_clears_unreachable_state_after_later_healthy_scan(
     assert row["last_successful_scan_ts"] == recovered_now
 
 
+def test_reconcile_directory_persists_thumbnail_and_keeps_it_when_source_goes_offline(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'reconcile-thumbnails.db'}"
+    upgrade_database(db_url)
+
+    healthy_now = datetime(2026, 3, 28, 19, 0, tzinfo=UTC)
+    source_id = seed_linked_storage_source(
+        db_url,
+        scan_root=staged_corpus_dir,
+        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
+        now=healthy_now,
+    )
+
+    reconcile_directory(
+        staged_corpus_dir,
+        database_url=db_url,
+        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
+        now=healthy_now,
+    )
+
+    photo = load_photo_row(
+        db_url,
+        f"{SEED_CORPUS_CONTAINER_PATH}/family-events/birthday-park/birthday_park_001.jpg",
+    )
+    assert photo["thumbnail_mime_type"] == "image/jpeg"
+    assert photo["thumbnail_width"] > 0
+    assert photo["thumbnail_height"] > 0
+    assert isinstance(photo["thumbnail_jpeg"], bytes)
+    assert len(photo["thumbnail_jpeg"]) > 0
+
+    monkeypatch.setattr("app.processing.ingest.iter_photo_files", _fail_root_scan)
+
+    offline_now = healthy_now + timedelta(minutes=1)
+    reconcile_directory(
+        staged_corpus_dir,
+        database_url=db_url,
+        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
+        now=offline_now,
+    )
+
+    source = load_storage_source_row(db_url, source_id)
+    assert source["availability_state"] == "unreachable"
+    assert source["last_failure_reason"] == "permission_denied"
+
+    preserved = load_photo_row(
+        db_url,
+        f"{SEED_CORPUS_CONTAINER_PATH}/family-events/birthday-park/birthday_park_001.jpg",
+    )
+    assert preserved["thumbnail_jpeg"] == photo["thumbnail_jpeg"]
+    assert preserved["thumbnail_width"] == photo["thumbnail_width"]
+    assert preserved["thumbnail_height"] == photo["thumbnail_height"]
+
+
+def test_reconcile_directory_reports_thumbnail_failures_without_marking_source_unreachable(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'reconcile-thumbnail-errors.db'}"
+    upgrade_database(db_url)
+
+    now = datetime(2026, 3, 28, 19, 30, tzinfo=UTC)
+    source_id = seed_linked_storage_source(
+        db_url,
+        scan_root=staged_corpus_dir,
+        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
+        now=now,
+    )
+
+    monkeypatch.setattr(
+        "app.processing.ingest.generate_thumbnail",
+        lambda _: (_ for _ in ()).throw(RuntimeError("thumbnail exploded")),
+    )
+
+    result = reconcile_directory(
+        staged_corpus_dir,
+        database_url=db_url,
+        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
+        now=now,
+    )
+
+    assert result.scanned == 6
+    assert result.inserted == 6
+    assert result.updated == 0
+    assert len(result.errors) == 6
+    assert all("thumbnail exploded" in error for error in result.errors)
+
+    source = load_storage_source_row(db_url, source_id)
+    assert source["availability_state"] == "active"
+    assert source["last_failure_reason"] is None
+
+    photo = load_photo_row(
+        db_url,
+        f"{SEED_CORPUS_CONTAINER_PATH}/family-events/birthday-park/birthday_park_001.jpg",
+    )
+    assert photo["thumbnail_jpeg"] is None
+
+
+def test_upsert_photo_skips_thumbnail_lookup_when_record_has_fresh_thumbnail(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'upsert-photo-thumbnail-fast-path.db'}"
+    upgrade_database(database_url)
+    now = datetime(2026, 3, 28, 20, 0, tzinfo=UTC)
+    path = f"{SEED_CORPUS_CONTAINER_PATH}/family-events/birthday-park/birthday_park_001.jpg"
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(photos).values(
+                photo_id="photo-1",
+                path=path,
+                sha256="a" * 64,
+                phash=None,
+                filesize=100,
+                ext="jpg",
+                created_ts=now,
+                modified_ts=now,
+                shot_ts=None,
+                shot_ts_source=None,
+                camera_make=None,
+                camera_model=None,
+                software=None,
+                orientation=None,
+                gps_latitude=None,
+                gps_longitude=None,
+                gps_altitude=None,
+                thumbnail_jpeg=b"old-thumbnail",
+                thumbnail_mime_type="image/jpeg",
+                thumbnail_width=64,
+                thumbnail_height=48,
+                updated_ts=now,
+                faces_count=0,
+                faces_detected_ts=None,
+            )
+        )
+
+    statements: list[str] = []
+
+    @event.listens_for(engine, "before_execute")
+    def capture_sql(conn, clauseelement, multiparams, params, execution_options):
+        statements.append(str(clauseelement))
+
+    try:
+        with engine.begin() as connection:
+            ingest_module.upsert_photo(
+                connection,
+                ingest_module.PhotoRecord(
+                    photo_id="photo-1",
+                    path=path,
+                    sha256="b" * 64,
+                    filesize=101,
+                    ext="jpg",
+                    created_ts=now,
+                    modified_ts=now + timedelta(minutes=1),
+                    shot_ts=None,
+                    shot_ts_source=None,
+                    camera_make=None,
+                    camera_model=None,
+                    software=None,
+                    orientation=None,
+                    gps_latitude=None,
+                    gps_longitude=None,
+                    gps_altitude=None,
+                    thumbnail_jpeg=b"new-thumbnail",
+                    thumbnail_mime_type="image/jpeg",
+                    thumbnail_width=80,
+                    thumbnail_height=60,
+                    faces_count=0,
+                ),
+            )
+    finally:
+        event.remove(engine, "before_execute", capture_sql)
+
+    photo = load_photo_row(database_url, path)
+    assert photo["thumbnail_jpeg"] == b"new-thumbnail"
+    assert photo["thumbnail_width"] == 80
+    assert photo["thumbnail_height"] == 60
+    thumbnail_selects = [
+        statement
+        for statement in statements
+        if "SELECT" in statement and "thumbnail_jpeg" in statement
+    ]
+    assert thumbnail_selects == []
+
+
 def test_photo_is_soft_deleted_only_when_all_file_instances_are_deleted(tmp_path):
     database_url = f"sqlite:///{tmp_path / 'photo-soft-delete.db'}"
     upgrade_database(database_url)
@@ -612,6 +801,20 @@ def load_photo_count(database_url: str) -> int:
         return connection.execute(select(func.count()).select_from(photos)).scalar_one()
 
 
+def load_photo_row(database_url: str, path: str) -> dict:
+    engine = create_engine(database_url, future=True)
+    with engine.connect() as connection:
+        row = connection.execute(
+            select(photos).where(photos.c.path == path)
+        ).mappings().one()
+    payload = dict(row)
+    for key in ("created_ts", "modified_ts", "shot_ts", "updated_ts", "deleted_ts", "faces_detected_ts"):
+        value = payload.get(key)
+        if isinstance(value, datetime) and value.tzinfo is None:
+            payload[key] = value.replace(tzinfo=UTC)
+    return payload
+
+
 def load_watched_folder_row(database_url: str, container_mount_path: str) -> dict:
     engine = create_engine(database_url, future=True)
     with engine.connect() as connection:
@@ -667,6 +870,57 @@ def load_photo_deleted_ts(database_url: str, photo_id: str) -> datetime | None:
     if isinstance(deleted_ts, datetime) and deleted_ts.tzinfo is None:
         return deleted_ts.replace(tzinfo=UTC)
     return deleted_ts
+
+
+def load_storage_source_row(database_url: str, storage_source_id: str) -> dict:
+    engine = create_engine(database_url, future=True)
+    with engine.connect() as connection:
+        row = connection.execute(
+            select(storage_sources).where(storage_sources.c.storage_source_id == storage_source_id)
+        ).mappings().one()
+    payload = dict(row)
+    for key in ("last_validated_ts", "created_ts", "updated_ts"):
+        value = payload.get(key)
+        if isinstance(value, datetime) and value.tzinfo is None:
+            payload[key] = value.replace(tzinfo=UTC)
+    return payload
+
+
+def seed_linked_storage_source(
+    database_url: str,
+    *,
+    scan_root: Path,
+    container_mount_path: str,
+    now: datetime,
+) -> str:
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        source = create_storage_source(
+            connection,
+            display_name="Family NAS",
+            marker_filename=".photo-org-source.json",
+            marker_version=1,
+            now=now,
+        )
+        connection.execute(
+            insert(watched_folders).values(
+                watched_folder_id=str(
+                    uuid5(NAMESPACE_URL, f"watched-folder:{scan_root.resolve().as_posix()}")
+                ),
+                scan_path=scan_root.resolve().as_posix(),
+                container_mount_path=container_mount_path,
+                storage_source_id=source["storage_source_id"],
+                relative_path=".",
+                display_name="Family NAS / seed-corpus",
+                is_enabled=1,
+                availability_state="active",
+                last_failure_reason=None,
+                last_successful_scan_ts=None,
+                created_ts=now,
+                updated_ts=now,
+            )
+        )
+    return str(source["storage_source_id"])
 
 
 def seed_photo_with_file_instances(database_url: str) -> None:

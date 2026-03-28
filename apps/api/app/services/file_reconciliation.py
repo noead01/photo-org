@@ -7,7 +7,7 @@ from sqlalchemy import insert, select, update
 from sqlalchemy.engine import Connection
 
 from app.path_contract import normalize_container_mount_path
-from app.storage import photo_files, photos, watched_folders
+from app.storage import photo_files, photos, storage_sources, watched_folders
 
 
 def _watched_folder_id_for_scan_path(scan_path: str) -> str:
@@ -62,6 +62,11 @@ def record_watched_folder_scan_success(
     watched_folder_id: str,
     now: datetime,
 ) -> None:
+    storage_source_id = connection.execute(
+        select(watched_folders.c.storage_source_id).where(
+            watched_folders.c.watched_folder_id == watched_folder_id
+        )
+    ).scalar_one_or_none()
     connection.execute(
         update(watched_folders)
         .where(watched_folders.c.watched_folder_id == watched_folder_id)
@@ -72,6 +77,17 @@ def record_watched_folder_scan_success(
             updated_ts=now,
         )
     )
+    if storage_source_id is not None:
+        connection.execute(
+            update(storage_sources)
+            .where(storage_sources.c.storage_source_id == storage_source_id)
+            .values(
+                availability_state="active",
+                last_failure_reason=None,
+                last_validated_ts=now,
+                updated_ts=now,
+            )
+        )
 
 
 def record_watched_folder_scan_failure(
@@ -81,6 +97,11 @@ def record_watched_folder_scan_failure(
     reason: str,
     now: datetime,
 ) -> None:
+    storage_source_id = connection.execute(
+        select(watched_folders.c.storage_source_id).where(
+            watched_folders.c.watched_folder_id == watched_folder_id
+        )
+    ).scalar_one_or_none()
     connection.execute(
         update(watched_folders)
         .where(watched_folders.c.watched_folder_id == watched_folder_id)
@@ -90,6 +111,17 @@ def record_watched_folder_scan_failure(
             updated_ts=now,
         )
     )
+    if storage_source_id is not None:
+        connection.execute(
+            update(storage_sources)
+            .where(storage_sources.c.storage_source_id == storage_source_id)
+            .values(
+                availability_state="unreachable",
+                last_failure_reason=reason,
+                last_validated_ts=now,
+                updated_ts=now,
+            )
+        )
 
 
 def ensure_watched_folder(

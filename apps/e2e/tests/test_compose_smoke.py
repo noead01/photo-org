@@ -1,13 +1,20 @@
+import os
 import subprocess
 from pathlib import Path
 
 
 def _make_variable(target: str, variable: str, environment: str, *extra_args: str) -> str:
+    child_env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("PHOTO_ORG_")
+    }
     completed = subprocess.run(
         ["make", "-pn", target, f"PHOTO_ORG_ENVIRONMENT={environment}", *extra_args],
         check=True,
         text=True,
         capture_output=True,
+        env=child_env,
     )
     for line in completed.stdout.splitlines():
         for operator in (" = ", " := "):
@@ -147,10 +154,25 @@ def test_makefile_documents_compose_smoke_workflow():
     contributing = Path("CONTRIBUTING.md").read_text(encoding="utf-8")
 
     assert "compose-smoke:" in makefile
+    assert "compose-e2e-smoke:" in makefile
     assert "compose.ephemeral.yaml" in makefile
     assert "./scripts/photo-org ingest seed-corpus" in makefile
     assert "/api/v1/internal/ingest-queue/process" in makefile
+    assert "make test-e2e" in makefile
+    assert "compose-down-volumes" in makefile
     assert "compose-smoke" in contributing
+    assert "compose-e2e-smoke" in contributing
+
+
+def test_makefile_compose_e2e_smoke_generates_its_own_environment():
+    makefile = Path("Makefile").read_text(encoding="utf-8")
+
+    assert "compose-e2e-smoke:" in makefile
+    assert "PHOTO_ORG_ENV_STORAGE_MODE=ephemeral" in makefile
+    assert "compose-smoke PHOTO_ORG_ENVIRONMENT=" in makefile
+    assert "test-e2e PHOTO_ORG_ENVIRONMENT=" in makefile
+    assert "compose-down-volumes PHOTO_ORG_ENVIRONMENT=" in makefile
+    assert "PHOTO_ORG_E2E_DATABASE_URL=" in makefile
 
 
 def test_makefile_uses_namespaced_environment_contract():
