@@ -86,13 +86,16 @@ def update_storage_source_watched_folder(
     body: UpdateWatchedFolderRequest,
     db: Session = Depends(get_db),
 ) -> WatchedFolderResponse:
-    del storage_source_id
-    row = set_watched_folder_enabled(
-        db.connection(),
-        watched_folder_id=watched_folder_id,
-        is_enabled=body.is_enabled,
-        now=datetime.now(tz=UTC),
-    )
+    try:
+        row = set_watched_folder_enabled(
+            db.connection(),
+            storage_source_id=storage_source_id,
+            watched_folder_id=watched_folder_id,
+            is_enabled=body.is_enabled,
+            now=datetime.now(tz=UTC),
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     db.commit()
     return WatchedFolderResponse.model_validate(row)
 
@@ -106,7 +109,13 @@ def delete_storage_source_watched_folder(
     watched_folder_id: str,
     db: Session = Depends(get_db),
 ) -> Response:
-    del storage_source_id
-    remove_watched_folder(db.connection(), watched_folder_id=watched_folder_id)
+    try:
+        remove_watched_folder(
+            db.connection(),
+            storage_source_id=storage_source_id,
+            watched_folder_id=watched_folder_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

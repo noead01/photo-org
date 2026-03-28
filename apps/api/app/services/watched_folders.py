@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import PurePosixPath
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid5
 
 from sqlalchemy import delete, insert, select, update
 from sqlalchemy.engine import Connection
@@ -34,11 +34,16 @@ def create_watched_folder(
         alias_path=normalized_alias_path,
         watched_path=normalized_watched_path,
     )
+    watched_folder_id = _watched_folder_id_for_scan_path(normalized_watched_path)
 
     existing = connection.execute(
         select(watched_folders).where(
-            watched_folders.c.storage_source_id == storage_source_id,
-            watched_folders.c.relative_path == relative_path,
+            (watched_folders.c.watched_folder_id == watched_folder_id)
+            | (
+                (watched_folders.c.storage_source_id == storage_source_id)
+                & (watched_folders.c.relative_path == relative_path)
+            )
+            | (watched_folders.c.scan_path == normalized_watched_path)
         )
     ).mappings().first()
     values = {
@@ -62,7 +67,7 @@ def create_watched_folder(
         }
 
     record = {
-        "watched_folder_id": str(uuid4()),
+        "watched_folder_id": watched_folder_id,
         "availability_state": "active",
         "last_failure_reason": None,
         "last_successful_scan_ts": None,
@@ -89,13 +94,16 @@ def list_watched_folders(
 def set_watched_folder_enabled(
     connection: Connection,
     *,
+    storage_source_id: str,
     watched_folder_id: str,
     is_enabled: bool,
     now: datetime,
 ) -> dict[str, object]:
-    row = connection.execute(
-        select(watched_folders).where(watched_folders.c.watched_folder_id == watched_folder_id)
-    ).mappings().one()
+    row = _get_scoped_watched_folder(
+        connection,
+        storage_source_id=storage_source_id,
+        watched_folder_id=watched_folder_id,
+    )
     values = {
         "is_enabled": 1 if is_enabled else 0,
         "updated_ts": now,
@@ -114,9 +122,20 @@ def set_watched_folder_enabled(
 def remove_watched_folder(
     connection: Connection,
     *,
+    storage_source_id: str,
     watched_folder_id: str,
 ) -> None:
-    connection.execute(delete(watched_folders).where(watched_folders.c.watched_folder_id == watched_folder_id))
+    _get_scoped_watched_folder(
+        connection,
+        storage_source_id=storage_source_id,
+        watched_folder_id=watched_folder_id,
+    )
+    connection.execute(
+        delete(watched_folders).where(
+            watched_folders.c.watched_folder_id == watched_folder_id,
+            watched_folders.c.storage_source_id == storage_source_id,
+        )
+    )
 
 
 def _validate_alias_belongs_to_source(
@@ -151,11 +170,39 @@ def _relative_path_within_source(*, alias_path: str, watched_path: str) -> str:
     return str(relative)
 
 
+def _get_scoped_watched_folder(
+    connection: Connection,
+    *,
+    storage_source_id: str,
+    watched_folder_id: str,
+) -> dict[str, object]:
+    row = connection.execute(
+        select(watched_folders).where(
+            watched_folders.c.watched_folder_id == watched_folder_id,
+            watched_folders.c.storage_source_id == storage_source_id,
+        )
+    ).mappings().first()
+    if row is None:
+        raise LookupError(f"missing watched folder {watched_folder_id} for storage source {storage_source_id}")
+    return row
+
+
+def _watched_folder_id_for_scan_path(scan_path: str) -> str:
+    return str(uuid5(NAMESPACE_URL, f"watched-folder:{scan_path}"))
+
+
 def _normalize_path(value: str) -> str:
     normalized = value.replace("\\", "/")
     if not normalized:
         return "/"
-    parts = [part for part in normalized.split("/") if part]
+    raw_parts = normalized.split("/")
+    parts: list[str] = []
+    for part in raw_parts:
+        if not part or part == ".":
+            continue
+        if part == "..":
+            raise WatchedFolderValidationError(f"path {value!r} must not contain '..'")
+        parts.append(part)
     if normalized.startswith("//"):
         prefix = "//"
     elif normalized.startswith("/"):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from uuid import NAMESPACE_URL, uuid5
 
 from sqlalchemy import create_engine, select
 
@@ -144,6 +145,9 @@ def test_create_watched_folder_persists_source_relative_path(tmp_path):
         ).mappings().one()
 
     assert created["storage_source_id"] == source["storage_source_id"]
+    assert created["watched_folder_id"] == str(
+        uuid5(NAMESPACE_URL, "watched-folder://nas/family/2024/trips")
+    )
     assert created["relative_path"] == "2024/trips"
     assert created["scan_path"] == "//nas/family/2024/trips"
     assert created["container_mount_path"] == "//nas/family/2024/trips"
@@ -194,6 +198,48 @@ def test_create_watched_folder_rejects_path_outside_source_boundary(tmp_path):
             raise AssertionError("expected watched-folder boundary failure")
 
 
+def test_create_watched_folder_rejects_parent_directory_escape(tmp_path):
+    from app.services.storage_sources import (
+        attach_storage_source_alias,
+        create_storage_source,
+    )
+    from app.services.watched_folders import WatchedFolderValidationError, create_watched_folder
+
+    database_url = f"sqlite:///{tmp_path / 'watched-folder-parent-escape.db'}"
+    upgrade_database(database_url)
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 3, 28, 19, 7, tzinfo=UTC)
+
+    with engine.begin() as connection:
+        source = create_storage_source(
+            connection,
+            display_name="Family NAS",
+            marker_filename=".photo-org-source.json",
+            marker_version=1,
+            now=now,
+        )
+        attach_storage_source_alias(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path="//nas/family",
+            now=now,
+        )
+
+        try:
+            create_watched_folder(
+                connection,
+                storage_source_id=source["storage_source_id"],
+                alias_path="//nas/family",
+                watched_path="//nas/family/../other",
+                display_name="Trips",
+                now=now,
+            )
+        except WatchedFolderValidationError as exc:
+            assert "outside source boundary" in str(exc) or "must not contain '..'" in str(exc)
+        else:
+            raise AssertionError("expected parent-directory rejection")
+
+
 def test_disable_enable_and_remove_watched_folder(tmp_path):
     from app.services.storage_sources import (
         attach_storage_source_alias,
@@ -236,17 +282,23 @@ def test_disable_enable_and_remove_watched_folder(tmp_path):
 
         disabled = set_watched_folder_enabled(
             connection,
+            storage_source_id=source["storage_source_id"],
             watched_folder_id=created["watched_folder_id"],
             is_enabled=False,
             now=now,
         )
         enabled = set_watched_folder_enabled(
             connection,
+            storage_source_id=source["storage_source_id"],
             watched_folder_id=created["watched_folder_id"],
             is_enabled=True,
             now=now,
         )
-        remove_watched_folder(connection, watched_folder_id=created["watched_folder_id"])
+        remove_watched_folder(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            watched_folder_id=created["watched_folder_id"],
+        )
         remaining = list_watched_folders(connection, source["storage_source_id"])
 
     assert disabled["is_enabled"] == 0

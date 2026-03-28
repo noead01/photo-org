@@ -123,3 +123,67 @@ def test_storage_source_watched_folder_create_rejects_outside_boundary(tmp_path,
 
     assert response.status_code == 400
     assert "outside source boundary" in response.json()["detail"]
+
+
+def test_storage_source_watched_folder_mutations_enforce_source_ownership(tmp_path, monkeypatch):
+    from app.services.storage_sources import (
+        attach_storage_source_alias,
+        create_storage_source,
+    )
+
+    database_url = f"sqlite:///{tmp_path / 'storage-source-api-ownership.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 3, 28, 19, 40, tzinfo=UTC)
+    with engine.begin() as connection:
+        source_a = create_storage_source(
+            connection,
+            display_name="Family NAS",
+            marker_filename=".photo-org-source.json",
+            marker_version=1,
+            now=now,
+        )
+        source_b = create_storage_source(
+            connection,
+            display_name="Travel NAS",
+            marker_filename=".photo-org-source.json",
+            marker_version=1,
+            now=now,
+        )
+        attach_storage_source_alias(
+            connection,
+            storage_source_id=source_a["storage_source_id"],
+            alias_path="//nas/family",
+            now=now,
+        )
+        attach_storage_source_alias(
+            connection,
+            storage_source_id=source_b["storage_source_id"],
+            alias_path="//nas/travel",
+            now=now,
+        )
+
+    client = TestClient(app)
+    created = client.post(
+        f"/api/v1/storage-sources/{source_b['storage_source_id']}/watched-folders",
+        json={
+            "alias_path": "//nas/travel",
+            "watched_path": "//nas/travel/2024/trips",
+            "display_name": "Trips",
+        },
+    )
+    watched_folder_id = created.json()["watched_folder_id"]
+
+    wrong_patch = client.patch(
+        f"/api/v1/storage-sources/{source_a['storage_source_id']}/watched-folders/{watched_folder_id}",
+        json={"is_enabled": False},
+    )
+    assert wrong_patch.status_code == 404
+
+    wrong_delete = client.delete(
+        f"/api/v1/storage-sources/{source_a['storage_source_id']}/watched-folders/{watched_folder_id}"
+    )
+    assert wrong_delete.status_code == 404
