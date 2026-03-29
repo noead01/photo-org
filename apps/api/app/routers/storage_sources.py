@@ -9,11 +9,14 @@ from pydantic import BaseModel, StringConstraints
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_db
+from app.services.storage_source_status import (
+    list_storage_source_statuses,
+    list_watched_folder_statuses,
+)
 from app.services.source_registration import SourceRegistrationError, register_storage_source
 from app.services.watched_folders import (
     WatchedFolderValidationError,
     create_watched_folder,
-    list_watched_folders,
     remove_watched_folder,
     set_watched_folder_enabled,
 )
@@ -40,6 +43,39 @@ class StorageSourceResponse(BaseModel):
     updated_ts: datetime
 
 
+class CatalogAvailabilityResponse(BaseModel):
+    metadata_queryable: bool
+    thumbnails_available: bool
+    originals_available: bool
+
+
+class IngestRunSummaryResponse(BaseModel):
+    status: str
+    files_seen: int
+    files_created: int
+    files_updated: int
+    files_missing: int
+    error_count: int
+    error_summary: str | None = None
+    completed_ts: datetime | None = None
+
+
+class RecentFailureResponse(BaseModel):
+    watched_folder_id: str
+    status: str
+    error_summary: str | None = None
+    completed_ts: datetime | None = None
+
+
+class StorageSourceStatusResponse(StorageSourceResponse):
+    alias_paths: list[str]
+    watched_folder_count: int
+    unreachable_watched_folder_count: int
+    catalog: CatalogAvailabilityResponse
+    latest_ingest_run: IngestRunSummaryResponse | None = None
+    recent_failures: list[RecentFailureResponse]
+
+
 class CreateWatchedFolderRequest(BaseModel):
     alias_path: str
     watched_path: str
@@ -60,6 +96,7 @@ class WatchedFolderResponse(BaseModel):
     availability_state: str
     last_failure_reason: str | None = None
     last_successful_scan_ts: datetime | None = None
+    latest_ingest_run: IngestRunSummaryResponse | None = None
 
 
 @router.post(
@@ -86,12 +123,20 @@ def register_storage_source_route(body: RegisterStorageSourceRequest) -> Storage
     return StorageSourceResponse.model_validate(source)
 
 
+@router.get("", response_model=list[StorageSourceStatusResponse])
+def list_storage_sources(
+    db: Session = Depends(get_db),
+) -> list[StorageSourceStatusResponse]:
+    rows = list_storage_source_statuses(db.connection())
+    return [StorageSourceStatusResponse.model_validate(row) for row in rows]
+
+
 @router.get("/{storage_source_id}/watched-folders", response_model=list[WatchedFolderResponse])
 def list_storage_source_watched_folders(
     storage_source_id: str,
     db: Session = Depends(get_db),
 ) -> list[WatchedFolderResponse]:
-    rows = list_watched_folders(db.connection(), storage_source_id)
+    rows = list_watched_folder_statuses(db.connection(), storage_source_id)
     return [WatchedFolderResponse.model_validate(row) for row in rows]
 
 
