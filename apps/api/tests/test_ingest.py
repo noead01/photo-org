@@ -1111,6 +1111,96 @@ def test_poll_registered_storage_sources_reassesses_existing_locations_for_same_
     rows_by_folder = {row["watched_folder_id"]: row for row in file_rows}
     assert rows_by_folder[watched_folder_a_id]["lifecycle_state"] == "deleted"
     assert rows_by_folder[watched_folder_b["watched_folder_id"]]["lifecycle_state"] == "active"
+    photo = load_photo_row_by_id(db_url, record.photo_id)
+    assert photo["path"] == _source_aware_photo_path(source_id, f"exports/{asset_name}")
+
+
+def test_poll_registered_storage_sources_preserves_existing_face_detection_timestamp(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    source_root = tmp_path / "library"
+    folder = source_root / "imports"
+    folder.mkdir(parents=True)
+    asset_name = "birthday_park_001.jpg"
+    source_asset = SEED_CORPUS_DIR / "family-events" / "birthday-park" / asset_name
+    observed_asset = folder / asset_name
+    shutil.copy2(source_asset, observed_asset)
+
+    db_url = f"sqlite:///{tmp_path / 'poll-storage-sources-preserve-face-ts.db'}"
+    upgrade_database(db_url)
+
+    now = datetime(2026, 3, 29, 13, 30, tzinfo=UTC)
+    source_id, watched_folder_id = seed_registered_storage_source_with_watched_folder(
+        db_url,
+        root_path=source_root,
+        watched_path=folder,
+        display_name="Library Imports",
+        now=now,
+    )
+    detected_ts = now - timedelta(days=1)
+    record = ingest_module.build_photo_record(
+        observed_asset,
+        canonical_path=_source_aware_photo_path(source_id, f"imports/{asset_name}"),
+    )
+
+    engine = create_engine(db_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(photos).values(
+                photo_id=record.photo_id,
+                path=record.path,
+                sha256=record.sha256,
+                phash=None,
+                filesize=record.filesize,
+                ext=record.ext,
+                created_ts=record.created_ts,
+                modified_ts=record.modified_ts,
+                shot_ts=record.shot_ts,
+                shot_ts_source=record.shot_ts_source,
+                camera_make=record.camera_make,
+                camera_model=record.camera_model,
+                software=record.software,
+                orientation=record.orientation,
+                gps_latitude=record.gps_latitude,
+                gps_longitude=record.gps_longitude,
+                gps_altitude=record.gps_altitude,
+                thumbnail_jpeg=None,
+                thumbnail_mime_type=None,
+                thumbnail_width=None,
+                thumbnail_height=None,
+                updated_ts=record.modified_ts,
+                deleted_ts=None,
+                faces_count=1,
+                faces_detected_ts=detected_ts,
+            )
+        )
+        connection.execute(
+            insert(photo_files).values(
+                photo_file_id=str(uuid5(NAMESPACE_URL, f"photo-file:{watched_folder_id}:{asset_name}")),
+                photo_id=record.photo_id,
+                watched_folder_id=watched_folder_id,
+                relative_path=asset_name,
+                filename=asset_name,
+                extension=record.ext,
+                filesize=record.filesize,
+                created_ts=record.created_ts,
+                modified_ts=record.modified_ts,
+                first_seen_ts=now,
+                last_seen_ts=now,
+                missing_ts=None,
+                deleted_ts=None,
+                lifecycle_state="active",
+                absence_reason=None,
+            )
+        )
+
+    result = poll_registered_storage_sources(database_url=db_url, now=now + timedelta(minutes=5))
+
+    assert result.errors == []
+    photo = load_photo_row_by_id(db_url, record.photo_id)
+    assert photo["faces_count"] == 1
+    assert photo["faces_detected_ts"] == detected_ts
 
 
 def test_upsert_photo_skips_thumbnail_lookup_when_record_has_fresh_thumbnail(tmp_path):
@@ -1274,6 +1364,20 @@ def load_photo_row(database_url: str, path: str) -> dict:
     with engine.connect() as connection:
         row = connection.execute(
             select(photos).where(photos.c.path == path)
+        ).mappings().one()
+    payload = dict(row)
+    for key in ("created_ts", "modified_ts", "shot_ts", "updated_ts", "deleted_ts", "faces_detected_ts"):
+        value = payload.get(key)
+        if isinstance(value, datetime) and value.tzinfo is None:
+            payload[key] = value.replace(tzinfo=UTC)
+    return payload
+
+
+def load_photo_row_by_id(database_url: str, photo_id: str) -> dict:
+    engine = create_engine(database_url, future=True)
+    with engine.connect() as connection:
+        row = connection.execute(
+            select(photos).where(photos.c.photo_id == photo_id)
         ).mappings().one()
     payload = dict(row)
     for key in ("created_ts", "modified_ts", "shot_ts", "updated_ts", "deleted_ts", "faces_detected_ts"):

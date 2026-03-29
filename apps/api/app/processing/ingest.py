@@ -663,6 +663,8 @@ def upsert_source_photo(connection: Connection, record: PhotoRecord) -> tuple[bo
             photos.c.thumbnail_mime_type,
             photos.c.thumbnail_width,
             photos.c.thumbnail_height,
+            photos.c.faces_count,
+            photos.c.faces_detected_ts,
         ).where(photos.c.sha256 == record.sha256)
     ).mappings().first()
 
@@ -687,7 +689,7 @@ def upsert_source_photo(connection: Connection, record: PhotoRecord) -> tuple[bo
             .where(photos.c.photo_id == existing["photo_id"])
             .values(
                 photo_id=existing["photo_id"],
-                path=existing["path"] or record.path,
+                path=record.path,
                 sha256=record.sha256,
                 phash=None,
                 filesize=record.filesize,
@@ -708,8 +710,8 @@ def upsert_source_photo(connection: Connection, record: PhotoRecord) -> tuple[bo
                 thumbnail_width=thumbnail_width,
                 thumbnail_height=thumbnail_height,
                 updated_ts=record.modified_ts,
-                faces_count=record.faces_count,
-                faces_detected_ts=None,
+                faces_count=existing["faces_count"],
+                faces_detected_ts=existing["faces_detected_ts"],
             )
         )
         return False, existing["photo_id"]
