@@ -36,6 +36,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/photos:
+    get:
+      tags:
+      - photos
+      summary: List Photos
+      operationId: list_photos_api_v1_photos_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/PhotoHit'
+                type: array
+                title: Response List Photos Api V1 Photos Get
   /api/v1/storage-sources:
     get:
       tags:
@@ -251,6 +267,15 @@ components:
       - alias_path
       - watched_path
       title: CreateWatchedFolderRequest
+    FaceHit:
+      properties:
+        person_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Person Id
+      type: object
+      title: FaceHit
     HTTPValidationError:
       properties:
         detail:
@@ -300,6 +325,90 @@ components:
       - files_missing
       - error_count
       title: IngestRunSummaryResponse
+    OriginalAvailabilityHit:
+      properties:
+        is_available:
+          type: boolean
+          title: Is Available
+        availability_state:
+          type: string
+          title: Availability State
+        last_failure_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Last Failure Reason
+      type: object
+      required:
+      - is_available
+      - availability_state
+      title: OriginalAvailabilityHit
+    PhotoHit:
+      properties:
+        photo_id:
+          type: string
+          title: Photo Id
+        path:
+          type: string
+          title: Path
+        ext:
+          type: string
+          title: Ext
+        camera_make:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Camera Make
+        orientation:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Orientation
+        shot_ts:
+          type: string
+          title: Shot Ts
+        filesize:
+          type: integer
+          title: Filesize
+        tags:
+          items:
+            type: string
+          type: array
+          title: Tags
+          default: []
+        people:
+          items:
+            type: string
+          type: array
+          title: People
+          default: []
+        faces:
+          items:
+            $ref: '#/components/schemas/FaceHit'
+          type: array
+          title: Faces
+          default: []
+        thumbnail:
+          anyOf:
+          - $ref: '#/components/schemas/ThumbnailHit'
+          - type: 'null'
+        original:
+          anyOf:
+          - $ref: '#/components/schemas/OriginalAvailabilityHit'
+          - type: 'null'
+        relevance:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Relevance
+      type: object
+      required:
+      - photo_id
+      - path
+      - ext
+      - shot_ts
+      - filesize
+      title: PhotoHit
     ProcessQueueRequest:
       properties:
         limit:
@@ -490,6 +599,27 @@ components:
       - catalog
       - recent_failures
       title: StorageSourceStatusResponse
+    ThumbnailHit:
+      properties:
+        mime_type:
+          type: string
+          title: Mime Type
+        width:
+          type: integer
+          title: Width
+        height:
+          type: integer
+          title: Height
+        data_base64:
+          type: string
+          title: Data Base64
+      type: object
+      required:
+      - mime_type
+      - width
+      - height
+      - data_base64
+      title: ThumbnailHit
     UpdateWatchedFolderRequest:
       properties:
         is_enabled:

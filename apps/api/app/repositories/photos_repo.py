@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql import Select
 
 from app.schemas.search_request import SearchFilters, SortSpec, PageSpec
-from app.core.enums import FilesizeRange
 from app.domain.facets import (
     TagsFacet,
     PeopleFacet,
@@ -31,7 +30,7 @@ class PhotosRepository:
         self.watched_folders: Table = Table("watched_folders", md, autoload_with=bind)
         self.storage_sources: Table = Table("storage_sources", md, autoload_with=bind)
 
-    def search_photos(self, filters: SearchFilters, sort: SortSpec, page: PageSpec, 
+    def search_photos(self, filters: SearchFilters, sort: SortSpec, page: PageSpec,
                      text_query: Optional[str] = None) -> Tuple[List[Dict[str, Any]], int, Optional[str]]:
         """
         Main search method that handles all query building and execution.
@@ -55,8 +54,18 @@ class PhotosRepository:
         
         # Generate next cursor
         next_cursor = self._generate_cursor(items, sort) if items else None
-        
+
         return items, total_count, next_cursor
+
+    def list_photos(self) -> List[Dict[str, Any]]:
+        """Return catalog photos in a deterministic browse order."""
+        query = select(self.photos).order_by(
+            self.photos.c.shot_ts.is_(None),
+            self.photos.c.shot_ts.desc(),
+            self.photos.c.photo_id.desc(),
+        )
+        rows = [row for row in self.db.execute(query).all() if row.deleted_ts is None]
+        return self._hydrate_items(rows)
 
     def get_filtered_photo_ids(self, filters: SearchFilters, text_query: Optional[str] = None) -> List[str]:
         """Get photo IDs for facet computation."""
