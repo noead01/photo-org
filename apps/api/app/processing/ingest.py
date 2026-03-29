@@ -158,6 +158,7 @@ def reconcile_directory(
                 source_root,
                 relative_path,
             ),
+            reuse_existing_photo_by_sha=False,
             now=at,
             missing_file_grace_period_days=grace_period_days,
         )
@@ -225,6 +226,7 @@ def poll_registered_storage_sources(
                         storage_source_id=source_target.storage_source_id,
                         watched_folder_relative_path=target.relative_path,
                     ),
+                    reuse_existing_photo_by_sha=True,
                     now=at,
                     missing_file_grace_period_days=grace_period_days,
                 )
@@ -271,6 +273,7 @@ def _reconcile_watched_folder_root(
     watched_folder_id: str,
     source_root: Path,
     canonical_path_for_relative_path: Callable[[str], str],
+    reuse_existing_photo_by_sha: bool,
     now: datetime,
     missing_file_grace_period_days: int,
 ) -> WatchedFolderPollOutcome:
@@ -326,7 +329,11 @@ def _reconcile_watched_folder_root(
                 }
             )
         observed_relative_paths.add(relative_path)
-        created = upsert_photo(connection, record)
+        if reuse_existing_photo_by_sha:
+            created, photo_id = upsert_source_photo(connection, record)
+        else:
+            created = upsert_photo(connection, record)
+            photo_id = record.photo_id
         if created:
             inserted += 1
         else:
@@ -335,7 +342,7 @@ def _reconcile_watched_folder_root(
             activate_observed_file(
                 connection,
                 watched_folder_id=watched_folder_id,
-                photo_id=record.photo_id,
+                photo_id=photo_id,
                 relative_path=relative_path,
                 filename=photo_path.name,
                 extension=record.ext,
@@ -645,6 +652,97 @@ def upsert_photo(connection: Connection, record: PhotoRecord) -> bool:
         .values(**payload)
     )
     return False
+
+
+def upsert_source_photo(connection: Connection, record: PhotoRecord) -> tuple[bool, str]:
+    existing = connection.execute(
+        select(
+            photos.c.photo_id,
+            photos.c.path,
+            photos.c.thumbnail_jpeg,
+            photos.c.thumbnail_mime_type,
+            photos.c.thumbnail_width,
+            photos.c.thumbnail_height,
+        ).where(photos.c.sha256 == record.sha256)
+    ).mappings().first()
+
+    thumbnail_jpeg = record.thumbnail_jpeg
+    thumbnail_mime_type = record.thumbnail_mime_type
+    thumbnail_width = record.thumbnail_width
+    thumbnail_height = record.thumbnail_height
+    if existing is not None:
+        if (
+            thumbnail_jpeg is None
+            and thumbnail_mime_type is None
+            and thumbnail_width is None
+            and thumbnail_height is None
+        ):
+            thumbnail_jpeg = existing["thumbnail_jpeg"]
+            thumbnail_mime_type = existing["thumbnail_mime_type"]
+            thumbnail_width = existing["thumbnail_width"]
+            thumbnail_height = existing["thumbnail_height"]
+
+        connection.execute(
+            update(photos)
+            .where(photos.c.photo_id == existing["photo_id"])
+            .values(
+                photo_id=existing["photo_id"],
+                path=existing["path"] or record.path,
+                sha256=record.sha256,
+                phash=None,
+                filesize=record.filesize,
+                ext=record.ext,
+                created_ts=record.created_ts,
+                modified_ts=record.modified_ts,
+                shot_ts=record.shot_ts,
+                shot_ts_source=record.shot_ts_source,
+                camera_make=record.camera_make,
+                camera_model=record.camera_model,
+                software=record.software,
+                orientation=record.orientation,
+                gps_latitude=record.gps_latitude,
+                gps_longitude=record.gps_longitude,
+                gps_altitude=record.gps_altitude,
+                thumbnail_jpeg=thumbnail_jpeg,
+                thumbnail_mime_type=thumbnail_mime_type,
+                thumbnail_width=thumbnail_width,
+                thumbnail_height=thumbnail_height,
+                updated_ts=record.modified_ts,
+                faces_count=record.faces_count,
+                faces_detected_ts=None,
+            )
+        )
+        return False, existing["photo_id"]
+
+    connection.execute(
+        insert(photos).values(
+            photo_id=record.photo_id,
+            path=record.path,
+            sha256=record.sha256,
+            phash=None,
+            filesize=record.filesize,
+            ext=record.ext,
+            created_ts=record.created_ts,
+            modified_ts=record.modified_ts,
+            shot_ts=record.shot_ts,
+            shot_ts_source=record.shot_ts_source,
+            camera_make=record.camera_make,
+            camera_model=record.camera_model,
+            software=record.software,
+            orientation=record.orientation,
+            gps_latitude=record.gps_latitude,
+            gps_longitude=record.gps_longitude,
+            gps_altitude=record.gps_altitude,
+            thumbnail_jpeg=thumbnail_jpeg,
+            thumbnail_mime_type=thumbnail_mime_type,
+            thumbnail_width=thumbnail_width,
+            thumbnail_height=thumbnail_height,
+            updated_ts=record.modified_ts,
+            faces_count=record.faces_count,
+            faces_detected_ts=None,
+        )
+    )
+    return True, record.photo_id
 
 
 def store_face_detections(connection: Connection, photo_id: str, detections: list[dict]) -> None:

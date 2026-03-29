@@ -932,6 +932,187 @@ def test_poll_registered_storage_sources_records_ingest_run_for_source_validatio
     assert run_rows[0]["error_summary"] == "storage source marker file is missing"
 
 
+def test_poll_registered_storage_sources_preserves_multiple_locations_for_same_hash(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    source_root = tmp_path / "library"
+    folder_a = source_root / "imports"
+    folder_b = source_root / "exports"
+    folder_a.mkdir(parents=True)
+    folder_b.mkdir(parents=True)
+    asset_name = "birthday_park_001.jpg"
+    source_asset = SEED_CORPUS_DIR / "family-events" / "birthday-park" / asset_name
+    shutil.copy2(source_asset, folder_a / asset_name)
+    shutil.copy2(source_asset, folder_b / asset_name)
+
+    db_url = f"sqlite:///{tmp_path / 'poll-storage-sources-multiple-locations.db'}"
+    upgrade_database(db_url)
+
+    now = datetime(2026, 3, 29, 13, 0, tzinfo=UTC)
+    source_id, watched_folder_a_id = seed_registered_storage_source_with_watched_folder(
+        db_url,
+        root_path=source_root,
+        watched_path=folder_a,
+        display_name="Library Imports",
+        now=now,
+    )
+    engine = create_engine(db_url, future=True)
+    with engine.begin() as connection:
+        watched_folder_b = create_watched_folder(
+            connection,
+            storage_source_id=source_id,
+            alias_path=source_root.as_posix(),
+            watched_path=folder_b.as_posix(),
+            display_name="Library Exports",
+            now=now,
+        )
+
+    result = poll_registered_storage_sources(database_url=db_url, now=now)
+
+    assert result.errors == []
+    assert result.scanned == 2
+    photo_rows = load_photo_rows(db_url)
+    assert len(photo_rows) == 1
+    file_rows = load_photo_file_rows(db_url, photo_rows[0]["photo_id"])
+    assert len(file_rows) == 2
+    assert {row["watched_folder_id"] for row in file_rows} == {
+        watched_folder_a_id,
+        watched_folder_b["watched_folder_id"],
+    }
+    assert {row["relative_path"] for row in file_rows} == {asset_name}
+    assert {row["lifecycle_state"] for row in file_rows} == {"active"}
+
+
+def test_poll_registered_storage_sources_reassesses_existing_locations_for_same_hash(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    source_root = tmp_path / "library"
+    folder_a = source_root / "imports"
+    folder_b = source_root / "exports"
+    folder_a.mkdir(parents=True)
+    folder_b.mkdir(parents=True)
+    asset_name = "birthday_park_001.jpg"
+    source_asset = SEED_CORPUS_DIR / "family-events" / "birthday-park" / asset_name
+    observed_asset = folder_b / asset_name
+    shutil.copy2(source_asset, observed_asset)
+
+    db_url = f"sqlite:///{tmp_path / 'poll-storage-sources-reassess-locations.db'}"
+    upgrade_database(db_url)
+
+    now = datetime(2026, 3, 29, 13, 15, tzinfo=UTC)
+    source_id, watched_folder_a_id = seed_registered_storage_source_with_watched_folder(
+        db_url,
+        root_path=source_root,
+        watched_path=folder_a,
+        display_name="Library Imports",
+        now=now,
+    )
+    engine = create_engine(db_url, future=True)
+    with engine.begin() as connection:
+        watched_folder_b = create_watched_folder(
+            connection,
+            storage_source_id=source_id,
+            alias_path=source_root.as_posix(),
+            watched_path=folder_b.as_posix(),
+            display_name="Library Exports",
+            now=now,
+        )
+        record = ingest_module.build_photo_record(
+            observed_asset,
+            canonical_path=_source_aware_photo_path(source_id, f"imports/{asset_name}"),
+        )
+        connection.execute(
+            insert(photos).values(
+                photo_id=record.photo_id,
+                path=record.path,
+                sha256=record.sha256,
+                phash=None,
+                filesize=record.filesize,
+                ext=record.ext,
+                created_ts=record.created_ts,
+                modified_ts=record.modified_ts,
+                shot_ts=record.shot_ts,
+                shot_ts_source=record.shot_ts_source,
+                camera_make=record.camera_make,
+                camera_model=record.camera_model,
+                software=record.software,
+                orientation=record.orientation,
+                gps_latitude=record.gps_latitude,
+                gps_longitude=record.gps_longitude,
+                gps_altitude=record.gps_altitude,
+                thumbnail_jpeg=None,
+                thumbnail_mime_type=None,
+                thumbnail_width=None,
+                thumbnail_height=None,
+                updated_ts=record.modified_ts,
+                deleted_ts=None,
+                faces_count=0,
+                faces_detected_ts=None,
+            )
+        )
+        connection.execute(
+            insert(photo_files),
+                [
+                    {
+                        "photo_file_id": str(
+                            uuid5(NAMESPACE_URL, f"photo-file:{watched_folder_a_id}:{asset_name}")
+                        ),
+                        "photo_id": record.photo_id,
+                        "watched_folder_id": watched_folder_a_id,
+                        "relative_path": asset_name,
+                    "filename": asset_name,
+                    "extension": record.ext,
+                    "filesize": record.filesize,
+                    "created_ts": record.created_ts,
+                    "modified_ts": record.modified_ts,
+                    "first_seen_ts": now,
+                    "last_seen_ts": now,
+                    "missing_ts": None,
+                    "deleted_ts": None,
+                    "lifecycle_state": "active",
+                    "absence_reason": None,
+                    },
+                    {
+                        "photo_file_id": str(
+                            uuid5(
+                                NAMESPACE_URL,
+                                f"photo-file:{watched_folder_b['watched_folder_id']}:{asset_name}",
+                            )
+                        ),
+                        "photo_id": record.photo_id,
+                        "watched_folder_id": watched_folder_b["watched_folder_id"],
+                    "relative_path": asset_name,
+                    "filename": asset_name,
+                    "extension": record.ext,
+                    "filesize": record.filesize,
+                    "created_ts": record.created_ts,
+                    "modified_ts": record.modified_ts,
+                    "first_seen_ts": now,
+                    "last_seen_ts": now,
+                    "missing_ts": now,
+                    "deleted_ts": now,
+                    "lifecycle_state": "deleted",
+                    "absence_reason": "path_removed",
+                },
+            ],
+        )
+
+    result = poll_registered_storage_sources(
+        database_url=db_url,
+        now=now + timedelta(minutes=5),
+        missing_file_grace_period_days=0,
+    )
+
+    assert result.errors == []
+    file_rows = load_photo_file_rows(db_url, record.photo_id)
+    assert len(file_rows) == 2
+    rows_by_folder = {row["watched_folder_id"]: row for row in file_rows}
+    assert rows_by_folder[watched_folder_a_id]["lifecycle_state"] == "deleted"
+    assert rows_by_folder[watched_folder_b["watched_folder_id"]]["lifecycle_state"] == "active"
+
+
 def test_upsert_photo_skips_thumbnail_lookup_when_record_has_fresh_thumbnail(tmp_path):
     database_url = f"sqlite:///{tmp_path / 'upsert-photo-thumbnail-fast-path.db'}"
     upgrade_database(database_url)
@@ -1081,6 +1262,13 @@ def load_photo_count(database_url: str) -> int:
         return connection.execute(select(func.count()).select_from(photos)).scalar_one()
 
 
+def load_photo_rows(database_url: str) -> list[dict]:
+    engine = create_engine(database_url, future=True)
+    with engine.connect() as connection:
+        rows = connection.execute(select(photos).order_by(photos.c.photo_id)).mappings()
+    return [dict(row) for row in rows]
+
+
 def load_photo_row(database_url: str, path: str) -> dict:
     engine = create_engine(database_url, future=True)
     with engine.connect() as connection:
@@ -1155,6 +1343,25 @@ def load_photo_file_row(database_url: str, relative_path: str) -> dict:
         if isinstance(value, datetime) and value.tzinfo is None:
             payload[key] = value.replace(tzinfo=UTC)
     return payload
+
+
+def load_photo_file_rows(database_url: str, photo_id: str) -> list[dict]:
+    engine = create_engine(database_url, future=True)
+    with engine.connect() as connection:
+        rows = connection.execute(
+            select(photo_files)
+            .where(photo_files.c.photo_id == photo_id)
+            .order_by(photo_files.c.watched_folder_id, photo_files.c.relative_path)
+        ).mappings()
+    payloads: list[dict] = []
+    for row in rows:
+        payload = dict(row)
+        for key in ("created_ts", "modified_ts", "first_seen_ts", "last_seen_ts", "missing_ts", "deleted_ts"):
+            value = payload.get(key)
+            if isinstance(value, datetime) and value.tzinfo is None:
+                payload[key] = value.replace(tzinfo=UTC)
+        payloads.append(payload)
+    return payloads
 
 
 def load_photo_deleted_ts(database_url: str, photo_id: str) -> datetime | None:
