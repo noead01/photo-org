@@ -257,6 +257,7 @@ components:
       properties:
         root_path:
           type: string
+          minLength: 1
           title: Root Path
         alias_path:
           anyOf:

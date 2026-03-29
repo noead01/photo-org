@@ -69,6 +69,42 @@ def test_storage_source_registration_api_reuses_existing_marker_identity(tmp_pat
     assert second.json()["display_name"] == "Family Share"
 
 
+def test_storage_source_registration_api_normalizes_alias_for_later_watched_folder_requests(
+    tmp_path, monkeypatch
+):
+    database_url = f"sqlite:///{tmp_path / 'storage-source-registration-api-normalized-alias.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    root = tmp_path / "family-share"
+    root.mkdir()
+
+    client = TestClient(app)
+    registered = client.post(
+        "/api/v1/storage-sources",
+        json={
+            "root_path": str(root),
+            "alias_path": "\\\\nas\\family\\",
+            "display_name": "Family Share",
+        },
+    )
+
+    assert registered.status_code == 201
+
+    created = client.post(
+        f"/api/v1/storage-sources/{registered.json()['storage_source_id']}/watched-folders",
+        json={
+            "alias_path": "//nas/family",
+            "watched_path": "//nas/family/2024/trips",
+            "display_name": "Trips",
+        },
+    )
+
+    assert created.status_code == 201
+    assert created.json()["relative_path"] == "2024/trips"
+
+
 def test_storage_source_registration_api_rejects_invalid_root(tmp_path, monkeypatch):
     database_url = f"sqlite:///{tmp_path / 'storage-source-registration-api-invalid-root.db'}"
     upgrade_database(database_url)
@@ -88,6 +124,26 @@ def test_storage_source_registration_api_rejects_invalid_root(tmp_path, monkeypa
 
     assert response.status_code == 400
     assert "does not exist" in response.json()["detail"]
+
+
+def test_storage_source_registration_api_rejects_empty_root_path(tmp_path, monkeypatch):
+    database_url = f"sqlite:///{tmp_path / 'storage-source-registration-api-empty-root.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/storage-sources",
+        json={
+            "root_path": "   ",
+            "alias_path": "//nas/family-share",
+            "display_name": "Family Share",
+        },
+    )
+
+    assert response.status_code == 422
+    assert any(error["loc"][-1] == "root_path" for error in response.json()["detail"])
 
 
 def test_storage_source_watched_folder_crud_api(tmp_path, monkeypatch):

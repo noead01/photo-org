@@ -4,6 +4,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from app.services.path_normalization import PathNormalizationError, normalize_operator_path
 from app.storage import create_db_engine
 from app.services.storage_sources import (
     StorageSourceConflictError,
@@ -34,7 +35,14 @@ def register_storage_source(
     if not root.is_dir():
         raise SourceRegistrationError(f"storage source root is not a directory: {root}")
 
-    alias = str(alias_path) if alias_path is not None else str(root)
+    try:
+        alias = (
+            normalize_operator_path(str(alias_path))
+            if alias_path is not None
+            else normalize_operator_path(root.as_posix())
+        )
+    except PathNormalizationError as exc:
+        raise SourceRegistrationError(str(exc)) from exc
     now = datetime.now(tz=UTC)
     engine = create_db_engine(database_url)
     marker = read_source_marker(root)

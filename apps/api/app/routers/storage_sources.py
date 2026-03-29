@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import os
+from typing import Annotated
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import BaseModel
+from pydantic import BaseModel, StringConstraints
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_db
@@ -22,7 +23,7 @@ router = APIRouter(prefix="/storage-sources", tags=["storage-sources"])
 
 
 class RegisterStorageSourceRequest(BaseModel):
-    root_path: str
+    root_path: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     alias_path: str | None = None
     display_name: str | None = None
 

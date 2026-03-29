@@ -7,6 +7,7 @@ from uuid import NAMESPACE_URL, uuid5
 from sqlalchemy import delete, insert, select, update
 from sqlalchemy.engine import Connection
 
+from app.services.path_normalization import PathNormalizationError, normalize_operator_path
 from app.storage import storage_source_aliases, watched_folders
 
 
@@ -192,23 +193,7 @@ def _watched_folder_id_for_scan_path(scan_path: str) -> str:
 
 
 def _normalize_path(value: str) -> str:
-    normalized = value.replace("\\", "/")
-    if not normalized:
-        return "/"
-    raw_parts = normalized.split("/")
-    parts: list[str] = []
-    for part in raw_parts:
-        if not part or part == ".":
-            continue
-        if part == "..":
-            raise WatchedFolderValidationError(f"path {value!r} must not contain '..'")
-        parts.append(part)
-    if normalized.startswith("//"):
-        prefix = "//"
-    elif normalized.startswith("/"):
-        prefix = "/"
-    else:
-        prefix = ""
-    if not parts:
-        return prefix or "/"
-    return prefix + "/".join(parts)
+    try:
+        return normalize_operator_path(value)
+    except PathNormalizationError as exc:
+        raise WatchedFolderValidationError(str(exc)) from exc
