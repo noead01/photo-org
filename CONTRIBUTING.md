@@ -126,6 +126,8 @@ Current high-value targets:
   - validate the checked-in `seed-corpus/` inventory and manifest
 - `make seed-corpus-load`
   - migrate and load the checked-in `seed-corpus/` into the local development database
+- `uv run python -m app.cli poll-storage-sources --database-url <url>`
+  - poll enabled registered storage sources, validate each source marker, and reconcile watched folders through the central polling loop
 - `uv run python apps/api/scripts/generate_openapi.py`
   - regenerate `apps/api/openapi/spec.yaml` from the current FastAPI app
 
@@ -209,6 +211,9 @@ Synthetic fixtures remain preferred for unit tests and BDD scenarios. The checke
 
 For missing-file reconciliation verification, run `uv run python -m pytest apps/api/tests/test_ingest.py -q`.
 That targeted suite exercises a temporary watched-folder fixture and simulated time so contributors can verify `active`, `missing`, `deleted`, and recovery transitions without bringing up the full worker stack.
+
+For the source-aware central polling loop, register a storage source plus watched folder first, then run `uv run python -m app.cli poll-storage-sources --database-url <url>`.
+That command validates the source marker before scanning, surfaces source-aware failures in its exit code and stdout, and reconciles only enabled watched folders attached to registered storage sources.
 
 ### Automated Version Updates
 

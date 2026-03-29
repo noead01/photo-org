@@ -4,6 +4,7 @@ import argparse
 
 from app.dev.seed_corpus import load_seed_corpus_into_database, validate_seed_corpus
 from app.migrations import upgrade_database
+from app.processing.ingest import poll_registered_storage_sources
 from app.storage import resolve_database_url
 
 
@@ -12,6 +13,16 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     migrate_parser = subparsers.add_parser("migrate", help="Apply database migrations")
     migrate_parser.add_argument(
+        "--database-url",
+        default=None,
+        help="SQLAlchemy database URL. Defaults to DATABASE_URL.",
+    )
+
+    poll_parser = subparsers.add_parser(
+        "poll-storage-sources",
+        help="Poll enabled registered storage sources and reconcile their watched folders",
+    )
+    poll_parser.add_argument(
         "--database-url",
         default=None,
         help="SQLAlchemy database URL. Defaults to DATABASE_URL.",
@@ -52,6 +63,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"database_url={resolve_database_url(args.database_url)}")
         print("migration=head")
         return 0
+    if args.command == "poll-storage-sources":
+        result = poll_registered_storage_sources(database_url=args.database_url)
+        print(f"database_url={resolve_database_url(args.database_url)}")
+        print(f"scanned={result.scanned}")
+        print(f"inserted={result.inserted}")
+        print(f"updated={result.updated}")
+        print(f"errors={len(result.errors)}")
+        for error in result.errors:
+            print(error)
+        return 1 if result.errors else 0
     if args.command == "seed-corpus":
         if args.seed_corpus_command == "validate":
             report = validate_seed_corpus()

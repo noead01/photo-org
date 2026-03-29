@@ -9,14 +9,21 @@ from sqlalchemy import create_engine, event, func, insert, select
 from app.db.queue import IngestQueueStore
 from app.migrations import upgrade_database
 from app.processing import ingest as ingest_module
-from app.processing.ingest import ingest_directory, reconcile_directory
+from app.processing.ingest import (
+    ingest_directory,
+    poll_registered_storage_sources,
+    reconcile_directory,
+)
 from app.services.file_reconciliation import (
     activate_observed_file,
     reconcile_watched_folder,
     refresh_photo_deleted_timestamps,
 )
-from app.services.storage_sources import create_storage_source
+from app.services.source_registration import MARKER_FILENAME
+from app.services.storage_sources import attach_storage_source_alias, create_storage_source
+from app.services.watched_folders import create_watched_folder
 from app.storage import faces, photo_files, photos, storage_sources, watched_folders
+from photoorg_db_schema import ingest_runs
 
 
 def _resolve_seed_corpus_dir(start: Path | None = None) -> Path:
@@ -652,6 +659,266 @@ def test_reconcile_directory_reports_thumbnail_failures_without_marking_source_u
     assert photo["thumbnail_jpeg"] is None
 
 
+def test_poll_registered_storage_sources_scans_enabled_registered_watched_folders(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'poll-storage-sources.db'}"
+    upgrade_database(db_url)
+
+    now = datetime(2026, 3, 28, 21, 0, tzinfo=UTC)
+    source_id, watched_folder_id = seed_registered_storage_source_with_watched_folder(
+        db_url,
+        root_path=staged_corpus_dir,
+        watched_path=staged_corpus_dir,
+        display_name="Seed Corpus",
+        now=now,
+    )
+
+    result = poll_registered_storage_sources(database_url=db_url, now=now)
+
+    assert result.scanned == 6
+    assert result.inserted == 6
+    assert result.updated == 0
+    assert result.errors == []
+
+    watched_folder = load_watched_folder_by_id(db_url, watched_folder_id)
+    assert watched_folder["availability_state"] == "active"
+    assert watched_folder["last_failure_reason"] is None
+    assert watched_folder["last_successful_scan_ts"] == now
+
+    source = load_storage_source_row(db_url, source_id)
+    assert source["availability_state"] == "active"
+    assert source["last_failure_reason"] is None
+    assert source["last_validated_ts"] == now
+
+    photo = load_photo_row(
+        db_url,
+        f"{staged_corpus_dir.as_posix()}/family-events/birthday-park/birthday_park_001.jpg",
+    )
+    assert photo["thumbnail_mime_type"] == "image/jpeg"
+
+
+def test_poll_registered_storage_sources_aborts_reconciliation_on_marker_mismatch(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'poll-storage-sources-marker-mismatch.db'}"
+    upgrade_database(db_url)
+
+    healthy_now = datetime(2026, 3, 28, 21, 30, tzinfo=UTC)
+    source_id, watched_folder_id = seed_registered_storage_source_with_watched_folder(
+        db_url,
+        root_path=staged_corpus_dir,
+        watched_path=staged_corpus_dir,
+        display_name="Seed Corpus",
+        now=healthy_now,
+    )
+
+    first_result = poll_registered_storage_sources(database_url=db_url, now=healthy_now)
+    assert first_result.errors == []
+
+    missing_path = staged_corpus_dir / "family-events" / "birthday-park" / "birthday_park_006.jpg"
+    missing_path.unlink()
+    (staged_corpus_dir / MARKER_FILENAME).write_text(
+        '{"storage_source_id":"unexpected-source","marker_version":1}'
+    )
+
+    failed_now = healthy_now + timedelta(minutes=5)
+    failed_result = poll_registered_storage_sources(database_url=db_url, now=failed_now)
+
+    assert failed_result.scanned == 0
+    assert failed_result.inserted == 0
+    assert failed_result.updated == 0
+    assert failed_result.errors == [
+        f"storage_source:{source_id}: marker file does not match expected storage source"
+    ]
+
+    source = load_storage_source_row(db_url, source_id)
+    assert source["availability_state"] == "unreachable"
+    assert source["last_failure_reason"] == "marker_mismatch"
+    assert source["last_validated_ts"] == failed_now
+
+    watched_folder = load_watched_folder_by_id(db_url, watched_folder_id)
+    assert watched_folder["availability_state"] == "unreachable"
+    assert watched_folder["last_failure_reason"] == "marker_mismatch"
+    assert watched_folder["last_successful_scan_ts"] == healthy_now
+
+    photo_file = load_photo_file_row(
+        db_url,
+        "family-events/birthday-park/birthday_park_006.jpg",
+    )
+    assert photo_file["lifecycle_state"] == "active"
+    assert photo_file["missing_ts"] is None
+    assert photo_file["deleted_ts"] is None
+
+
+def test_poll_registered_storage_sources_reports_missing_marker_file(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'poll-storage-sources-marker-missing.db'}"
+    upgrade_database(db_url)
+
+    now = datetime(2026, 3, 28, 21, 45, tzinfo=UTC)
+    source_id, watched_folder_id = seed_registered_storage_source_with_watched_folder(
+        db_url,
+        root_path=staged_corpus_dir,
+        watched_path=staged_corpus_dir,
+        display_name="Seed Corpus",
+        now=now,
+    )
+    (staged_corpus_dir / MARKER_FILENAME).unlink()
+
+    result = poll_registered_storage_sources(database_url=db_url, now=now)
+
+    assert result.scanned == 0
+    assert result.errors == [f"storage_source:{source_id}: storage source marker file is missing"]
+
+    source = load_storage_source_row(db_url, source_id)
+    assert source["availability_state"] == "unreachable"
+    assert source["last_failure_reason"] == "marker_missing"
+    assert source["last_validated_ts"] == now
+
+    watched_folder = load_watched_folder_by_id(db_url, watched_folder_id)
+    assert watched_folder["availability_state"] == "unreachable"
+    assert watched_folder["last_failure_reason"] == "marker_missing"
+
+
+def test_poll_registered_storage_sources_reports_unreachable_source_root(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'poll-storage-sources-root-unreachable.db'}"
+    upgrade_database(db_url)
+
+    now = datetime(2026, 3, 28, 22, 0, tzinfo=UTC)
+    source_id, watched_folder_id = seed_registered_storage_source_with_watched_folder(
+        db_url,
+        root_path=staged_corpus_dir,
+        watched_path=staged_corpus_dir,
+        display_name="Seed Corpus",
+        now=now,
+    )
+    shutil.rmtree(staged_corpus_dir)
+
+    result = poll_registered_storage_sources(database_url=db_url, now=now)
+
+    assert result.scanned == 0
+    assert result.errors == [f"storage_source:{source_id}: storage source root is unavailable"]
+
+    source = load_storage_source_row(db_url, source_id)
+    assert source["availability_state"] == "unreachable"
+    assert source["last_failure_reason"] == "source_unreachable"
+    assert source["last_validated_ts"] == now
+
+    watched_folder = load_watched_folder_by_id(db_url, watched_folder_id)
+    assert watched_folder["availability_state"] == "unreachable"
+    assert watched_folder["last_failure_reason"] == "source_unreachable"
+
+
+def test_poll_registered_storage_sources_falls_back_to_later_alias_when_first_is_unreachable(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
+    missing_alias_root = tmp_path / "missing-alias-root"
+    db_url = f"sqlite:///{tmp_path / 'poll-storage-sources-alias-fallback.db'}"
+    upgrade_database(db_url)
+
+    now = datetime(2026, 3, 28, 22, 30, tzinfo=UTC)
+    source_id, watched_folder_id = seed_registered_storage_source_with_watched_folder(
+        db_url,
+        root_path=staged_corpus_dir,
+        watched_path=staged_corpus_dir,
+        display_name="Seed Corpus",
+        now=now,
+        alias_paths=(missing_alias_root.as_posix(), staged_corpus_dir.as_posix()),
+    )
+
+    result = poll_registered_storage_sources(database_url=db_url, now=now)
+
+    assert result.scanned == 6
+    assert result.errors == []
+
+    source = load_storage_source_row(db_url, source_id)
+    assert source["availability_state"] == "active"
+    assert source["last_failure_reason"] is None
+
+    watched_folder = load_watched_folder_by_id(db_url, watched_folder_id)
+    assert watched_folder["availability_state"] == "active"
+    assert watched_folder["last_successful_scan_ts"] == now
+
+
+def test_poll_registered_storage_sources_records_ingest_run_for_successful_scan(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'poll-storage-sources-ingest-run-success.db'}"
+    upgrade_database(db_url)
+
+    now = datetime(2026, 3, 28, 22, 45, tzinfo=UTC)
+    _, watched_folder_id = seed_registered_storage_source_with_watched_folder(
+        db_url,
+        root_path=staged_corpus_dir,
+        watched_path=staged_corpus_dir,
+        display_name="Seed Corpus",
+        now=now,
+    )
+
+    result = poll_registered_storage_sources(database_url=db_url, now=now)
+
+    assert result.scanned == 6
+
+    run_rows = load_ingest_runs(database_url=db_url)
+    assert len(run_rows) == 1
+    assert run_rows[0]["watched_folder_id"] == watched_folder_id
+    assert run_rows[0]["status"] == "completed"
+    assert run_rows[0]["files_seen"] == 6
+    assert run_rows[0]["files_created"] == 6
+    assert run_rows[0]["files_updated"] == 0
+    assert run_rows[0]["error_count"] == 0
+    assert run_rows[0]["error_summary"] is None
+
+
+def test_poll_registered_storage_sources_records_ingest_run_for_source_validation_failure(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'poll-storage-sources-ingest-run-failure.db'}"
+    upgrade_database(db_url)
+
+    now = datetime(2026, 3, 28, 23, 0, tzinfo=UTC)
+    source_id, watched_folder_id = seed_registered_storage_source_with_watched_folder(
+        db_url,
+        root_path=staged_corpus_dir,
+        watched_path=staged_corpus_dir,
+        display_name="Seed Corpus",
+        now=now,
+    )
+    (staged_corpus_dir / MARKER_FILENAME).unlink()
+
+    result = poll_registered_storage_sources(database_url=db_url, now=now)
+
+    assert result.errors == [f"storage_source:{source_id}: storage source marker file is missing"]
+
+    run_rows = load_ingest_runs(database_url=db_url)
+    assert len(run_rows) == 1
+    assert run_rows[0]["watched_folder_id"] == watched_folder_id
+    assert run_rows[0]["status"] == "failed"
+    assert run_rows[0]["files_seen"] == 0
+    assert run_rows[0]["files_created"] == 0
+    assert run_rows[0]["files_updated"] == 0
+    assert run_rows[0]["error_count"] == 1
+    assert run_rows[0]["error_summary"] == "storage source marker file is missing"
+
+
 def test_upsert_photo_skips_thumbnail_lookup_when_record_has_fresh_thumbnail(tmp_path):
     database_url = f"sqlite:///{tmp_path / 'upsert-photo-thumbnail-fast-path.db'}"
     upgrade_database(database_url)
@@ -831,6 +1098,22 @@ def load_watched_folder_row(database_url: str, container_mount_path: str) -> dic
     return payload
 
 
+def load_watched_folder_by_id(database_url: str, watched_folder_id: str) -> dict:
+    engine = create_engine(database_url, future=True)
+    with engine.connect() as connection:
+        row = connection.execute(
+            select(watched_folders).where(
+                watched_folders.c.watched_folder_id == watched_folder_id
+            )
+        ).mappings().one()
+    payload = dict(row)
+    for key in ("created_ts", "updated_ts", "last_successful_scan_ts"):
+        value = payload.get(key)
+        if isinstance(value, datetime) and value.tzinfo is None:
+            payload[key] = value.replace(tzinfo=UTC)
+    return payload
+
+
 def load_pending_queue_count(database_url: str) -> int:
     store = IngestQueueStore(database_url)
     return len(store.list_pending())
@@ -886,6 +1169,23 @@ def load_storage_source_row(database_url: str, storage_source_id: str) -> dict:
     return payload
 
 
+def load_ingest_runs(database_url: str) -> list[dict]:
+    engine = create_engine(database_url, future=True)
+    with engine.connect() as connection:
+        rows = connection.execute(
+            select(ingest_runs).order_by(ingest_runs.c.started_ts, ingest_runs.c.ingest_run_id)
+        ).mappings()
+    payloads: list[dict] = []
+    for row in rows:
+        payload = dict(row)
+        for key in ("started_ts", "completed_ts"):
+            value = payload.get(key)
+            if isinstance(value, datetime) and value.tzinfo is None:
+                payload[key] = value.replace(tzinfo=UTC)
+        payloads.append(payload)
+    return payloads
+
+
 def seed_linked_storage_source(
     database_url: str,
     *,
@@ -921,6 +1221,47 @@ def seed_linked_storage_source(
             )
         )
     return str(source["storage_source_id"])
+
+
+def seed_registered_storage_source_with_watched_folder(
+    database_url: str,
+    *,
+    root_path: Path,
+    watched_path: Path,
+    display_name: str,
+    now: datetime,
+    alias_paths: tuple[str, ...] | None = None,
+) -> tuple[str, str]:
+    root = root_path.resolve()
+    watched = watched_path.resolve()
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        source = create_storage_source(
+            connection,
+            display_name=display_name,
+            marker_filename=MARKER_FILENAME,
+            marker_version=1,
+            now=now,
+        )
+        for alias_path in alias_paths or (root.as_posix(),):
+            attach_storage_source_alias(
+                connection,
+                storage_source_id=source["storage_source_id"],
+                alias_path=alias_path,
+                now=now,
+            )
+        (root / MARKER_FILENAME).write_text(
+            f'{{"storage_source_id":"{source["storage_source_id"]}","marker_version":1}}'
+        )
+        watched_folder = create_watched_folder(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            watched_path=watched.as_posix(),
+            display_name=display_name,
+            now=now,
+        )
+    return str(source["storage_source_id"]), str(watched_folder["watched_folder_id"])
 
 
 def seed_photo_with_file_instances(database_url: str) -> None:

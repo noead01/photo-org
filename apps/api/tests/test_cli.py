@@ -2,12 +2,18 @@ import os
 import shutil
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from sqlalchemy import create_engine, select
 
 from app.cli import main
 from app.migrations import upgrade_database
+from app.services.source_registration import MARKER_FILENAME
+from app.services.storage_sources import attach_storage_source_alias, create_storage_source
+from app.services.watched_folders import create_watched_folder
+from app.storage import photos, storage_sources
 
 
 def _resolve_seed_corpus_dir(start: Path | None = None) -> Path:
@@ -98,3 +104,102 @@ def test_cli_module_executes_main_when_run_with_dash_m(tmp_path):
     assert result.returncode == 0
     assert f"database_url={db_url}" in result.stdout
     assert "migration=head" in result.stdout
+
+
+def test_poll_storage_sources_cli_scans_registered_watched_folders(monkeypatch, tmp_path, capsys):
+    monkeypatch.chdir(tmp_path)
+    _use_supported_cli_runtime(monkeypatch)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'cli-poll-storage-sources.db'}"
+    upgrade_database(db_url)
+    _seed_registered_storage_source_with_watched_folder(
+        db_url,
+        root_path=staged_corpus_dir,
+        watched_path=staged_corpus_dir,
+        display_name="Seed Corpus",
+        now=datetime(2026, 3, 28, 22, 15, tzinfo=UTC),
+    )
+
+    exit_code = main(["poll-storage-sources", "--database-url", db_url])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "scanned=6" in output
+    assert "inserted=6" in output
+    assert "updated=0" in output
+    assert "errors=0" in output
+
+    engine = create_engine(db_url, future=True)
+    with engine.connect() as connection:
+        assert connection.execute(select(photos.c.photo_id)).first() is not None
+
+
+def test_poll_storage_sources_cli_returns_nonzero_when_source_validation_fails(
+    monkeypatch, tmp_path, capsys
+):
+    monkeypatch.chdir(tmp_path)
+    _use_supported_cli_runtime(monkeypatch)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'cli-poll-storage-sources-error.db'}"
+    upgrade_database(db_url)
+    source_id = _seed_registered_storage_source_with_watched_folder(
+        db_url,
+        root_path=staged_corpus_dir,
+        watched_path=staged_corpus_dir,
+        display_name="Seed Corpus",
+        now=datetime(2026, 3, 28, 22, 20, tzinfo=UTC),
+    )
+    (staged_corpus_dir / MARKER_FILENAME).unlink()
+
+    exit_code = main(["poll-storage-sources", "--database-url", db_url])
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert "errors=1" in output
+    assert f"storage_source:{source_id}: storage source marker file is missing" in output
+
+    engine = create_engine(db_url, future=True)
+    with engine.connect() as connection:
+        source = connection.execute(
+            select(storage_sources).where(storage_sources.c.storage_source_id == source_id)
+        ).mappings().one()
+    assert source["last_failure_reason"] == "marker_missing"
+
+
+def _seed_registered_storage_source_with_watched_folder(
+    database_url: str,
+    *,
+    root_path: Path,
+    watched_path: Path,
+    display_name: str,
+    now: datetime,
+) -> str:
+    root = root_path.resolve()
+    watched = watched_path.resolve()
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        source = create_storage_source(
+            connection,
+            display_name=display_name,
+            marker_filename=MARKER_FILENAME,
+            marker_version=1,
+            now=now,
+        )
+        attach_storage_source_alias(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            now=now,
+        )
+        (root / MARKER_FILENAME).write_text(
+            f'{{"storage_source_id":"{source["storage_source_id"]}","marker_version":1}}'
+        )
+        create_watched_folder(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            watched_path=watched.as_posix(),
+            display_name=display_name,
+            now=now,
+        )
+    return str(source["storage_source_id"])
