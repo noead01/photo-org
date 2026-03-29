@@ -36,6 +36,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/photos:
+    get:
+      tags:
+      - photos
+      summary: List Photos
+      operationId: list_photos_api_v1_photos_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/PhotoHit'
+                type: array
+                title: Response List Photos Api V1 Photos Get
   /api/v1/photos/{photo_id}:
     get:
       tags:
@@ -419,6 +435,72 @@ components:
       - filesize
       - metadata
       title: PhotoDetailResponse
+    PhotoHit:
+      properties:
+        photo_id:
+          type: string
+          title: Photo Id
+        path:
+          type: string
+          title: Path
+        ext:
+          type: string
+          title: Ext
+        camera_make:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Camera Make
+        orientation:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Orientation
+        shot_ts:
+          type: string
+          title: Shot Ts
+        filesize:
+          type: integer
+          title: Filesize
+        tags:
+          items:
+            type: string
+          type: array
+          title: Tags
+          default: []
+        people:
+          items:
+            type: string
+          type: array
+          title: People
+          default: []
+        faces:
+          items:
+            $ref: '#/components/schemas/FaceHit'
+          type: array
+          title: Faces
+          default: []
+        thumbnail:
+          anyOf:
+          - $ref: '#/components/schemas/ThumbnailHit'
+          - type: 'null'
+        original:
+          anyOf:
+          - $ref: '#/components/schemas/OriginalAvailabilityHit'
+          - type: 'null'
+        relevance:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Relevance
+      type: object
+      required:
+      - photo_id
+      - path
+      - ext
+      - shot_ts
+      - filesize
+      title: PhotoHit
     PhotoMetadataProjection:
       properties:
         sha256:

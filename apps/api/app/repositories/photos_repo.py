@@ -114,6 +114,16 @@ class PhotosRepository:
         }
         return item
 
+    def list_photos(self) -> List[Dict[str, Any]]:
+        """Return catalog photos in a deterministic browse order."""
+        query = select(self.photos).order_by(
+            self.photos.c.shot_ts.is_(None),
+            self.photos.c.shot_ts.desc(),
+            self.photos.c.photo_id.desc(),
+        )
+        rows = [row for row in self.db.execute(query).all() if row.deleted_ts is None]
+        return self._hydrate_items(rows)
+
     def get_filtered_photo_ids(self, filters: SearchFilters, text_query: Optional[str] = None) -> List[str]:
         """Get photo IDs for facet computation."""
         query = select(self.photos.c.photo_id)
