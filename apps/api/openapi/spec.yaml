@@ -55,6 +55,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StorageSourceResponse'
+        '400':
+          description: Storage source registration failed
         '422':
           description: Validation Error
           content:

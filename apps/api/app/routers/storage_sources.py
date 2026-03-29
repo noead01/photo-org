@@ -67,6 +67,11 @@ class WatchedFolderResponse(BaseModel):
     "",
     response_model=StorageSourceResponse,
     status_code=status.HTTP_201_CREATED,
+    responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "description": "Storage source registration failed",
+        }
+    },
 )
 def register_storage_source_route(body: RegisterStorageSourceRequest) -> StorageSourceResponse:
     try:
