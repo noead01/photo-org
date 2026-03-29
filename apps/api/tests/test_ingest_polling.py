@@ -134,3 +134,39 @@ def test_reconcile_directory_processes_a_watched_folder_end_to_end(tmp_path):
     assert watched_folder_row["last_failure_reason"] is None
     assert watched_folder_row["last_successful_scan_ts"] == expected_now
     assert photo_count == 1
+
+
+def test_ingest_polling_reconcile_directory_does_not_depend_on_ingest_facade(tmp_path, monkeypatch):
+    import importlib.util
+    import sys
+    import types
+
+    import app.processing
+    import app.processing.ingest_polling as ingest_polling_module
+
+    database_url = f"sqlite:///{tmp_path / 'reconcile-no-facade-dependency.db'}"
+    upgrade_database(database_url)
+
+    root = tmp_path / "isolated-watched-folder"
+    root.mkdir(parents=True)
+    _write_test_image(root / "birthday_park_001.jpg")
+
+    fake_ingest_module = types.ModuleType("app.processing.ingest")
+    monkeypatch.setattr(app.processing, "ingest", fake_ingest_module, raising=False)
+    monkeypatch.setitem(sys.modules, "app.processing.ingest", fake_ingest_module)
+
+    spec = importlib.util.spec_from_file_location(
+        "isolated_ingest_polling",
+        Path(ingest_polling_module.__file__),
+    )
+    assert spec is not None and spec.loader is not None
+    isolated_ingest_polling = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, isolated_ingest_polling)
+    spec.loader.exec_module(isolated_ingest_polling)
+
+    result = isolated_ingest_polling.reconcile_directory(root, database_url=database_url)
+
+    assert result.scanned == 1
+    assert result.inserted == 1
+    assert result.updated == 0
+    assert result.errors == []

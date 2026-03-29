@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import posixpath
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from stat import S_ISDIR
-from typing import Callable
+from typing import Callable, Iterable
 
 from sqlalchemy import select
 from sqlalchemy.engine import Connection
@@ -13,7 +13,6 @@ from sqlalchemy.engine import Connection
 from app.db.config import resolve_missing_file_grace_period_days
 from app.db.ingest_runs import IngestRunStore
 from app.path_contract import build_rooted_photo_path, build_source_aware_photo_path, relative_photo_path
-from app.processing import ingest as ingest_facade
 from app.processing.ingest_persistence import (
     PhotoRecord,
     build_photo_record,
@@ -30,7 +29,20 @@ from app.services.file_reconciliation import (
     utc_now,
 )
 from app.services.source_registration import SourceRegistrationError, read_source_marker
+from app.services.thumbnails import generate_thumbnail
 from app.storage import create_db_engine, storage_source_aliases, watched_folders
+
+
+SUPPORTED_EXTENSIONS = {".heic", ".heif", ".jpeg", ".jpg", ".png"}
+
+
+@dataclass
+class IngestResult:
+    scanned: int = 0
+    enqueued: int = 0
+    inserted: int = 0
+    updated: int = 0
+    errors: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -62,11 +74,16 @@ def reconcile_directory(
     *,
     now: datetime | None = None,
     missing_file_grace_period_days: int | None = None,
-) -> ingest_facade.IngestResult:
+    _result_factory: Callable[[], IngestResult] = IngestResult,
+    _iter_photo_files: Callable[[Path], Iterable[Path]] | None = None,
+    _generate_thumbnail: Callable[[Path], object] | None = None,
+) -> IngestResult:
     source_root = Path(root).expanduser().resolve()
-    result = ingest_facade.IngestResult()
+    result = _result_factory()
     at = now if now is not None else utc_now()
     grace_period_days = resolve_missing_file_grace_period_days(missing_file_grace_period_days)
+    iter_photo_files_fn = _iter_photo_files or iter_photo_files
+    generate_thumbnail_fn = _generate_thumbnail or generate_thumbnail
 
     engine = create_db_engine(database_url)
     with engine.begin() as connection:
@@ -86,6 +103,8 @@ def reconcile_directory(
             reuse_existing_photo_by_sha=False,
             now=at,
             missing_file_grace_period_days=grace_period_days,
+            iter_photo_files_fn=iter_photo_files_fn,
+            generate_thumbnail_fn=generate_thumbnail_fn,
         )
         result.scanned += outcome.scanned
         result.inserted += outcome.inserted
@@ -100,12 +119,17 @@ def poll_registered_storage_sources(
     *,
     now: datetime | None = None,
     missing_file_grace_period_days: int | None = None,
-) -> ingest_facade.IngestResult:
-    result = ingest_facade.IngestResult()
+    _result_factory: Callable[[], IngestResult] = IngestResult,
+    _iter_photo_files: Callable[[Path], Iterable[Path]] | None = None,
+    _generate_thumbnail: Callable[[Path], object] | None = None,
+) -> IngestResult:
+    result = _result_factory()
     at = now if now is not None else utc_now()
     grace_period_days = resolve_missing_file_grace_period_days(missing_file_grace_period_days)
     engine = create_db_engine(database_url)
     run_store = IngestRunStore(database_url)
+    iter_photo_files_fn = _iter_photo_files or iter_photo_files
+    generate_thumbnail_fn = _generate_thumbnail or generate_thumbnail
 
     with engine.begin() as connection:
         targets = _load_registered_storage_source_targets(connection)
@@ -154,6 +178,8 @@ def poll_registered_storage_sources(
                     reuse_existing_photo_by_sha=True,
                     now=at,
                     missing_file_grace_period_days=grace_period_days,
+                    iter_photo_files_fn=iter_photo_files_fn,
+                    generate_thumbnail_fn=generate_thumbnail_fn,
                 )
                 result.scanned += outcome.scanned
                 result.inserted += outcome.inserted
@@ -186,6 +212,12 @@ def _classify_root_scan_failure(exc: OSError) -> str:
     return "io_error"
 
 
+def iter_photo_files(root: Path) -> Iterable[Path]:
+    for path in sorted(root.rglob("*")):
+        if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
+            yield path
+
+
 def _reconcile_watched_folder_root(
     connection: Connection,
     *,
@@ -195,6 +227,8 @@ def _reconcile_watched_folder_root(
     reuse_existing_photo_by_sha: bool,
     now: datetime,
     missing_file_grace_period_days: int,
+    iter_photo_files_fn: Callable[[Path], Iterable[Path]],
+    generate_thumbnail_fn: Callable[[Path], object],
 ) -> WatchedFolderPollOutcome:
     scanned = 0
     inserted = 0
@@ -202,7 +236,7 @@ def _reconcile_watched_folder_root(
     error_messages: list[str] = []
     try:
         _validate_scan_root(source_root)
-        scanned_paths = list(ingest_facade.iter_photo_files(source_root))
+        scanned_paths = list(iter_photo_files_fn(source_root))
     except OSError as exc:
         record_watched_folder_scan_failure(
             connection,
@@ -234,7 +268,7 @@ def _reconcile_watched_folder_root(
             canonical_path=canonical_path_for_relative_path(relative_path),
         )
         try:
-            thumbnail = ingest_facade.generate_thumbnail(photo_path)
+            thumbnail = generate_thumbnail_fn(photo_path)
         except Exception as exc:
             error_messages.append(f"{photo_path}: thumbnail generation failed: {exc}")
         else:

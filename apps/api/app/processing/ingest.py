@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+import inspect
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +17,8 @@ from app.processing.ingest_persistence import (
     upsert_source_photo,
 )
 from app.services.thumbnails import generate_thumbnail
+
+ingest_polling_module = importlib.import_module("app.processing.ingest_polling")
 
 
 SUPPORTED_EXTENSIONS = {".heic", ".heif", ".jpeg", ".jpg", ".png"}
@@ -73,9 +77,9 @@ def reconcile_directory(
     missing_file_grace_period_days: int | None = None,
 ) -> IngestResult:
     source_root = Path(root).expanduser().resolve()
-    from app.processing.ingest_polling import reconcile_directory as reconcile_directory_impl
 
-    return reconcile_directory_impl(
+    return _call_polling_with_facade_overrides(
+        ingest_polling_module.reconcile_directory,
         source_root,
         database_url=database_url,
         now=now,
@@ -89,11 +93,8 @@ def poll_registered_storage_sources(
     now: datetime | None = None,
     missing_file_grace_period_days: int | None = None,
 ) -> IngestResult:
-    from app.processing.ingest_polling import (
-        poll_registered_storage_sources as poll_registered_storage_sources_impl,
-    )
-
-    return poll_registered_storage_sources_impl(
+    return _call_polling_with_facade_overrides(
+        ingest_polling_module.poll_registered_storage_sources,
         database_url=database_url,
         now=now,
         missing_file_grace_period_days=missing_file_grace_period_days,
@@ -104,3 +105,14 @@ def iter_photo_files(root: Path) -> Iterable[Path]:
     for path in sorted(root.rglob("*")):
         if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
             yield path
+
+
+def _call_polling_with_facade_overrides(function, /, *args, **kwargs):
+    parameters = inspect.signature(function).parameters
+    if "_result_factory" in parameters:
+        kwargs["_result_factory"] = IngestResult
+    if "_iter_photo_files" in parameters:
+        kwargs["_iter_photo_files"] = iter_photo_files
+    if "_generate_thumbnail" in parameters:
+        kwargs["_generate_thumbnail"] = generate_thumbnail
+    return function(*args, **kwargs)
