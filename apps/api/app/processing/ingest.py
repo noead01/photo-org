@@ -1,20 +1,26 @@
 from __future__ import annotations
 
-import hashlib
 import posixpath
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from stat import S_ISDIR
 from typing import Callable, Iterable, Protocol
-from uuid import NAMESPACE_URL, uuid5
 
-from sqlalchemy import delete, insert, select, update
+from sqlalchemy import select
 from sqlalchemy.engine import Connection
 
 from app.db.config import resolve_missing_file_grace_period_days
 from app.db.ingest_runs import IngestRunStore
 from app.db.queue import IngestQueueStore
+from app.processing.ingest_persistence import (
+    PhotoRecord,
+    build_ingest_submission,
+    build_photo_record,
+    store_face_detections,
+    upsert_photo,
+    upsert_source_photo,
+)
 from app.path_contract import (
     build_rooted_photo_path,
     build_source_aware_photo_path,
@@ -29,10 +35,9 @@ from app.services.file_reconciliation import (
     reconcile_watched_folder,
     utc_now,
 )
-from app.processing.metadata import extract_image_metadata, stat_timestamp_to_iso
 from app.services.source_registration import SourceRegistrationError, read_source_marker
 from app.services.thumbnails import generate_thumbnail
-from app.storage import create_db_engine, faces, photos, storage_source_aliases, watched_folders
+from app.storage import create_db_engine, storage_source_aliases, watched_folders
 
 
 SUPPORTED_EXTENSIONS = {".heic", ".heif", ".jpeg", ".jpg", ".png"}
@@ -41,31 +46,6 @@ SUPPORTED_EXTENSIONS = {".heic", ".heif", ".jpeg", ".jpg", ".png"}
 class FaceDetector(Protocol):
     def detect(self, path: Path) -> list[dict]:
         """Return face detections for a photo."""
-
-
-@dataclass(frozen=True)
-class PhotoRecord:
-    photo_id: str
-    path: str
-    sha256: str
-    filesize: int
-    ext: str
-    created_ts: datetime
-    modified_ts: datetime
-    shot_ts: datetime | None
-    shot_ts_source: str | None
-    camera_make: str | None
-    camera_model: str | None
-    software: str | None
-    orientation: str | None
-    gps_latitude: float | None
-    gps_longitude: float | None
-    gps_altitude: float | None
-    thumbnail_jpeg: bytes | None = None
-    thumbnail_mime_type: str | None = None
-    thumbnail_width: int | None = None
-    thumbnail_height: int | None = None
-    faces_count: int = 0
 
 
 @dataclass
@@ -524,272 +504,3 @@ def _error_summary(error_messages: tuple[str, ...]) -> str | None:
     if not error_messages:
         return None
     return error_messages[0]
-
-
-def build_photo_record(path: Path, *, canonical_path: str) -> PhotoRecord:
-    stat = path.stat()
-    image_metadata = extract_image_metadata(path)
-    sha256 = _sha256_file(path)
-    photo_id = str(uuid5(NAMESPACE_URL, f"{canonical_path}:{sha256}"))
-
-    return PhotoRecord(
-        photo_id=photo_id,
-        path=canonical_path,
-        sha256=sha256,
-        filesize=stat.st_size,
-        ext=path.suffix.lower().lstrip("."),
-        created_ts=_parse_timestamp(stat_timestamp_to_iso(stat.st_ctime)),
-        modified_ts=_parse_timestamp(stat_timestamp_to_iso(stat.st_mtime)),
-        shot_ts=_parse_timestamp(image_metadata.shot_ts),
-        shot_ts_source=image_metadata.shot_ts_source,
-        camera_make=image_metadata.camera_make,
-        camera_model=image_metadata.camera_model,
-        software=image_metadata.software,
-        orientation=image_metadata.orientation,
-        gps_latitude=image_metadata.gps_latitude,
-        gps_longitude=image_metadata.gps_longitude,
-        gps_altitude=image_metadata.gps_altitude,
-    )
-
-
-def build_ingest_submission(
-    path: Path,
-    *,
-    scan_root: Path,
-    path_root: str | Path,
-) -> dict:
-    relative_path = relative_photo_path(scan_root, path)
-    record = build_photo_record(
-        path,
-        canonical_path=build_rooted_photo_path(path_root, relative_path),
-    )
-    payload = {
-        "photo_id": record.photo_id,
-        "path": record.path,
-        "sha256": record.sha256,
-        "filesize": record.filesize,
-        "ext": record.ext,
-        "created_ts": record.created_ts.isoformat(),
-        "modified_ts": record.modified_ts.isoformat(),
-        "shot_ts": _format_optional_timestamp(record.shot_ts),
-        "shot_ts_source": record.shot_ts_source,
-        "camera_make": record.camera_make,
-        "camera_model": record.camera_model,
-        "software": record.software,
-        "orientation": record.orientation,
-        "gps_latitude": record.gps_latitude,
-        "gps_longitude": record.gps_longitude,
-        "gps_altitude": record.gps_altitude,
-        "faces_count": record.faces_count,
-    }
-    payload["idempotency_key"] = record.photo_id
-    return payload
-
-
-def upsert_photo(connection: Connection, record: PhotoRecord) -> bool:
-    existing = connection.execute(
-        select(photos.c.photo_id).where(photos.c.path == record.path)
-    ).mappings().first()
-
-    thumbnail_jpeg = record.thumbnail_jpeg
-    thumbnail_mime_type = record.thumbnail_mime_type
-    thumbnail_width = record.thumbnail_width
-    thumbnail_height = record.thumbnail_height
-    if (
-        existing is not None
-        and thumbnail_jpeg is None
-        and thumbnail_mime_type is None
-        and thumbnail_width is None
-        and thumbnail_height is None
-    ):
-        existing_thumbnail = connection.execute(
-            select(
-                photos.c.thumbnail_jpeg,
-                photos.c.thumbnail_mime_type,
-                photos.c.thumbnail_width,
-                photos.c.thumbnail_height,
-            ).where(photos.c.path == record.path)
-        ).mappings().one()
-        thumbnail_jpeg = existing_thumbnail["thumbnail_jpeg"]
-        thumbnail_mime_type = existing_thumbnail["thumbnail_mime_type"]
-        thumbnail_width = existing_thumbnail["thumbnail_width"]
-        thumbnail_height = existing_thumbnail["thumbnail_height"]
-
-    payload = {
-        "photo_id": record.photo_id,
-        "path": record.path,
-        "sha256": record.sha256,
-        "phash": None,
-        "filesize": record.filesize,
-        "ext": record.ext,
-        "created_ts": record.created_ts,
-        "modified_ts": record.modified_ts,
-        "shot_ts": record.shot_ts,
-        "shot_ts_source": record.shot_ts_source,
-        "camera_make": record.camera_make,
-        "camera_model": record.camera_model,
-        "software": record.software,
-        "orientation": record.orientation,
-        "gps_latitude": record.gps_latitude,
-        "gps_longitude": record.gps_longitude,
-        "gps_altitude": record.gps_altitude,
-        "thumbnail_jpeg": thumbnail_jpeg,
-        "thumbnail_mime_type": thumbnail_mime_type,
-        "thumbnail_width": thumbnail_width,
-        "thumbnail_height": thumbnail_height,
-        "updated_ts": record.modified_ts,
-        "faces_count": record.faces_count,
-        "faces_detected_ts": None,
-    }
-
-    if existing is None:
-        connection.execute(insert(photos).values(**payload))
-        return True
-
-    connection.execute(
-        update(photos)
-        .where(photos.c.path == record.path)
-        .values(**payload)
-    )
-    return False
-
-
-def upsert_source_photo(connection: Connection, record: PhotoRecord) -> tuple[bool, str]:
-    existing = connection.execute(
-        select(
-            photos.c.photo_id,
-            photos.c.path,
-            photos.c.thumbnail_jpeg,
-            photos.c.thumbnail_mime_type,
-            photos.c.thumbnail_width,
-            photos.c.thumbnail_height,
-            photos.c.faces_count,
-            photos.c.faces_detected_ts,
-        ).where(photos.c.sha256 == record.sha256)
-    ).mappings().first()
-
-    thumbnail_jpeg = record.thumbnail_jpeg
-    thumbnail_mime_type = record.thumbnail_mime_type
-    thumbnail_width = record.thumbnail_width
-    thumbnail_height = record.thumbnail_height
-    if existing is not None:
-        if (
-            thumbnail_jpeg is None
-            and thumbnail_mime_type is None
-            and thumbnail_width is None
-            and thumbnail_height is None
-        ):
-            thumbnail_jpeg = existing["thumbnail_jpeg"]
-            thumbnail_mime_type = existing["thumbnail_mime_type"]
-            thumbnail_width = existing["thumbnail_width"]
-            thumbnail_height = existing["thumbnail_height"]
-
-        connection.execute(
-            update(photos)
-            .where(photos.c.photo_id == existing["photo_id"])
-            .values(
-                photo_id=existing["photo_id"],
-                path=record.path,
-                sha256=record.sha256,
-                phash=None,
-                filesize=record.filesize,
-                ext=record.ext,
-                created_ts=record.created_ts,
-                modified_ts=record.modified_ts,
-                shot_ts=record.shot_ts,
-                shot_ts_source=record.shot_ts_source,
-                camera_make=record.camera_make,
-                camera_model=record.camera_model,
-                software=record.software,
-                orientation=record.orientation,
-                gps_latitude=record.gps_latitude,
-                gps_longitude=record.gps_longitude,
-                gps_altitude=record.gps_altitude,
-                thumbnail_jpeg=thumbnail_jpeg,
-                thumbnail_mime_type=thumbnail_mime_type,
-                thumbnail_width=thumbnail_width,
-                thumbnail_height=thumbnail_height,
-                updated_ts=record.modified_ts,
-                faces_count=existing["faces_count"],
-                faces_detected_ts=existing["faces_detected_ts"],
-            )
-        )
-        return False, existing["photo_id"]
-
-    connection.execute(
-        insert(photos).values(
-            photo_id=record.photo_id,
-            path=record.path,
-            sha256=record.sha256,
-            phash=None,
-            filesize=record.filesize,
-            ext=record.ext,
-            created_ts=record.created_ts,
-            modified_ts=record.modified_ts,
-            shot_ts=record.shot_ts,
-            shot_ts_source=record.shot_ts_source,
-            camera_make=record.camera_make,
-            camera_model=record.camera_model,
-            software=record.software,
-            orientation=record.orientation,
-            gps_latitude=record.gps_latitude,
-            gps_longitude=record.gps_longitude,
-            gps_altitude=record.gps_altitude,
-            thumbnail_jpeg=thumbnail_jpeg,
-            thumbnail_mime_type=thumbnail_mime_type,
-            thumbnail_width=thumbnail_width,
-            thumbnail_height=thumbnail_height,
-            updated_ts=record.modified_ts,
-            faces_count=record.faces_count,
-            faces_detected_ts=None,
-        )
-    )
-    return True, record.photo_id
-
-
-def store_face_detections(connection: Connection, photo_id: str, detections: list[dict]) -> None:
-    connection.execute(delete(faces).where(faces.c.photo_id == photo_id))
-    for detection in detections:
-        connection.execute(
-            insert(faces).values(
-                face_id=detection["face_id"],
-                photo_id=photo_id,
-                person_id=detection.get("person_id"),
-                bbox_x=detection.get("bbox_x"),
-                bbox_y=detection.get("bbox_y"),
-                bbox_w=detection.get("bbox_w"),
-                bbox_h=detection.get("bbox_h"),
-                bitmap=detection.get("bitmap"),
-                embedding=detection.get("embedding"),
-                provenance=detection.get("provenance", {}),
-            )
-        )
-
-    connection.execute(
-        update(photos)
-        .where(photos.c.photo_id == photo_id)
-        .values(
-            faces_count=len(detections),
-            faces_detected_ts=datetime.now(tz=UTC),
-        )
-    )
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _parse_timestamp(value: str | None) -> datetime | None:
-    if value is None:
-        return None
-    return datetime.fromisoformat(value)
-
-
-def _format_optional_timestamp(value: datetime | None) -> str | None:
-    if value is None:
-        return None
-    return value.isoformat()
