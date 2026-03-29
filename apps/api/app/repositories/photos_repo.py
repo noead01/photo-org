@@ -94,7 +94,7 @@ class PhotosRepository:
         if not rows:
             return None
 
-        item = self._hydrate_items(rows)[0]
+        item = self._hydrate_items(rows, include_face_regions=True)[0]
         row = rows[0]
         item["metadata"] = {
             "sha256": row.sha256,
@@ -267,7 +267,7 @@ class PhotosRepository:
         
         return encode_cursor(shot_ts_dt, last_item["photo_id"])
 
-    def _hydrate_items(self, rows: List[Row]) -> List[Dict[str, Any]]:
+    def _hydrate_items(self, rows: List[Row], *, include_face_regions: bool = False) -> List[Dict[str, Any]]:
         """Hydrate photo rows with related data (tags, people, faces)."""
         if not rows:
             return []
@@ -287,13 +287,34 @@ class PhotosRepository:
             tag_map[r.photo_id].append(r.tag)
 
         # Load faces and people
+        face_columns = [self.faces.c.photo_id, self.faces.c.person_id]
+        if include_face_regions:
+            face_columns.extend(
+                [
+                    self.faces.c.bbox_x,
+                    self.faces.c.bbox_y,
+                    self.faces.c.bbox_w,
+                    self.faces.c.bbox_h,
+                ]
+            )
+
         for r in self.db.execute(
-            select(self.faces.c.photo_id, self.faces.c.person_id)
+            select(*face_columns)
             .where(self.faces.c.photo_id.in_(pids))
         ).all():
             if r.person_id:
                 ppl_map[r.photo_id].append(r.person_id)
-            faces_map[r.photo_id].append({"person_id": r.person_id})
+            face_item = {"person_id": r.person_id}
+            if include_face_regions:
+                face_item.update(
+                    {
+                        "bbox_x": r.bbox_x,
+                        "bbox_y": r.bbox_y,
+                        "bbox_w": r.bbox_w,
+                        "bbox_h": r.bbox_h,
+                    }
+                )
+            faces_map[r.photo_id].append(face_item)
 
         original_map = self._load_original_availability(pids)
 

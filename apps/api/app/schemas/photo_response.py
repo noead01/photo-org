@@ -4,7 +4,15 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from app.schemas.search_response import FaceHit, OriginalAvailabilityHit, ThumbnailHit
+from app.schemas.search_response import OriginalAvailabilityHit, ThumbnailHit
+
+
+class PhotoDetailFace(BaseModel):
+    person_id: str | None = None
+    bbox_x: int | None = None
+    bbox_y: int | None = None
+    bbox_w: int | None = None
+    bbox_h: int | None = None
 
 
 class PhotoMetadataProjection(BaseModel):
@@ -34,7 +42,7 @@ class PhotoDetailResponse(BaseModel):
     filesize: int
     tags: list[str] = []
     people: list[str] = []
-    faces: list[FaceHit] = []
+    faces: list[PhotoDetailFace] = []
     thumbnail: ThumbnailHit | None = None
     original: OriginalAvailabilityHit | None = None
     metadata: PhotoMetadataProjection
