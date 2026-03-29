@@ -235,6 +235,51 @@ def test_ingest_facade_poll_registered_storage_sources_delegates_to_polling_modu
     assert result is sentinel_result
 
 
+def test_ingest_facade_reconcile_directory_delegates_to_polling_module(tmp_path, monkeypatch):
+    import importlib
+    import importlib.util
+    import sys
+    import types
+
+    from app.processing import ingest as ingest_module
+
+    sentinel_result = object()
+    fake_module = types.ModuleType("app.processing.ingest_polling")
+
+    def fake_reconcile_directory(
+        root,
+        database_url=None,
+        *,
+        now=None,
+        missing_file_grace_period_days=None,
+    ):
+        assert root == (tmp_path / "photos").resolve()
+        assert database_url == f"sqlite:///{tmp_path / 'facade-reconcile-delegation.db'}"
+        assert now is None
+        assert missing_file_grace_period_days is None
+        return sentinel_result
+
+    fake_module.reconcile_directory = fake_reconcile_directory
+    monkeypatch.setitem(sys.modules, "app.processing.ingest_polling", fake_module)
+    database_url = f"sqlite:///{tmp_path / 'facade-reconcile-delegation.db'}"
+    upgrade_database(database_url)
+    spec = importlib.util.spec_from_file_location(
+        "isolated_ingest_facade",
+        Path(ingest_module.__file__),
+    )
+    assert spec is not None and spec.loader is not None
+    isolated_ingest_module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, isolated_ingest_module)
+    spec.loader.exec_module(isolated_ingest_module)
+
+    result = isolated_ingest_module.reconcile_directory(
+        tmp_path / "photos",
+        database_url=database_url,
+    )
+
+    assert result is sentinel_result
+
+
 def test_upgrade_database_creates_search_tables(tmp_path):
     db_url = f"sqlite:///{tmp_path / 'schema.db'}"
     upgrade_database(db_url)
