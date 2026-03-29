@@ -191,6 +191,95 @@ def test_ingest_directory_keeps_queue_only_behavior(tmp_path, monkeypatch):
     assert load_photo_count(db_url) == 0
 
 
+def test_ingest_facade_poll_registered_storage_sources_delegates_to_polling_module(
+    tmp_path, monkeypatch
+):
+    import importlib
+    import importlib.util
+    import sys
+    import types
+
+    from app.processing import ingest as ingest_module
+
+    sentinel_result = object()
+    fake_module = types.ModuleType("app.processing.ingest_polling")
+
+    def fake_poll_registered_storage_sources(
+        database_url=None,
+        *,
+        now=None,
+        missing_file_grace_period_days=None,
+    ):
+        assert database_url == f"sqlite:///{tmp_path / 'facade-delegation.db'}"
+        assert now is None
+        assert missing_file_grace_period_days is None
+        return sentinel_result
+
+    fake_module.poll_registered_storage_sources = fake_poll_registered_storage_sources
+    monkeypatch.setitem(sys.modules, "app.processing.ingest_polling", fake_module)
+    database_url = f"sqlite:///{tmp_path / 'facade-delegation.db'}"
+    upgrade_database(database_url)
+    spec = importlib.util.spec_from_file_location(
+        "isolated_ingest_facade",
+        Path(ingest_module.__file__),
+    )
+    assert spec is not None and spec.loader is not None
+    isolated_ingest_module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, isolated_ingest_module)
+    spec.loader.exec_module(isolated_ingest_module)
+
+    result = isolated_ingest_module.poll_registered_storage_sources(
+        database_url=database_url,
+    )
+
+    assert result is sentinel_result
+
+
+def test_ingest_facade_reconcile_directory_delegates_to_polling_module(tmp_path, monkeypatch):
+    import importlib
+    import importlib.util
+    import sys
+    import types
+
+    from app.processing import ingest as ingest_module
+
+    sentinel_result = object()
+    fake_module = types.ModuleType("app.processing.ingest_polling")
+
+    def fake_reconcile_directory(
+        root,
+        database_url=None,
+        *,
+        now=None,
+        missing_file_grace_period_days=None,
+    ):
+        assert root == (tmp_path / "photos").resolve()
+        assert database_url == f"sqlite:///{tmp_path / 'facade-reconcile-delegation.db'}"
+        assert now is None
+        assert missing_file_grace_period_days is None
+        return sentinel_result
+
+    fake_module.reconcile_directory = fake_reconcile_directory
+    monkeypatch.setitem(sys.modules, "app.processing.ingest_polling", fake_module)
+    database_url = f"sqlite:///{tmp_path / 'facade-reconcile-delegation.db'}"
+    upgrade_database(database_url)
+    spec = importlib.util.spec_from_file_location(
+        "isolated_ingest_facade",
+        Path(ingest_module.__file__),
+    )
+    assert spec is not None and spec.loader is not None
+    isolated_ingest_module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, isolated_ingest_module)
+    spec.loader.exec_module(isolated_ingest_module)
+
+    result = isolated_ingest_module.reconcile_directory(
+        tmp_path / "photos",
+        database_url=database_url,
+    )
+
+    assert result is sentinel_result
+
+
 def test_upgrade_database_creates_search_tables(tmp_path):
     db_url = f"sqlite:///{tmp_path / 'schema.db'}"
     upgrade_database(db_url)
@@ -331,7 +420,7 @@ def test_reconcile_directory_marks_watched_folder_unreachable_when_root_scan_fai
     assert watched_folder["last_failure_reason"] is None
     assert watched_folder["last_successful_scan_ts"] == healthy_now
 
-    monkeypatch.setattr("app.processing.ingest.iter_photo_files", _fail_root_scan)
+    monkeypatch.setattr("app.processing.ingest_polling.iter_photo_files", _fail_root_scan)
 
     failure_now = healthy_now + timedelta(minutes=1)
     reconcile_directory(
@@ -361,7 +450,7 @@ def test_reconcile_directory_preserves_last_successful_scan_ts_when_root_scan_fa
         now=healthy_now,
     )
 
-    monkeypatch.setattr("app.processing.ingest.iter_photo_files", _fail_root_scan)
+    monkeypatch.setattr("app.processing.ingest_polling.iter_photo_files", _fail_root_scan)
     reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
@@ -415,7 +504,7 @@ def test_reconcile_directory_does_not_advance_file_lifecycle_when_root_scan_fail
         "family-events/birthday-park/birthday_park_006.jpg",
     )
 
-    monkeypatch.setattr("app.processing.ingest.iter_photo_files", _fail_root_scan)
+    monkeypatch.setattr("app.processing.ingest_polling.iter_photo_files", _fail_root_scan)
 
     failure_now = healthy_now + timedelta(minutes=1)
     reconcile_directory(
@@ -473,7 +562,7 @@ def test_reconcile_directory_preserves_parent_photo_deleted_timestamp_when_root_
     )
     assert deleted_before == deleted_now
 
-    monkeypatch.setattr("app.processing.ingest.iter_photo_files", _fail_root_scan)
+    monkeypatch.setattr("app.processing.ingest_polling.iter_photo_files", _fail_root_scan)
 
     failure_now = deleted_now + timedelta(minutes=1)
     reconcile_directory(
@@ -505,7 +594,7 @@ def test_reconcile_directory_clears_unreachable_state_after_later_healthy_scan(
     )
 
     original_iter_photo_files = ingest_module.iter_photo_files
-    monkeypatch.setattr("app.processing.ingest.iter_photo_files", _fail_root_scan)
+    monkeypatch.setattr("app.processing.ingest_polling.iter_photo_files", _fail_root_scan)
 
     failure_now = healthy_now + timedelta(minutes=1)
     reconcile_directory(
@@ -513,9 +602,8 @@ def test_reconcile_directory_clears_unreachable_state_after_later_healthy_scan(
         database_url=db_url,
         now=failure_now,
     )
-
     monkeypatch.setattr(
-        "app.processing.ingest.iter_photo_files",
+        "app.processing.ingest_polling.iter_photo_files",
         original_iter_photo_files,
     )
 
@@ -563,7 +651,7 @@ def test_reconcile_directory_persists_thumbnail_and_keeps_it_when_source_goes_of
     assert isinstance(photo["thumbnail_jpeg"], bytes)
     assert len(photo["thumbnail_jpeg"]) > 0
 
-    monkeypatch.setattr("app.processing.ingest.iter_photo_files", _fail_root_scan)
+    monkeypatch.setattr("app.processing.ingest_polling.iter_photo_files", _fail_root_scan)
 
     offline_now = healthy_now + timedelta(minutes=1)
     reconcile_directory(
@@ -601,7 +689,7 @@ def test_reconcile_directory_reports_thumbnail_failures_without_marking_source_u
     )
 
     monkeypatch.setattr(
-        "app.processing.ingest.generate_thumbnail",
+        "app.processing.ingest_polling.generate_thumbnail",
         lambda _: (_ for _ in ()).throw(RuntimeError("thumbnail exploded")),
     )
 
