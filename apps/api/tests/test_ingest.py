@@ -191,6 +191,35 @@ def test_ingest_directory_keeps_queue_only_behavior(tmp_path, monkeypatch):
     assert load_photo_count(db_url) == 0
 
 
+def test_ingest_facade_build_photo_record_delegates_to_persistence_module(
+    tmp_path, monkeypatch
+):
+    import importlib
+
+    from app.processing import ingest as ingest_module
+
+    photo_path = tmp_path / "photo.jpg"
+    photo_path.write_bytes(b"not-a-real-jpeg-but-a-real-file")
+    expected_canonical_path = "/library/photo.jpg"
+    sentinel_record = object()
+
+    def fake_build_photo_record(path: Path, *, canonical_path: str):
+        assert path == photo_path
+        assert canonical_path == expected_canonical_path
+        return sentinel_record
+
+    ingest_persistence = importlib.import_module("app.processing.ingest_persistence")
+    monkeypatch.setattr(ingest_persistence, "build_photo_record", fake_build_photo_record)
+
+    assert (
+        ingest_module.build_photo_record(
+            photo_path,
+            canonical_path=expected_canonical_path,
+        )
+        is sentinel_record
+    )
+
+
 def test_upgrade_database_creates_search_tables(tmp_path):
     db_url = f"sqlite:///{tmp_path / 'schema.db'}"
     upgrade_database(db_url)
