@@ -175,6 +175,16 @@ def test_makefile_compose_e2e_smoke_generates_its_own_environment():
     assert "PHOTO_ORG_E2E_DATABASE_URL=" in makefile
 
 
+def test_makefile_compose_e2e_smoke_reanchors_nested_make_calls_to_repo_root():
+    makefile = Path("Makefile").read_text(encoding="utf-8")
+
+    assert '$(MAKE) --no-print-directory -C "$(CURDIR)" env-create' in makefile
+    assert '$(MAKE) --no-print-directory -C "$(CURDIR)" compose-smoke' in makefile
+    assert '$(MAKE) --no-print-directory -C "$(CURDIR)" -s print-compose-db-url' in makefile
+    assert '$(MAKE) --no-print-directory -C "$(CURDIR)" test-e2e' in makefile
+    assert '$(MAKE) --no-print-directory -C "$(CURDIR)" compose-down-volumes' in makefile
+
+
 def test_makefile_uses_namespaced_environment_contract():
     makefile = Path("Makefile").read_text(encoding="utf-8")
 
