@@ -538,7 +538,6 @@ class TestPhotosRepositoryOfflineBrowseIntegration:
                 insert(watched_folders).values(
                     watched_folder_id="watched-folder-1",
                     scan_path="/photos/seed-corpus",
-                    container_mount_path="/photos/seed-corpus",
                     storage_source_id="source-1",
                     relative_path=".",
                     display_name="Family NAS / seed-corpus",
@@ -646,7 +645,6 @@ class TestPhotosRepositoryOfflineBrowseIntegration:
                 insert(watched_folders).values(
                     watched_folder_id="watched-folder-1",
                     scan_path="/photos/seed-corpus",
-                    container_mount_path="/photos/seed-corpus",
                     storage_source_id="source-1",
                     relative_path=".",
                     display_name="Family NAS / seed-corpus",
@@ -748,7 +746,6 @@ class TestPhotosRepositoryOfflineBrowseIntegration:
                         {
                             "watched_folder_id": "watched-folder-healthy",
                             "scan_path": "/photos/healthy",
-                            "container_mount_path": "/photos/healthy",
                             "storage_source_id": "source-1",
                             "relative_path": "healthy",
                             "display_name": "Healthy Folder",
@@ -762,7 +759,6 @@ class TestPhotosRepositoryOfflineBrowseIntegration:
                         {
                             "watched_folder_id": "watched-folder-unreachable",
                             "scan_path": "/photos/offline",
-                            "container_mount_path": "/photos/offline",
                             "storage_source_id": "source-1",
                             "relative_path": "offline",
                             "display_name": "Offline Folder",

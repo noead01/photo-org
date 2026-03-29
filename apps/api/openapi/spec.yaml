@@ -369,9 +369,6 @@ components:
         scan_path:
           type: string
           title: Scan Path
-        container_mount_path:
-          type: string
-          title: Container Mount Path
         relative_path:
           anyOf:
           - type: string
@@ -403,7 +400,6 @@ components:
       required:
       - watched_folder_id
       - scan_path
-      - container_mount_path
       - is_enabled
       - availability_state
       title: WatchedFolderResponse

@@ -4,11 +4,11 @@ import posixpath
 from pathlib import Path
 
 
-def normalize_container_mount_path(path: str | Path) -> str:
+def normalize_absolute_path_root(path: str | Path) -> str:
     raw = str(path).replace("\\", "/")
     normalized = posixpath.normpath(raw)
     if not normalized.startswith("/"):
-        raise ValueError("container mount path must be absolute")
+        raise ValueError("path root must be absolute")
     return normalized
 
 
@@ -26,7 +26,14 @@ def normalize_relative_path(path: str) -> str:
     return normalized
 
 
-def build_canonical_photo_path(container_mount_path: str | Path, relative_path: str) -> str:
-    mount_root = normalize_container_mount_path(container_mount_path)
+def build_rooted_photo_path(path_root: str | Path, relative_path: str) -> str:
+    mount_root = normalize_absolute_path_root(path_root)
     normalized_relative = normalize_relative_path(relative_path)
     return posixpath.normpath(posixpath.join(mount_root, normalized_relative))
+
+
+def build_source_aware_photo_path(storage_source_id: str, relative_path: str) -> str:
+    normalized_relative = normalize_relative_path(relative_path)
+    return posixpath.normpath(
+        posixpath.join("/storage-sources", storage_source_id, normalized_relative)
+    )

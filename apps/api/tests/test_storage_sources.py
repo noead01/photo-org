@@ -150,7 +150,6 @@ def test_create_watched_folder_persists_source_relative_path(tmp_path):
     )
     assert created["relative_path"] == "2024/trips"
     assert created["scan_path"] == "//nas/family/2024/trips"
-    assert created["container_mount_path"] == "//nas/family/2024/trips"
     assert [entry["relative_path"] for entry in rows] == ["2024/trips"]
     assert row["display_name"] == "Trips"
     assert row["is_enabled"] == 1

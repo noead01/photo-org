@@ -54,7 +54,6 @@ class WatchedFolderResponse(BaseModel):
     watched_folder_id: str
     storage_source_id: str | None = None
     scan_path: str
-    container_mount_path: str
     relative_path: str | None = None
     display_name: str | None = None
     is_enabled: int

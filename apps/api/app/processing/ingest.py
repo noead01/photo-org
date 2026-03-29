@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import posixpath
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from stat import S_ISDIR
-from typing import Iterable, Protocol
+from typing import Callable, Iterable, Protocol
 from uuid import NAMESPACE_URL, uuid5
 
 from sqlalchemy import delete, insert, select, update
@@ -15,8 +16,8 @@ from app.db.config import resolve_missing_file_grace_period_days
 from app.db.ingest_runs import IngestRunStore
 from app.db.queue import IngestQueueStore
 from app.path_contract import (
-    build_canonical_photo_path,
-    normalize_container_mount_path,
+    build_rooted_photo_path,
+    build_source_aware_photo_path,
     relative_photo_path,
 )
 from app.services.file_reconciliation import (
@@ -80,7 +81,6 @@ class IngestResult:
 class RegisteredWatchedFolderTarget:
     storage_source_id: str
     watched_folder_id: str
-    container_mount_path: str
     relative_path: str | None
 
 
@@ -104,11 +104,9 @@ def ingest_directory(
     root: str | Path,
     database_url: str | Path | None = None,
     *,
-    container_mount_path: str | Path | None = None,
     face_detector: FaceDetector | None = None,
 ) -> IngestResult:
     source_root = Path(root).expanduser().resolve()
-    canonical_root = normalize_container_mount_path(container_mount_path or source_root)
     result = IngestResult()
 
     queue_store = IngestQueueStore(database_url)
@@ -119,7 +117,7 @@ def ingest_directory(
             payload = build_ingest_submission(
                 photo_path,
                 scan_root=source_root,
-                container_mount_path=canonical_root,
+                path_root=source_root,
             )
             queue_store.enqueue(
                 payload_type="photo_metadata",
@@ -137,12 +135,10 @@ def reconcile_directory(
     root: str | Path,
     database_url: str | Path | None = None,
     *,
-    container_mount_path: str | Path | None = None,
     now: datetime | None = None,
     missing_file_grace_period_days: int | None = None,
 ) -> IngestResult:
     source_root = Path(root).expanduser().resolve()
-    canonical_root = normalize_container_mount_path(container_mount_path or source_root)
     result = IngestResult()
     at = now if now is not None else utc_now()
     grace_period_days = resolve_missing_file_grace_period_days(missing_file_grace_period_days)
@@ -152,14 +148,16 @@ def reconcile_directory(
         watched_folder_id = ensure_watched_folder_exists(
             connection,
             scan_path=source_root.as_posix(),
-            container_mount_path=canonical_root,
             now=at,
         )
         outcome = _reconcile_watched_folder_root(
             connection,
             watched_folder_id=watched_folder_id,
             source_root=source_root,
-            canonical_root=canonical_root,
+            canonical_path_for_relative_path=lambda relative_path: build_rooted_photo_path(
+                source_root,
+                relative_path,
+            ),
             now=at,
             missing_file_grace_period_days=grace_period_days,
         )
@@ -223,7 +221,10 @@ def poll_registered_storage_sources(
                     connection,
                     watched_folder_id=target.watched_folder_id,
                     source_root=scan_root,
-                    canonical_root=target.container_mount_path,
+                    canonical_path_for_relative_path=_registered_source_path_builder(
+                        storage_source_id=source_target.storage_source_id,
+                        watched_folder_relative_path=target.relative_path,
+                    ),
                     now=at,
                     missing_file_grace_period_days=grace_period_days,
                 )
@@ -269,7 +270,7 @@ def _reconcile_watched_folder_root(
     *,
     watched_folder_id: str,
     source_root: Path,
-    canonical_root: str,
+    canonical_path_for_relative_path: Callable[[str], str],
     now: datetime,
     missing_file_grace_period_days: int,
 ) -> WatchedFolderPollOutcome:
@@ -308,7 +309,7 @@ def _reconcile_watched_folder_root(
         relative_path = relative_photo_path(source_root, photo_path)
         record = build_photo_record(
             photo_path,
-            canonical_path=build_canonical_photo_path(canonical_root, relative_path),
+            canonical_path=canonical_path_for_relative_path(relative_path),
         )
         try:
             thumbnail = generate_thumbnail(photo_path)
@@ -384,7 +385,6 @@ def _load_registered_storage_source_targets(
         select(
             watched_folders.c.storage_source_id,
             watched_folders.c.watched_folder_id,
-            watched_folders.c.container_mount_path,
             watched_folders.c.relative_path,
         )
         .where(
@@ -401,7 +401,6 @@ def _load_registered_storage_source_targets(
             RegisteredWatchedFolderTarget(
                 storage_source_id=row["storage_source_id"],
                 watched_folder_id=row["watched_folder_id"],
-                container_mount_path=row["container_mount_path"],
                 relative_path=row["relative_path"],
             )
         )
@@ -452,6 +451,23 @@ def _resolve_registered_scan_root(*, alias_root: Path, relative_path: str | None
     if relative_path in {None, "."}:
         return alias_root
     return alias_root / relative_path
+
+
+def _registered_source_path_builder(
+    *,
+    storage_source_id: str,
+    watched_folder_relative_path: str | None,
+) -> Callable[[str], str]:
+    def build(relative_path: str) -> str:
+        source_relative_parts = [
+            part
+            for part in (watched_folder_relative_path, relative_path)
+            if part not in {None, ".", ""}
+        ]
+        source_relative_path = posixpath.normpath(posixpath.join(*source_relative_parts))
+        return build_source_aware_photo_path(storage_source_id, source_relative_path)
+
+    return build
 
 
 def _classify_source_failure(exc: OSError) -> str:
@@ -533,12 +549,12 @@ def build_ingest_submission(
     path: Path,
     *,
     scan_root: Path,
-    container_mount_path: str | Path,
+    path_root: str | Path,
 ) -> dict:
     relative_path = relative_photo_path(scan_root, path)
     record = build_photo_record(
         path,
-        canonical_path=build_canonical_photo_path(container_mount_path, relative_path),
+        canonical_path=build_rooted_photo_path(path_root, relative_path),
     )
     payload = {
         "photo_id": record.photo_id,

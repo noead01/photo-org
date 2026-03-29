@@ -117,7 +117,6 @@ def upgrade() -> None:
         "watched_folders",
         sa.Column("watched_folder_id", sa.String(36), primary_key=True),
         sa.Column("scan_path", sa.Text(), nullable=False, unique=True),
-        sa.Column("container_mount_path", sa.Text(), nullable=False, unique=True),
         sa.Column(
             "storage_source_id",
             sa.String(36),

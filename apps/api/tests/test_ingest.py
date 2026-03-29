@@ -1,10 +1,11 @@
 from datetime import UTC, datetime, timedelta
+import posixpath
 import shutil
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
 import pytest
-from sqlalchemy import create_engine, event, func, insert, select
+from sqlalchemy import create_engine, event, func, insert, select, update
 
 from app.db.queue import IngestQueueStore
 from app.migrations import upgrade_database
@@ -44,7 +45,6 @@ SEED_CORPUS_SUBSET_PATHS = (
     "seed-corpus/family-events/birthday-park/birthday_park_005.jpg",
     "seed-corpus/family-events/birthday-park/birthday_park_006.jpg",
 )
-SEED_CORPUS_CONTAINER_PATH = "/photos/seed-corpus"
 SEED_CORPUS_RELATIVE_SUBSET_PATHS = tuple(
     asset_path.removeprefix("seed-corpus/") for asset_path in SEED_CORPUS_SUBSET_PATHS
 )
@@ -86,7 +86,6 @@ def test_ingest_directory_loads_sample_photos_into_queue(tmp_path, monkeypatch):
     result = ingest_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
     )
 
     assert result.scanned == 6
@@ -99,7 +98,7 @@ def test_ingest_directory_loads_sample_photos_into_queue(tmp_path, monkeypatch):
 
     assert len(rows) == 6
     assert all(row.payload_type == "photo_metadata" for row in rows)
-    assert all(row.payload_json["path"].startswith(f"{SEED_CORPUS_CONTAINER_PATH}/") for row in rows)
+    assert all(row.payload_json["path"].startswith(f"{staged_corpus_dir.as_posix()}/") for row in rows)
     assert {row.payload_json["ext"] for row in rows} == {"jpg", "jpeg", "png", "heic"}
     assert all(row.payload_json["filesize"] > 0 for row in rows)
     assert all(len(row.payload_json["sha256"]) == 64 for row in rows)
@@ -123,7 +122,6 @@ def test_ingest_directory_enqueues_records_without_writing_photos_table(tmp_path
     result = ingest_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
     )
 
     assert result.scanned == 6
@@ -141,12 +139,10 @@ def test_ingest_directory_is_idempotent_for_existing_paths(tmp_path, monkeypatch
     first_run = ingest_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
     )
     second_run = ingest_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
     )
 
     assert first_run.enqueued == 6
@@ -167,7 +163,6 @@ def test_ingest_directory_keeps_domain_tables_unwritten_when_detector_is_enabled
     result = ingest_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
         face_detector=UnusedFaceDetector(),
     )
 
@@ -187,7 +182,6 @@ def test_ingest_directory_keeps_queue_only_behavior(tmp_path, monkeypatch):
     result = ingest_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
     )
 
     assert result.errors == []
@@ -217,7 +211,6 @@ def test_reconcile_directory_marks_absent_files_missing(tmp_path, monkeypatch):
     reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
     )
 
     missing_path = staged_corpus_dir / "family-events" / "birthday-park" / "birthday_park_006.jpg"
@@ -226,7 +219,6 @@ def test_reconcile_directory_marks_absent_files_missing(tmp_path, monkeypatch):
     reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
     )
 
     row = load_photo_file_row(db_url, "family-events/birthday-park/birthday_park_006.jpg")
@@ -234,7 +226,7 @@ def test_reconcile_directory_marks_absent_files_missing(tmp_path, monkeypatch):
     assert row["missing_ts"] is not None
     assert row["deleted_ts"] is None
 
-    watched_folder = load_watched_folder_row(db_url, SEED_CORPUS_CONTAINER_PATH)
+    watched_folder = load_watched_folder_row(db_url, staged_corpus_dir.as_posix())
     assert watched_folder["availability_state"] == "active"
     assert watched_folder["last_failure_reason"] is None
     assert watched_folder["last_successful_scan_ts"] is not None
@@ -250,7 +242,6 @@ def test_reconcile_directory_deletes_missing_file_after_grace_period(tmp_path, m
     reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
         now=now,
     )
 
@@ -260,13 +251,11 @@ def test_reconcile_directory_deletes_missing_file_after_grace_period(tmp_path, m
     reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
         now=now,
     )
     reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
         now=now + timedelta(days=1, seconds=1),
     )
 
@@ -278,7 +267,7 @@ def test_reconcile_directory_deletes_missing_file_after_grace_period(tmp_path, m
     assert row["missing_ts"] == now
     assert row["deleted_ts"] == now + timedelta(days=1, seconds=1)
 
-    watched_folder = load_watched_folder_row(db_url, SEED_CORPUS_CONTAINER_PATH)
+    watched_folder = load_watched_folder_row(db_url, staged_corpus_dir.as_posix())
     assert watched_folder["availability_state"] == "active"
     assert watched_folder["last_failure_reason"] is None
     assert watched_folder["last_successful_scan_ts"] == now + timedelta(days=1, seconds=1)
@@ -294,7 +283,6 @@ def test_reconcile_directory_with_zero_day_grace_immediately_deletes_missing_fil
     reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
         now=now,
         missing_file_grace_period_days=0,
     )
@@ -305,7 +293,6 @@ def test_reconcile_directory_with_zero_day_grace_immediately_deletes_missing_fil
     reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
         now=now,
         missing_file_grace_period_days=0,
     )
@@ -318,7 +305,7 @@ def test_reconcile_directory_with_zero_day_grace_immediately_deletes_missing_fil
     assert row["missing_ts"] == now
     assert row["deleted_ts"] == now
 
-    watched_folder = load_watched_folder_row(db_url, SEED_CORPUS_CONTAINER_PATH)
+    watched_folder = load_watched_folder_row(db_url, staged_corpus_dir.as_posix())
     assert watched_folder["availability_state"] == "active"
     assert watched_folder["last_failure_reason"] is None
     assert watched_folder["last_successful_scan_ts"] == now
@@ -336,11 +323,10 @@ def test_reconcile_directory_marks_watched_folder_unreachable_when_root_scan_fai
     reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
         now=healthy_now,
     )
 
-    watched_folder = load_watched_folder_row(db_url, SEED_CORPUS_CONTAINER_PATH)
+    watched_folder = load_watched_folder_row(db_url, staged_corpus_dir.as_posix())
     assert watched_folder["availability_state"] == "active"
     assert watched_folder["last_failure_reason"] is None
     assert watched_folder["last_successful_scan_ts"] == healthy_now
@@ -351,11 +337,10 @@ def test_reconcile_directory_marks_watched_folder_unreachable_when_root_scan_fai
     reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
         now=failure_now,
     )
 
-    row = load_watched_folder_row(db_url, SEED_CORPUS_CONTAINER_PATH)
+    row = load_watched_folder_row(db_url, staged_corpus_dir.as_posix())
     assert row["availability_state"] == "unreachable"
     assert row["last_successful_scan_ts"] == healthy_now
 
@@ -373,7 +358,6 @@ def test_reconcile_directory_preserves_last_successful_scan_ts_when_root_scan_fa
     reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
         now=healthy_now,
     )
 
@@ -381,11 +365,10 @@ def test_reconcile_directory_preserves_last_successful_scan_ts_when_root_scan_fa
     reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
         now=failure_now,
     )
 
-    row = load_watched_folder_row(db_url, SEED_CORPUS_CONTAINER_PATH)
+    row = load_watched_folder_row(db_url, staged_corpus_dir.as_posix())
     assert row["availability_state"] == "unreachable"
     assert row["last_failure_reason"] == "permission_denied"
     assert row["last_successful_scan_ts"] == healthy_now
@@ -424,7 +407,6 @@ def test_reconcile_directory_does_not_advance_file_lifecycle_when_root_scan_fail
     reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
         now=healthy_now,
     )
 
@@ -439,7 +421,6 @@ def test_reconcile_directory_does_not_advance_file_lifecycle_when_root_scan_fail
     reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
         now=failure_now,
     )
 
@@ -464,7 +445,6 @@ def test_reconcile_directory_preserves_parent_photo_deleted_timestamp_when_root_
     reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
         now=now,
     )
 
@@ -474,14 +454,12 @@ def test_reconcile_directory_preserves_parent_photo_deleted_timestamp_when_root_
     reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
         now=now,
     )
     deleted_now = now + timedelta(days=1, seconds=1)
     reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
         now=deleted_now,
     )
 
@@ -501,7 +479,6 @@ def test_reconcile_directory_preserves_parent_photo_deleted_timestamp_when_root_
     reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
         now=failure_now,
     )
 
@@ -524,7 +501,6 @@ def test_reconcile_directory_clears_unreachable_state_after_later_healthy_scan(
     reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
         now=healthy_now,
     )
 
@@ -535,7 +511,6 @@ def test_reconcile_directory_clears_unreachable_state_after_later_healthy_scan(
     reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
         now=failure_now,
     )
 
@@ -548,11 +523,10 @@ def test_reconcile_directory_clears_unreachable_state_after_later_healthy_scan(
     reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
         now=recovered_now,
     )
 
-    row = load_watched_folder_row(db_url, SEED_CORPUS_CONTAINER_PATH)
+    row = load_watched_folder_row(db_url, staged_corpus_dir.as_posix())
     assert row["availability_state"] == "active"
     assert row["last_failure_reason"] is None
     assert row["last_successful_scan_ts"] == recovered_now
@@ -570,20 +544,18 @@ def test_reconcile_directory_persists_thumbnail_and_keeps_it_when_source_goes_of
     source_id = seed_linked_storage_source(
         db_url,
         scan_root=staged_corpus_dir,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
         now=healthy_now,
     )
 
     reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
         now=healthy_now,
     )
 
     photo = load_photo_row(
         db_url,
-        f"{SEED_CORPUS_CONTAINER_PATH}/family-events/birthday-park/birthday_park_001.jpg",
+        f"{staged_corpus_dir.as_posix()}/family-events/birthday-park/birthday_park_001.jpg",
     )
     assert photo["thumbnail_mime_type"] == "image/jpeg"
     assert photo["thumbnail_width"] > 0
@@ -597,7 +569,6 @@ def test_reconcile_directory_persists_thumbnail_and_keeps_it_when_source_goes_of
     reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
         now=offline_now,
     )
 
@@ -607,7 +578,7 @@ def test_reconcile_directory_persists_thumbnail_and_keeps_it_when_source_goes_of
 
     preserved = load_photo_row(
         db_url,
-        f"{SEED_CORPUS_CONTAINER_PATH}/family-events/birthday-park/birthday_park_001.jpg",
+        f"{staged_corpus_dir.as_posix()}/family-events/birthday-park/birthday_park_001.jpg",
     )
     assert preserved["thumbnail_jpeg"] == photo["thumbnail_jpeg"]
     assert preserved["thumbnail_width"] == photo["thumbnail_width"]
@@ -626,7 +597,6 @@ def test_reconcile_directory_reports_thumbnail_failures_without_marking_source_u
     source_id = seed_linked_storage_source(
         db_url,
         scan_root=staged_corpus_dir,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
         now=now,
     )
 
@@ -638,7 +608,6 @@ def test_reconcile_directory_reports_thumbnail_failures_without_marking_source_u
     result = reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
-        container_mount_path=SEED_CORPUS_CONTAINER_PATH,
         now=now,
     )
 
@@ -654,7 +623,7 @@ def test_reconcile_directory_reports_thumbnail_failures_without_marking_source_u
 
     photo = load_photo_row(
         db_url,
-        f"{SEED_CORPUS_CONTAINER_PATH}/family-events/birthday-park/birthday_park_001.jpg",
+        f"{staged_corpus_dir.as_posix()}/family-events/birthday-park/birthday_park_001.jpg",
     )
     assert photo["thumbnail_jpeg"] is None
 
@@ -695,9 +664,53 @@ def test_poll_registered_storage_sources_scans_enabled_registered_watched_folder
 
     photo = load_photo_row(
         db_url,
-        f"{staged_corpus_dir.as_posix()}/family-events/birthday-park/birthday_park_001.jpg",
+        _source_aware_photo_path(
+            source_id,
+            "family-events/birthday-park/birthday_park_001.jpg",
+        ),
     )
     assert photo["thumbnail_mime_type"] == "image/jpeg"
+
+
+def test_poll_registered_storage_sources_ignores_legacy_scan_path_for_identity(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    staged_corpus_dir = _stage_seed_corpus_subset(tmp_path)
+    db_url = f"sqlite:///{tmp_path / 'poll-storage-sources-source-aware-paths.db'}"
+    upgrade_database(db_url)
+
+    now = datetime(2026, 3, 28, 21, 15, tzinfo=UTC)
+    source_id, watched_folder_id = seed_registered_storage_source_with_watched_folder(
+        db_url,
+        root_path=staged_corpus_dir,
+        watched_path=staged_corpus_dir,
+        display_name="Seed Corpus",
+        now=now,
+    )
+    engine = create_engine(db_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            update(watched_folders)
+            .where(watched_folders.c.watched_folder_id == watched_folder_id)
+            .values(scan_path="/legacy/photos/seed-corpus")
+        )
+
+    result = poll_registered_storage_sources(database_url=db_url, now=now)
+
+    assert result.errors == []
+    photo = load_photo_row(
+        db_url,
+        _source_aware_photo_path(
+            source_id,
+            "family-events/birthday-park/birthday_park_001.jpg",
+        ),
+    )
+    assert photo["path"] == _source_aware_photo_path(
+        source_id,
+        "family-events/birthday-park/birthday_park_001.jpg",
+    )
+    assert not photo["path"].startswith("/legacy/photos/")
 
 
 def test_poll_registered_storage_sources_aborts_reconciliation_on_marker_mismatch(
@@ -923,7 +936,7 @@ def test_upsert_photo_skips_thumbnail_lookup_when_record_has_fresh_thumbnail(tmp
     database_url = f"sqlite:///{tmp_path / 'upsert-photo-thumbnail-fast-path.db'}"
     upgrade_database(database_url)
     now = datetime(2026, 3, 28, 20, 0, tzinfo=UTC)
-    path = f"{SEED_CORPUS_CONTAINER_PATH}/family-events/birthday-park/birthday_park_001.jpg"
+    path = "/test-root/family-events/birthday-park/birthday_park_001.jpg"
 
     engine = create_engine(database_url, future=True)
     with engine.begin() as connection:
@@ -1082,12 +1095,12 @@ def load_photo_row(database_url: str, path: str) -> dict:
     return payload
 
 
-def load_watched_folder_row(database_url: str, container_mount_path: str) -> dict:
+def load_watched_folder_row(database_url: str, scan_path: str) -> dict:
     engine = create_engine(database_url, future=True)
     with engine.connect() as connection:
         row = connection.execute(
             select(watched_folders).where(
-                watched_folders.c.container_mount_path == container_mount_path
+                watched_folders.c.scan_path == scan_path
             )
         ).mappings().one()
     payload = dict(row)
@@ -1186,11 +1199,16 @@ def load_ingest_runs(database_url: str) -> list[dict]:
     return payloads
 
 
+def _source_aware_photo_path(storage_source_id: str, relative_path: str) -> str:
+    return posixpath.normpath(
+        posixpath.join("/storage-sources", storage_source_id, relative_path)
+    )
+
+
 def seed_linked_storage_source(
     database_url: str,
     *,
     scan_root: Path,
-    container_mount_path: str,
     now: datetime,
 ) -> str:
     engine = create_engine(database_url, future=True)
@@ -1208,7 +1226,6 @@ def seed_linked_storage_source(
                     uuid5(NAMESPACE_URL, f"watched-folder:{scan_root.resolve().as_posix()}")
                 ),
                 scan_path=scan_root.resolve().as_posix(),
-                container_mount_path=container_mount_path,
                 storage_source_id=source["storage_source_id"],
                 relative_path=".",
                 display_name="Family NAS / seed-corpus",
@@ -1271,7 +1288,7 @@ def seed_photo_with_file_instances(database_url: str) -> None:
         connection.execute(
             insert(photos).values(
                 photo_id="photo-1",
-                path=f"{SEED_CORPUS_CONTAINER_PATH}/family-events/birthday-park/birthday_park_001.jpg",
+                path="/test-root/family-events/birthday-park/birthday_park_001.jpg",
                 sha256="a" * 64,
                 phash=None,
                 filesize=100,
@@ -1340,7 +1357,7 @@ def seed_deleted_photo_with_file_instance(database_url: str, *, deleted_ts: date
         connection.execute(
             insert(photos).values(
                 photo_id="photo-1",
-                path=f"{SEED_CORPUS_CONTAINER_PATH}/family-events/birthday-park/birthday_park_001.jpg",
+                path="/test-root/family-events/birthday-park/birthday_park_001.jpg",
                 sha256="b" * 64,
                 phash=None,
                 filesize=100,

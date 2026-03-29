@@ -46,7 +46,6 @@ def test_phase_zero_schema_applies_core_constraints():
 
     assert photos.c.sha256.unique is True
     assert watched_folders.c.scan_path.unique is True
-    assert watched_folders.c.container_mount_path.unique is True
     assert watched_folders.c.storage_source_id.nullable is True
     assert watched_folders.c.relative_path.nullable is True
     assert [fk.column.table.name for fk in watched_folders.c.storage_source_id.foreign_keys] == [
