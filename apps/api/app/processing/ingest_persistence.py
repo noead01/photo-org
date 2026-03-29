@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
-from sqlalchemy import delete, insert, select, text, update
+from sqlalchemy import delete, insert, select, update
 from sqlalchemy.engine import Connection
 
 from app.path_contract import build_rooted_photo_path, relative_photo_path
@@ -156,7 +156,7 @@ def store_face_detections(connection: Connection, photo_id: str, detections: lis
         .where(photos.c.photo_id == photo_id)
         .values(
             faces_count=len(detections),
-            faces_detected_ts=_sqlite_timestamp_sql(datetime.now(tz=UTC)),
+            faces_detected_ts=datetime.now(tz=UTC),
         )
     )
 
@@ -241,7 +241,7 @@ def _face_row(photo_id: str, detection: dict) -> dict[str, object]:
         "bbox_w": detection.get("bbox_w"),
         "bbox_h": detection.get("bbox_h"),
         "bitmap": detection.get("bitmap"),
-        "embedding": _json_safe_embedding(detection.get("embedding")),
+        "embedding": detection.get("embedding"),
         "provenance": detection.get("provenance", {}),
     }
 
@@ -279,7 +279,7 @@ def _normalize_optional_timestamp(value: datetime | None) -> datetime | None:
 
 
 def _insert_photo_row(connection: Connection, payload: dict[str, object | None]) -> None:
-    connection.execute(insert(photos).values(**_sqlite_timestamp_payload(connection, payload)))
+    connection.execute(insert(photos).values(**payload))
 
 
 def _update_photo_row(
@@ -290,33 +290,8 @@ def _update_photo_row(
     connection.execute(
         update(photos)
         .where(where_clause)
-        .values(**_sqlite_timestamp_payload(connection, payload))
+        .values(**payload)
     )
-
-
-def _sqlite_timestamp_payload(
-    connection: Connection,
-    payload: dict[str, object | None],
-) -> dict[str, object | None]:
-    if connection.dialect.name != "sqlite":
-        return payload
-
-    converted = dict(payload)
-    for column_name in _PHOTO_TIMESTAMP_COLUMNS:
-        value = converted.get(column_name)
-        if isinstance(value, datetime):
-            converted[column_name] = _sqlite_timestamp_sql(value)
-    return converted
-
-
-def _sqlite_timestamp_sql(value: datetime):
-    return text(f"'{_normalize_timestamp(value).isoformat(sep=' ')}'")
-
-
-def _json_safe_embedding(value: object) -> object:
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        return list(bytes(value))
-    return value
 
 
 __all__ = [
@@ -327,12 +302,3 @@ __all__ = [
     "upsert_photo",
     "upsert_source_photo",
 ]
-
-
-_PHOTO_TIMESTAMP_COLUMNS = (
-    "created_ts",
-    "modified_ts",
-    "shot_ts",
-    "updated_ts",
-    "faces_detected_ts",
-)

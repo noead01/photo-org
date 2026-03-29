@@ -60,6 +60,12 @@ def _photo_row_values(
     }
 
 
+def _normalize_timestamp(value: datetime | None) -> datetime | None:
+    if isinstance(value, datetime) and value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value
+
+
 def test_build_photo_record_returns_stable_identity_for_same_file_and_path(tmp_path):
     from app.processing.ingest_persistence import build_photo_record
 
@@ -191,7 +197,7 @@ def test_upsert_photo_preserves_existing_thumbnail_when_new_record_lacks_one(tmp
     assert row["thumbnail_width"] == 64
     assert row["thumbnail_height"] == 48
     assert row["faces_count"] == 4
-    assert row["updated_ts"] == now + timedelta(minutes=1)
+    assert _normalize_timestamp(row["updated_ts"]) == now + timedelta(minutes=1)
 
 
 def test_upsert_source_photo_reuses_existing_photo_id_and_detection_state(tmp_path):
@@ -263,7 +269,7 @@ def test_upsert_source_photo_reuses_existing_photo_id_and_detection_state(tmp_pa
     assert row["path"] == moved_path
     assert row["thumbnail_jpeg"] == b"old-thumbnail"
     assert row["faces_count"] == 1
-    assert row["faces_detected_ts"] == detected_ts
+    assert _normalize_timestamp(row["faces_detected_ts"]) == detected_ts
 
 
 def test_store_face_detections_replaces_existing_faces_and_updates_photo_counts(tmp_path):
@@ -318,7 +324,7 @@ def test_store_face_detections_replaces_existing_faces_and_updates_photo_counts(
                     "bbox_w": 3,
                     "bbox_h": 4,
                     "bitmap": b"bitmap",
-                    "embedding": b"embedding",
+                    "embedding": [0.1, 0.2],
                     "provenance": {"detector": "test"},
                 }
             ],
