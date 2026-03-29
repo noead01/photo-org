@@ -420,7 +420,7 @@ def test_reconcile_directory_marks_watched_folder_unreachable_when_root_scan_fai
     assert watched_folder["last_failure_reason"] is None
     assert watched_folder["last_successful_scan_ts"] == healthy_now
 
-    monkeypatch.setattr("app.processing.ingest.iter_photo_files", _fail_root_scan)
+    monkeypatch.setattr("app.processing.ingest_polling.iter_photo_files", _fail_root_scan)
 
     failure_now = healthy_now + timedelta(minutes=1)
     reconcile_directory(
@@ -450,7 +450,7 @@ def test_reconcile_directory_preserves_last_successful_scan_ts_when_root_scan_fa
         now=healthy_now,
     )
 
-    monkeypatch.setattr("app.processing.ingest.iter_photo_files", _fail_root_scan)
+    monkeypatch.setattr("app.processing.ingest_polling.iter_photo_files", _fail_root_scan)
     reconcile_directory(
         staged_corpus_dir,
         database_url=db_url,
@@ -504,7 +504,7 @@ def test_reconcile_directory_does_not_advance_file_lifecycle_when_root_scan_fail
         "family-events/birthday-park/birthday_park_006.jpg",
     )
 
-    monkeypatch.setattr("app.processing.ingest.iter_photo_files", _fail_root_scan)
+    monkeypatch.setattr("app.processing.ingest_polling.iter_photo_files", _fail_root_scan)
 
     failure_now = healthy_now + timedelta(minutes=1)
     reconcile_directory(
@@ -562,7 +562,7 @@ def test_reconcile_directory_preserves_parent_photo_deleted_timestamp_when_root_
     )
     assert deleted_before == deleted_now
 
-    monkeypatch.setattr("app.processing.ingest.iter_photo_files", _fail_root_scan)
+    monkeypatch.setattr("app.processing.ingest_polling.iter_photo_files", _fail_root_scan)
 
     failure_now = deleted_now + timedelta(minutes=1)
     reconcile_directory(
@@ -594,7 +594,7 @@ def test_reconcile_directory_clears_unreachable_state_after_later_healthy_scan(
     )
 
     original_iter_photo_files = ingest_module.iter_photo_files
-    monkeypatch.setattr("app.processing.ingest.iter_photo_files", _fail_root_scan)
+    monkeypatch.setattr("app.processing.ingest_polling.iter_photo_files", _fail_root_scan)
 
     failure_now = healthy_now + timedelta(minutes=1)
     reconcile_directory(
@@ -602,9 +602,8 @@ def test_reconcile_directory_clears_unreachable_state_after_later_healthy_scan(
         database_url=db_url,
         now=failure_now,
     )
-
     monkeypatch.setattr(
-        "app.processing.ingest.iter_photo_files",
+        "app.processing.ingest_polling.iter_photo_files",
         original_iter_photo_files,
     )
 
@@ -652,7 +651,7 @@ def test_reconcile_directory_persists_thumbnail_and_keeps_it_when_source_goes_of
     assert isinstance(photo["thumbnail_jpeg"], bytes)
     assert len(photo["thumbnail_jpeg"]) > 0
 
-    monkeypatch.setattr("app.processing.ingest.iter_photo_files", _fail_root_scan)
+    monkeypatch.setattr("app.processing.ingest_polling.iter_photo_files", _fail_root_scan)
 
     offline_now = healthy_now + timedelta(minutes=1)
     reconcile_directory(
@@ -690,7 +689,7 @@ def test_reconcile_directory_reports_thumbnail_failures_without_marking_source_u
     )
 
     monkeypatch.setattr(
-        "app.processing.ingest.generate_thumbnail",
+        "app.processing.ingest_polling.generate_thumbnail",
         lambda _: (_ for _ in ()).throw(RuntimeError("thumbnail exploded")),
     )
 

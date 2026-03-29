@@ -83,18 +83,23 @@ def build_ingest_submission(
 
 def upsert_photo(connection: Connection, record: PhotoRecord) -> bool:
     existing = connection.execute(
-        select(
-            photos.c.photo_id,
-            photos.c.thumbnail_jpeg,
-            photos.c.thumbnail_mime_type,
-            photos.c.thumbnail_width,
-            photos.c.thumbnail_height,
-        ).where(photos.c.path == record.path)
+        select(photos.c.photo_id).where(photos.c.path == record.path)
     ).mappings().first()
+
+    existing_thumbnail_fields = existing
+    if existing is not None and _thumbnail_fields_missing(record):
+        existing_thumbnail_fields = connection.execute(
+            select(
+                photos.c.thumbnail_jpeg,
+                photos.c.thumbnail_mime_type,
+                photos.c.thumbnail_width,
+                photos.c.thumbnail_height,
+            ).where(photos.c.path == record.path)
+        ).mappings().one()
 
     payload = _photo_row_payload(
         record,
-        thumbnail_fields=_coalesce_thumbnail_fields(record, existing),
+        thumbnail_fields=_coalesce_thumbnail_fields(record, existing_thumbnail_fields),
         faces_count=record.faces_count,
         faces_detected_ts=None,
     )
@@ -229,6 +234,10 @@ def _thumbnail_fields(record: PhotoRecord) -> dict[str, object | None]:
         "thumbnail_width": record.thumbnail_width,
         "thumbnail_height": record.thumbnail_height,
     }
+
+
+def _thumbnail_fields_missing(record: PhotoRecord) -> bool:
+    return all(value is None for value in _thumbnail_fields(record).values())
 
 
 def _face_row(photo_id: str, detection: dict) -> dict[str, object]:
