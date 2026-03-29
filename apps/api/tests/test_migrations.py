@@ -207,7 +207,6 @@ def test_ingest_succeeds_after_running_migrations(tmp_path):
     result = ingest_directory(
         staged_root,
         database_url=database_url,
-        container_mount_path="/photos/seed-corpus",
     )
 
     assert result.errors == []

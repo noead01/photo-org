@@ -50,7 +50,6 @@ def create_watched_folder(
     values = {
         "storage_source_id": storage_source_id,
         "scan_path": normalized_watched_path,
-        "container_mount_path": normalized_watched_path,
         "relative_path": relative_path,
         "display_name": display_name or PurePosixPath(relative_path).name or relative_path,
         "is_enabled": 1,

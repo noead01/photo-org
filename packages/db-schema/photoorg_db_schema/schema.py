@@ -108,7 +108,6 @@ watched_folders = Table(
     metadata,
     Column("watched_folder_id", String(36), primary_key=True),
     Column("scan_path", Text, nullable=False, unique=True),
-    Column("container_mount_path", Text, nullable=False, unique=True),
     Column(
         "storage_source_id",
         String(36),

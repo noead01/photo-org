@@ -71,7 +71,7 @@ Each environment is created once with an immutable storage mode, either `persist
 - a PostgreSQL database with the `vector` extension enabled
 - access from the server to the folders that contain the photo library
 
-The server still needs runtime access to the photo library, but watched-folder registration is now modeled under registered storage sources. Operators should register a source root first, then add watched folders relative to that source boundary instead of treating container mount paths as the user-facing identity contract.
+The server still needs runtime access to the photo library, but watched-folder registration is now modeled under registered storage sources. Operators should register a source root first, then add watched folders relative to that source boundary instead of treating container mount paths as the user-facing identity contract. Source-backed ingest and reconciliation now derive canonical file identity from the registered storage source plus source-relative paths, not from deployment-specific mount spellings.
 
 If you already have PostgreSQL running separately, the application can use that existing database instead of starting another one.
 
