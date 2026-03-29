@@ -12,6 +12,12 @@ from app.services.watched_folders import create_watched_folder
 from photoorg_db_schema import ingest_runs
 
 
+def test_poll_registered_storage_sources_is_public_entrypoint():
+    from app.processing.ingest_polling import poll_registered_storage_sources
+
+    assert callable(poll_registered_storage_sources)
+
+
 def test_load_registered_storage_source_targets_collects_enabled_watched_folders(tmp_path):
     from app.processing.ingest_polling import _load_registered_storage_source_targets
 
