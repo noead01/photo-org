@@ -4,11 +4,12 @@ import json
 from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, insert, select
 
 from app.dependencies import _get_session_factory
 from app.main import app
 from app.migrations import upgrade_database
+from app.storage import ingest_runs, photo_files, photos
 
 
 def test_storage_source_registration_api_creates_source_and_marker(tmp_path, monkeypatch):
@@ -372,3 +373,247 @@ def test_storage_source_watched_folder_mutations_enforce_source_ownership(tmp_pa
         f"/api/v1/storage-sources/{source_a['storage_source_id']}/watched-folders/{watched_folder_id}"
     )
     assert wrong_delete.status_code == 404
+
+
+def test_storage_sources_api_lists_source_health_latest_runs_and_catalog_availability(
+    tmp_path, monkeypatch
+):
+    from app.services.storage_sources import (
+        attach_storage_source_alias,
+        create_storage_source,
+        update_storage_source_availability,
+    )
+    from app.services.watched_folders import create_watched_folder
+
+    database_url = f"sqlite:///{tmp_path / 'storage-source-api-status.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    root = tmp_path / "family-share"
+    watched_root = root / "2024" / "trips"
+    watched_root.mkdir(parents=True)
+    now = datetime(2026, 3, 29, 14, 0, tzinfo=UTC)
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        source = create_storage_source(
+            connection,
+            display_name="Family Share",
+            marker_filename=".photo-org-source.json",
+            marker_version=1,
+            now=now,
+        )
+        attach_storage_source_alias(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=str(root),
+            now=now,
+        )
+        watched_folder = create_watched_folder(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=str(root),
+            watched_path=str(watched_root),
+            display_name="Trips",
+            now=now,
+        )
+        update_storage_source_availability(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            availability_state="unreachable",
+            last_failure_reason="folder_unmounted",
+            now=now,
+        )
+        connection.execute(
+            insert(photos).values(
+                photo_id="photo-1",
+                path=f"/storage-sources/{source['storage_source_id']}/2024/trips/arrival.jpg",
+                sha256="a" * 64,
+                phash=None,
+                filesize=123,
+                ext="jpg",
+                created_ts=now,
+                modified_ts=now,
+                shot_ts=now,
+                shot_ts_source="exif:DateTime",
+                camera_make="Canon",
+                camera_model="EOS",
+                software=None,
+                orientation="landscape",
+                gps_latitude=None,
+                gps_longitude=None,
+                gps_altitude=None,
+                thumbnail_jpeg=b"thumb",
+                thumbnail_mime_type="image/jpeg",
+                thumbnail_width=64,
+                thumbnail_height=48,
+                updated_ts=now,
+                deleted_ts=None,
+                faces_count=0,
+                faces_detected_ts=None,
+            )
+        )
+        connection.execute(
+            insert(photo_files).values(
+                photo_file_id="photo-file-1",
+                photo_id="photo-1",
+                watched_folder_id=watched_folder["watched_folder_id"],
+                relative_path="arrival.jpg",
+                filename="arrival.jpg",
+                extension="jpg",
+                filesize=123,
+                created_ts=now,
+                modified_ts=now,
+                first_seen_ts=now,
+                last_seen_ts=now,
+                missing_ts=None,
+                deleted_ts=None,
+                lifecycle_state="active",
+                absence_reason=None,
+            )
+        )
+        connection.execute(
+            insert(ingest_runs).values(
+                ingest_run_id="run-failed",
+                watched_folder_id=watched_folder["watched_folder_id"],
+                status="failed",
+                started_ts=now,
+                completed_ts=now,
+                files_seen=0,
+                files_created=0,
+                files_updated=0,
+                files_missing=0,
+                error_count=1,
+                error_summary="marker mismatch on alias //nas/family-share",
+            )
+        )
+        connection.execute(
+            insert(ingest_runs).values(
+                ingest_run_id="run-ok",
+                watched_folder_id=watched_folder["watched_folder_id"],
+                status="completed",
+                started_ts=now.replace(hour=13),
+                completed_ts=now.replace(hour=13),
+                files_seen=10,
+                files_created=2,
+                files_updated=1,
+                files_missing=0,
+                error_count=0,
+                error_summary=None,
+            )
+        )
+
+    client = TestClient(app)
+
+    response = client.get("/api/v1/storage-sources")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    payload = response.json()[0]
+    assert payload["storage_source_id"] == source["storage_source_id"]
+    assert payload["availability_state"] == "unreachable"
+    assert payload["last_failure_reason"] == "folder_unmounted"
+    assert payload["watched_folder_count"] == 1
+    assert payload["unreachable_watched_folder_count"] == 0
+    assert payload["catalog"]["metadata_queryable"] is True
+    assert payload["catalog"]["thumbnails_available"] is True
+    assert payload["catalog"]["originals_available"] is False
+    assert payload["latest_ingest_run"]["status"] == "failed"
+    assert payload["latest_ingest_run"]["error_summary"] == "marker mismatch on alias //nas/family-share"
+    assert payload["recent_failures"] == [
+        {
+            "watched_folder_id": watched_folder["watched_folder_id"],
+            "status": "failed",
+            "error_summary": "marker mismatch on alias //nas/family-share",
+            "completed_ts": "2026-03-29T14:00:00Z",
+        }
+    ]
+
+
+def test_storage_source_watched_folder_list_includes_latest_ingest_run_summary(tmp_path, monkeypatch):
+    from app.services.storage_sources import (
+        attach_storage_source_alias,
+        create_storage_source,
+    )
+    from app.services.watched_folders import create_watched_folder
+
+    database_url = f"sqlite:///{tmp_path / 'storage-source-api-watched-folder-status.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    root = tmp_path / "family-share"
+    watched_root = root / "2024" / "trips"
+    watched_root.mkdir(parents=True)
+    now = datetime(2026, 3, 29, 15, 0, tzinfo=UTC)
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        source = create_storage_source(
+            connection,
+            display_name="Family Share",
+            marker_filename=".photo-org-source.json",
+            marker_version=1,
+            now=now,
+        )
+        attach_storage_source_alias(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=str(root),
+            now=now,
+        )
+        watched_folder = create_watched_folder(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=str(root),
+            watched_path=str(watched_root),
+            display_name="Trips",
+            now=now,
+        )
+        connection.execute(
+            insert(ingest_runs).values(
+                ingest_run_id="run-1",
+                watched_folder_id=watched_folder["watched_folder_id"],
+                status="completed",
+                started_ts=now.replace(hour=14),
+                completed_ts=now.replace(hour=14),
+                files_seen=12,
+                files_created=3,
+                files_updated=2,
+                files_missing=1,
+                error_count=0,
+                error_summary=None,
+            )
+        )
+
+    client = TestClient(app)
+
+    response = client.get(
+        f"/api/v1/storage-sources/{source['storage_source_id']}/watched-folders"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "watched_folder_id": watched_folder["watched_folder_id"],
+            "storage_source_id": source["storage_source_id"],
+            "scan_path": str(watched_root),
+            "relative_path": "2024/trips",
+            "display_name": "Trips",
+            "is_enabled": 1,
+            "availability_state": "active",
+            "last_failure_reason": None,
+            "last_successful_scan_ts": None,
+            "latest_ingest_run": {
+                "status": "completed",
+                "files_seen": 12,
+                "files_created": 3,
+                "files_updated": 2,
+                "files_missing": 1,
+                "error_count": 0,
+                "error_summary": None,
+                "completed_ts": "2026-03-29T14:00:00Z",
+            },
+        }
+    ]

@@ -37,6 +37,21 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/storage-sources:
+    get:
+      tags:
+      - storage-sources
+      summary: List Storage Sources
+      operationId: list_storage_sources_api_v1_storage_sources_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/StorageSourceStatusResponse'
+                type: array
+                title: Response List Storage Sources Api V1 Storage Sources Get
     post:
       tags:
       - storage-sources
@@ -201,6 +216,23 @@ paths:
               schema: {}
 components:
   schemas:
+    CatalogAvailabilityResponse:
+      properties:
+        metadata_queryable:
+          type: boolean
+          title: Metadata Queryable
+        thumbnails_available:
+          type: boolean
+          title: Thumbnails Available
+        originals_available:
+          type: boolean
+          title: Originals Available
+      type: object
+      required:
+      - metadata_queryable
+      - thumbnails_available
+      - originals_available
+      title: CatalogAvailabilityResponse
     CreateWatchedFolderRequest:
       properties:
         alias_path:
@@ -228,6 +260,46 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    IngestRunSummaryResponse:
+      properties:
+        status:
+          type: string
+          title: Status
+        files_seen:
+          type: integer
+          title: Files Seen
+        files_created:
+          type: integer
+          title: Files Created
+        files_updated:
+          type: integer
+          title: Files Updated
+        files_missing:
+          type: integer
+          title: Files Missing
+        error_count:
+          type: integer
+          title: Error Count
+        error_summary:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Summary
+        completed_ts:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Completed Ts
+      type: object
+      required:
+      - status
+      - files_seen
+      - files_created
+      - files_updated
+      - files_missing
+      - error_count
+      title: IngestRunSummaryResponse
     ProcessQueueRequest:
       properties:
         limit:
@@ -255,6 +327,30 @@ components:
       - failed
       - retryable_errors
       title: ProcessQueueResponse
+    RecentFailureResponse:
+      properties:
+        watched_folder_id:
+          type: string
+          title: Watched Folder Id
+        status:
+          type: string
+          title: Status
+        error_summary:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Summary
+        completed_ts:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Completed Ts
+      type: object
+      required:
+      - watched_folder_id
+      - status
+      title: RecentFailureResponse
     RegisterStorageSourceRequest:
       properties:
         root_path:
@@ -321,6 +417,79 @@ components:
       - created_ts
       - updated_ts
       title: StorageSourceResponse
+    StorageSourceStatusResponse:
+      properties:
+        storage_source_id:
+          type: string
+          title: Storage Source Id
+        display_name:
+          type: string
+          title: Display Name
+        marker_filename:
+          type: string
+          title: Marker Filename
+        marker_version:
+          type: integer
+          title: Marker Version
+        availability_state:
+          type: string
+          title: Availability State
+        last_failure_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Last Failure Reason
+        last_validated_ts:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Last Validated Ts
+        created_ts:
+          type: string
+          format: date-time
+          title: Created Ts
+        updated_ts:
+          type: string
+          format: date-time
+          title: Updated Ts
+        alias_paths:
+          items:
+            type: string
+          type: array
+          title: Alias Paths
+        watched_folder_count:
+          type: integer
+          title: Watched Folder Count
+        unreachable_watched_folder_count:
+          type: integer
+          title: Unreachable Watched Folder Count
+        catalog:
+          $ref: '#/components/schemas/CatalogAvailabilityResponse'
+        latest_ingest_run:
+          anyOf:
+          - $ref: '#/components/schemas/IngestRunSummaryResponse'
+          - type: 'null'
+        recent_failures:
+          items:
+            $ref: '#/components/schemas/RecentFailureResponse'
+          type: array
+          title: Recent Failures
+      type: object
+      required:
+      - storage_source_id
+      - display_name
+      - marker_filename
+      - marker_version
+      - availability_state
+      - created_ts
+      - updated_ts
+      - alias_paths
+      - watched_folder_count
+      - unreachable_watched_folder_count
+      - catalog
+      - recent_failures
+      title: StorageSourceStatusResponse
     UpdateWatchedFolderRequest:
       properties:
         is_enabled:
@@ -396,6 +565,10 @@ components:
             format: date-time
           - type: 'null'
           title: Last Successful Scan Ts
+        latest_ingest_run:
+          anyOf:
+          - $ref: '#/components/schemas/IngestRunSummaryResponse'
+          - type: 'null'
       type: object
       required:
       - watched_folder_id
