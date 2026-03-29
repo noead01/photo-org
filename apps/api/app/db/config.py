@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 
-DEFAULT_SQLITE_PATH = Path("apps/api/photoorg.db").resolve()
+DEFAULT_SQLITE_PATH = (Path(__file__).resolve().parents[2] / "photoorg.db").resolve()
 DEFAULT_DATABASE_URL = f"sqlite:///{DEFAULT_SQLITE_PATH}"
 DEFAULT_MISSING_FILE_GRACE_PERIOD_DAYS = 1
 
