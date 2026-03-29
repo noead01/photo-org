@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
@@ -124,6 +125,54 @@ def test_storage_source_registration_api_rejects_invalid_root(tmp_path, monkeypa
 
     assert response.status_code == 400
     assert "does not exist" in response.json()["detail"]
+
+
+def test_storage_source_registration_api_rejects_malformed_marker_file(tmp_path, monkeypatch):
+    database_url = f"sqlite:///{tmp_path / 'storage-source-registration-api-bad-marker.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    root = tmp_path / "family-share"
+    root.mkdir()
+    (root / ".photo-org-source.json").write_text("{not-json")
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/storage-sources",
+        json={
+            "root_path": str(root),
+            "alias_path": "//nas/family-share",
+            "display_name": "Family Share",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "marker" in response.json()["detail"]
+
+
+def test_storage_source_registration_api_rejects_marker_missing_storage_source_id(tmp_path, monkeypatch):
+    database_url = f"sqlite:///{tmp_path / 'storage-source-registration-api-missing-marker-key.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    root = tmp_path / "family-share"
+    root.mkdir()
+    (root / ".photo-org-source.json").write_text(json.dumps({"marker_version": 1}))
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/storage-sources",
+        json={
+            "root_path": str(root),
+            "alias_path": "//nas/family-share",
+            "display_name": "Family Share",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "marker" in response.json()["detail"]
 
 
 def test_storage_source_registration_api_rejects_empty_root_path(tmp_path, monkeypatch):

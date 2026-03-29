@@ -89,7 +89,17 @@ def read_source_marker(root: Path) -> dict[str, object] | None:
     marker_path = root / MARKER_FILENAME
     if not marker_path.is_file():
         return None
-    return json.loads(marker_path.read_text())
+    try:
+        marker = json.loads(marker_path.read_text())
+    except json.JSONDecodeError as exc:
+        raise SourceRegistrationError(f"malformed storage source marker file: {marker_path}") from exc
+    if not isinstance(marker, dict):
+        raise SourceRegistrationError(f"malformed storage source marker file: {marker_path}")
+    if "storage_source_id" not in marker:
+        raise SourceRegistrationError(
+            f"malformed storage source marker file missing storage_source_id: {marker_path}"
+        )
+    return marker
 
 
 def write_source_marker(root: Path, *, storage_source_id: str) -> None:
