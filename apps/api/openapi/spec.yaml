@@ -399,6 +399,35 @@ components:
       - is_available
       - availability_state
       title: OriginalAvailabilityHit
+    PhotoDetailFace:
+      properties:
+        person_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Person Id
+        bbox_x:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Bbox X
+        bbox_y:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Bbox Y
+        bbox_w:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Bbox W
+        bbox_h:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Bbox H
+      type: object
+      title: PhotoDetailFace
     PhotoDetailResponse:
       properties:
         photo_id:
@@ -440,7 +469,7 @@ components:
           default: []
         faces:
           items:
-            $ref: '#/components/schemas/FaceHit'
+            $ref: '#/components/schemas/PhotoDetailFace'
           type: array
           title: Faces
           default: []

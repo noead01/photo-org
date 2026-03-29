@@ -67,7 +67,15 @@ def test_photo_detail_api_returns_projected_metadata_and_related_fields(tmp_path
     assert payload["shot_ts"] == "2026-03-28T19:30:00Z"
     assert payload["tags"] == ["vacation"]
     assert payload["people"] == ["person-1"]
-    assert payload["faces"] == [{"person_id": "person-1"}]
+    assert payload["faces"] == [
+        {
+            "person_id": "person-1",
+            "bbox_x": 10,
+            "bbox_y": 20,
+            "bbox_w": 30,
+            "bbox_h": 40,
+        }
+    ]
     assert payload["thumbnail"] is None
     assert payload["original"] is None
     assert payload["metadata"]["camera_model"] == "iPhone 15 Pro"
