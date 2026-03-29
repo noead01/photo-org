@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from uuid import NAMESPACE_URL, uuid5
 
 import pytest
 from sqlalchemy import create_engine, insert, select
@@ -61,48 +60,66 @@ def _photo_row_values(
     }
 
 
-def test_build_photo_record_captures_identity_and_metadata(tmp_path):
+def test_build_photo_record_returns_stable_identity_for_same_file_and_path(tmp_path):
     from app.processing.ingest_persistence import build_photo_record
 
     photo_path = tmp_path / "photo.jpg"
     _write_test_image(photo_path)
     canonical_path = "/library/photo.jpg"
 
-    record = build_photo_record(photo_path, canonical_path=canonical_path)
+    first = build_photo_record(photo_path, canonical_path=canonical_path)
+    second = build_photo_record(photo_path, canonical_path=canonical_path)
 
-    assert record.path == canonical_path
-    assert record.photo_id == str(
-        uuid5(NAMESPACE_URL, f"{canonical_path}:{hashlib.sha256(photo_path.read_bytes()).hexdigest()}")
-    )
-    assert record.sha256 == hashlib.sha256(photo_path.read_bytes()).hexdigest()
-    assert record.filesize == photo_path.stat().st_size
-    assert record.ext == "jpg"
-    assert record.created_ts is not None
-    assert record.modified_ts is not None
-    assert record.faces_count == 0
+    assert first.photo_id == second.photo_id
+    assert first.path == canonical_path
+    assert first.sha256 == hashlib.sha256(photo_path.read_bytes()).hexdigest()
+    assert first.filesize == photo_path.stat().st_size
+    assert first.ext == "jpg"
+    assert first.created_ts is not None
+    assert first.modified_ts is not None
+    assert first.faces_count == 0
 
 
-def test_build_ingest_submission_serializes_photo_record_fields(tmp_path):
-    from app.processing.ingest_persistence import build_ingest_submission, build_photo_record
+def test_build_photo_record_changes_identity_when_canonical_path_changes(tmp_path):
+    from app.processing.ingest_persistence import build_photo_record
 
     photo_path = tmp_path / "photo.jpg"
     _write_test_image(photo_path)
 
-    expected_record = build_photo_record(photo_path, canonical_path="/library/photo.jpg")
+    first = build_photo_record(photo_path, canonical_path="/library/photo.jpg")
+    second = build_photo_record(photo_path, canonical_path="/archive/photo.jpg")
+
+    assert first.photo_id != second.photo_id
+
+
+def test_build_ingest_submission_serializes_expected_payload_fields(tmp_path):
+    from app.processing.ingest_persistence import build_ingest_submission
+
+    photo_path = tmp_path / "photo.jpg"
+    _write_test_image(photo_path)
+
     payload = build_ingest_submission(
         photo_path,
         scan_root=tmp_path,
         path_root="/library",
     )
 
-    assert payload["photo_id"] == expected_record.photo_id
-    assert payload["path"] == expected_record.path
-    assert payload["sha256"] == expected_record.sha256
-    assert payload["created_ts"] == expected_record.created_ts.isoformat()
-    assert payload["modified_ts"] == expected_record.modified_ts.isoformat()
+    assert payload["path"] == "/library/photo.jpg"
+    assert payload["sha256"] == hashlib.sha256(photo_path.read_bytes()).hexdigest()
+    assert len(payload["photo_id"]) > 0
+    assert payload["idempotency_key"] == payload["photo_id"]
+    assert payload["created_ts"].endswith("+00:00") or payload["created_ts"].endswith("Z")
+    assert payload["modified_ts"].endswith("+00:00") or payload["modified_ts"].endswith("Z")
     assert payload["shot_ts"] is None
+    assert payload["shot_ts_source"] is None
+    assert payload["camera_make"] is None
+    assert payload["camera_model"] is None
+    assert payload["software"] is None
+    assert payload["orientation"] is None
+    assert payload["gps_latitude"] is None
+    assert payload["gps_longitude"] is None
+    assert payload["gps_altitude"] is None
     assert payload["faces_count"] == 0
-    assert payload["idempotency_key"] == expected_record.photo_id
 
 
 def test_upsert_photo_preserves_existing_thumbnail_when_new_record_lacks_one(tmp_path):

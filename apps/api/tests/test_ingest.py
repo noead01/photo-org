@@ -192,9 +192,10 @@ def test_ingest_directory_keeps_queue_only_behavior(tmp_path, monkeypatch):
 
 
 def test_ingest_facade_poll_registered_storage_sources_delegates_to_polling_module(
-    monkeypatch,
+    tmp_path, monkeypatch
 ):
     import importlib
+    import importlib.util
     import sys
     import types
 
@@ -209,18 +210,26 @@ def test_ingest_facade_poll_registered_storage_sources_delegates_to_polling_modu
         now=None,
         missing_file_grace_period_days=None,
     ):
-        assert database_url == "sqlite:///facade-delegation.db"
+        assert database_url == f"sqlite:///{tmp_path / 'facade-delegation.db'}"
         assert now is None
         assert missing_file_grace_period_days is None
         return sentinel_result
 
     fake_module.poll_registered_storage_sources = fake_poll_registered_storage_sources
     monkeypatch.setitem(sys.modules, "app.processing.ingest_polling", fake_module)
-    upgrade_database("sqlite:///facade-delegation.db")
-    reloaded_ingest_module = importlib.reload(ingest_module)
+    database_url = f"sqlite:///{tmp_path / 'facade-delegation.db'}"
+    upgrade_database(database_url)
+    spec = importlib.util.spec_from_file_location(
+        "isolated_ingest_facade",
+        Path(ingest_module.__file__),
+    )
+    assert spec is not None and spec.loader is not None
+    isolated_ingest_module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, isolated_ingest_module)
+    spec.loader.exec_module(isolated_ingest_module)
 
-    result = reloaded_ingest_module.poll_registered_storage_sources(
-        database_url="sqlite:///facade-delegation.db",
+    result = isolated_ingest_module.poll_registered_storage_sources(
+        database_url=database_url,
     )
 
     assert result is sentinel_result

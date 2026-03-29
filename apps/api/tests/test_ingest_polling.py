@@ -1,22 +1,99 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+from sqlalchemy import create_engine, func, select
 
 from app.migrations import upgrade_database
+from app.services.source_registration import MARKER_FILENAME, write_source_marker
+from app.services.storage_sources import attach_storage_source_alias, create_storage_source
+from app.services.watched_folders import create_watched_folder
+from app.storage import photos, storage_sources, watched_folders
+from photoorg_db_schema import ingest_runs
+
+pytest.importorskip("PIL")
+from PIL import Image
 
 
-def test_poll_registered_storage_sources_returns_empty_result_for_empty_database(tmp_path):
+def _write_test_image(path: Path) -> None:
+    image = Image.new("RGB", (2, 2), color=(255, 0, 0))
+    image.save(path, format="JPEG")
+
+
+def test_poll_registered_storage_sources_processes_a_registered_source_end_to_end(tmp_path):
     from app.processing.ingest_polling import poll_registered_storage_sources
 
-    database_url = f"sqlite:///{tmp_path / 'poll-empty.db'}"
+    database_url = f"sqlite:///{tmp_path / 'poll-happy-path.db'}"
     upgrade_database(database_url)
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 3, 29, 0, 0, tzinfo=UTC)
 
-    result = poll_registered_storage_sources(
-        database_url=database_url,
-        now=datetime(2026, 3, 29, 0, 0, tzinfo=UTC),
-    )
+    root = tmp_path / "source-root"
+    watched = root / "imports"
+    watched.mkdir(parents=True)
+    _write_test_image(watched / "birthday_park_001.jpg")
 
-    assert result.scanned == 0
-    assert result.inserted == 0
+    with engine.begin() as connection:
+        source = create_storage_source(
+            connection,
+            display_name="Source",
+            marker_filename=MARKER_FILENAME,
+            marker_version=1,
+            now=now,
+        )
+        attach_storage_source_alias(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            now=now,
+        )
+        watched_folder = create_watched_folder(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            watched_path=watched.as_posix(),
+            display_name="Imports",
+            now=now,
+        )
+        write_source_marker(root, storage_source_id=source["storage_source_id"])
+
+    result = poll_registered_storage_sources(database_url=database_url, now=now)
+
+    assert result.scanned == 1
+    assert result.inserted == 1
     assert result.updated == 0
     assert result.errors == []
+
+    with engine.connect() as connection:
+        source_row = connection.execute(
+            select(
+                storage_sources.c.availability_state,
+                storage_sources.c.last_failure_reason,
+                storage_sources.c.last_validated_ts,
+            ).where(storage_sources.c.storage_source_id == source["storage_source_id"])
+        ).mappings().one()
+        watched_folder_row = connection.execute(
+            select(
+                watched_folders.c.availability_state,
+                watched_folders.c.last_failure_reason,
+                watched_folders.c.last_successful_scan_ts,
+            ).where(watched_folders.c.watched_folder_id == watched_folder["watched_folder_id"])
+        ).mappings().one()
+        run_row = connection.execute(select(ingest_runs)).mappings().one()
+        photo_count = connection.execute(select(func.count()).select_from(photos)).scalar_one()
+
+    assert source_row["availability_state"] == "active"
+    assert source_row["last_failure_reason"] is None
+    assert source_row["last_validated_ts"] == now
+    assert watched_folder_row["availability_state"] == "active"
+    assert watched_folder_row["last_failure_reason"] is None
+    assert watched_folder_row["last_successful_scan_ts"] == now
+    assert run_row["watched_folder_id"] == watched_folder["watched_folder_id"]
+    assert run_row["status"] == "completed"
+    assert run_row["files_seen"] == 1
+    assert run_row["files_created"] == 1
+    assert run_row["files_updated"] == 0
+    assert run_row["error_count"] == 0
+    assert photo_count == 1
