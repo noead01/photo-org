@@ -4,7 +4,7 @@ import json
 from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, insert, select
+from sqlalchemy import create_engine, insert
 
 from app.dependencies import _get_session_factory
 from app.main import app
@@ -529,6 +529,107 @@ def test_storage_sources_api_lists_source_health_latest_runs_and_catalog_availab
             "completed_ts": "2026-03-29T14:00:00Z",
         }
     ]
+
+
+def test_storage_source_detail_api_includes_ingest_status_summary(tmp_path, monkeypatch):
+    from app.services.storage_sources import (
+        attach_storage_source_alias,
+        create_storage_source,
+        update_storage_source_availability,
+    )
+    from app.services.watched_folders import create_watched_folder
+
+    database_url = f"sqlite:///{tmp_path / 'storage-source-api-detail.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    root = tmp_path / "family-share"
+    watched_root = root / "2024" / "trips"
+    watched_root.mkdir(parents=True)
+    now = datetime(2026, 3, 29, 14, 0, tzinfo=UTC)
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        source = create_storage_source(
+            connection,
+            display_name="Family Share",
+            marker_filename=".photo-org-source.json",
+            marker_version=1,
+            now=now,
+        )
+        attach_storage_source_alias(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=str(root),
+            now=now,
+        )
+        watched_folder = create_watched_folder(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=str(root),
+            watched_path=str(watched_root),
+            display_name="Trips",
+            now=now,
+        )
+        update_storage_source_availability(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            availability_state="unreachable",
+            last_failure_reason="folder_unmounted",
+            now=now,
+        )
+        connection.execute(
+            insert(ingest_runs).values(
+                ingest_run_id="run-failed",
+                watched_folder_id=watched_folder["watched_folder_id"],
+                status="failed",
+                started_ts=now,
+                completed_ts=now,
+                files_seen=0,
+                files_created=0,
+                files_updated=0,
+                files_missing=0,
+                error_count=1,
+                error_summary="marker mismatch on alias //nas/family-share",
+            )
+        )
+
+    client = TestClient(app)
+
+    response = client.get(f"/api/v1/storage-sources/{source['storage_source_id']}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["storage_source_id"] == source["storage_source_id"]
+    assert payload["availability_state"] == "unreachable"
+    assert payload["watched_folder_count"] == 1
+    assert payload["unreachable_watched_folder_count"] == 0
+    assert payload["catalog"]["metadata_queryable"] is False
+    assert payload["catalog"]["thumbnails_available"] is False
+    assert payload["catalog"]["originals_available"] is False
+    assert payload["latest_ingest_run"]["status"] == "failed"
+    assert payload["recent_failures"] == [
+        {
+            "watched_folder_id": watched_folder["watched_folder_id"],
+            "status": "failed",
+            "error_summary": "marker mismatch on alias //nas/family-share",
+            "completed_ts": "2026-03-29T14:00:00Z",
+        }
+    ]
+
+
+def test_storage_source_detail_api_returns_404_for_missing_source(tmp_path, monkeypatch):
+    database_url = f"sqlite:///{tmp_path / 'storage-source-api-detail-missing.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    client = TestClient(app)
+
+    response = client.get("/api/v1/storage-sources/missing-source-id")
+
+    assert response.status_code == 404
 
 
 def test_storage_source_watched_folder_list_includes_latest_ingest_run_summary(tmp_path, monkeypatch):
