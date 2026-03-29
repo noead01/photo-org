@@ -68,3 +68,17 @@ class TestHealthEndpoint:
         )
 
         assert checked_in == runtime
+
+    def test_given_storage_source_registration_route_when_fetching_openapi_then_declares_400_response(self):
+        """
+        Given: The storage source registration route
+        When: Fetching the runtime OpenAPI schema
+        Then: The route declares the documented 400 error response
+        """
+        client = TestClient(app)
+
+        response = client.get("/openapi.json")
+
+        assert response.status_code == 200
+        operation = response.json()["paths"]["/api/v1/storage-sources"]["post"]
+        assert "400" in operation["responses"]

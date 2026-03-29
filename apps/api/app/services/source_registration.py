@@ -4,6 +4,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from app.services.path_normalization import PathNormalizationError, normalize_operator_path
 from app.storage import create_db_engine
 from app.services.storage_sources import (
     StorageSourceConflictError,
@@ -34,7 +35,14 @@ def register_storage_source(
     if not root.is_dir():
         raise SourceRegistrationError(f"storage source root is not a directory: {root}")
 
-    alias = str(alias_path) if alias_path is not None else str(root)
+    try:
+        alias = (
+            normalize_operator_path(str(alias_path))
+            if alias_path is not None
+            else normalize_operator_path(root.as_posix())
+        )
+    except PathNormalizationError as exc:
+        raise SourceRegistrationError(str(exc)) from exc
     now = datetime.now(tz=UTC)
     engine = create_db_engine(database_url)
     marker = read_source_marker(root)
@@ -81,7 +89,17 @@ def read_source_marker(root: Path) -> dict[str, object] | None:
     marker_path = root / MARKER_FILENAME
     if not marker_path.is_file():
         return None
-    return json.loads(marker_path.read_text())
+    try:
+        marker = json.loads(marker_path.read_text())
+    except json.JSONDecodeError as exc:
+        raise SourceRegistrationError(f"malformed storage source marker file: {marker_path}") from exc
+    if not isinstance(marker, dict):
+        raise SourceRegistrationError(f"malformed storage source marker file: {marker_path}")
+    if "storage_source_id" not in marker:
+        raise SourceRegistrationError(
+            f"malformed storage source marker file missing storage_source_id: {marker_path}"
+        )
+    return marker
 
 
 def write_source_marker(root: Path, *, storage_source_id: str) -> None:

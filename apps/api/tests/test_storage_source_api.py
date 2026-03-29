@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
@@ -8,6 +9,190 @@ from sqlalchemy import create_engine
 from app.dependencies import _get_session_factory
 from app.main import app
 from app.migrations import upgrade_database
+
+
+def test_storage_source_registration_api_creates_source_and_marker(tmp_path, monkeypatch):
+    database_url = f"sqlite:///{tmp_path / 'storage-source-registration-api.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    root = tmp_path / "family-share"
+    root.mkdir()
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/storage-sources",
+        json={
+            "root_path": str(root),
+            "alias_path": "//nas/family-share",
+            "display_name": "Family Share",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["display_name"] == "Family Share"
+    assert response.json()["marker_filename"] == ".photo-org-source.json"
+    assert response.json()["marker_version"] == 1
+    assert (root / ".photo-org-source.json").is_file()
+
+
+def test_storage_source_registration_api_reuses_existing_marker_identity(tmp_path, monkeypatch):
+    database_url = f"sqlite:///{tmp_path / 'storage-source-registration-api-reuse.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    root = tmp_path / "family-share"
+    root.mkdir()
+
+    client = TestClient(app)
+    first = client.post(
+        "/api/v1/storage-sources",
+        json={
+            "root_path": str(root),
+            "alias_path": "//nas/family-share",
+            "display_name": "Family Share",
+        },
+    )
+    second = client.post(
+        "/api/v1/storage-sources",
+        json={
+            "root_path": str(root),
+            "alias_path": "smb://family.local/family-share",
+            "display_name": "Ignored Alias Name",
+        },
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert second.json()["storage_source_id"] == first.json()["storage_source_id"]
+    assert second.json()["display_name"] == "Family Share"
+
+
+def test_storage_source_registration_api_normalizes_alias_for_later_watched_folder_requests(
+    tmp_path, monkeypatch
+):
+    database_url = f"sqlite:///{tmp_path / 'storage-source-registration-api-normalized-alias.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    root = tmp_path / "family-share"
+    root.mkdir()
+
+    client = TestClient(app)
+    registered = client.post(
+        "/api/v1/storage-sources",
+        json={
+            "root_path": str(root),
+            "alias_path": "\\\\nas\\family\\",
+            "display_name": "Family Share",
+        },
+    )
+
+    assert registered.status_code == 201
+
+    created = client.post(
+        f"/api/v1/storage-sources/{registered.json()['storage_source_id']}/watched-folders",
+        json={
+            "alias_path": "//nas/family",
+            "watched_path": "//nas/family/2024/trips",
+            "display_name": "Trips",
+        },
+    )
+
+    assert created.status_code == 201
+    assert created.json()["relative_path"] == "2024/trips"
+
+
+def test_storage_source_registration_api_rejects_invalid_root(tmp_path, monkeypatch):
+    database_url = f"sqlite:///{tmp_path / 'storage-source-registration-api-invalid-root.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    client = TestClient(app)
+    missing_root = tmp_path / "missing-share"
+    response = client.post(
+        "/api/v1/storage-sources",
+        json={
+            "root_path": str(missing_root),
+            "alias_path": "//nas/missing-share",
+            "display_name": "Missing Share",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "does not exist" in response.json()["detail"]
+
+
+def test_storage_source_registration_api_rejects_malformed_marker_file(tmp_path, monkeypatch):
+    database_url = f"sqlite:///{tmp_path / 'storage-source-registration-api-bad-marker.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    root = tmp_path / "family-share"
+    root.mkdir()
+    (root / ".photo-org-source.json").write_text("{not-json")
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/storage-sources",
+        json={
+            "root_path": str(root),
+            "alias_path": "//nas/family-share",
+            "display_name": "Family Share",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "marker" in response.json()["detail"]
+
+
+def test_storage_source_registration_api_rejects_marker_missing_storage_source_id(tmp_path, monkeypatch):
+    database_url = f"sqlite:///{tmp_path / 'storage-source-registration-api-missing-marker-key.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    root = tmp_path / "family-share"
+    root.mkdir()
+    (root / ".photo-org-source.json").write_text(json.dumps({"marker_version": 1}))
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/storage-sources",
+        json={
+            "root_path": str(root),
+            "alias_path": "//nas/family-share",
+            "display_name": "Family Share",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "marker" in response.json()["detail"]
+
+
+def test_storage_source_registration_api_rejects_empty_root_path(tmp_path, monkeypatch):
+    database_url = f"sqlite:///{tmp_path / 'storage-source-registration-api-empty-root.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/storage-sources",
+        json={
+            "root_path": "   ",
+            "alias_path": "//nas/family-share",
+            "display_name": "Family Share",
+        },
+    )
+
+    assert response.status_code == 422
+    assert any(error["loc"][-1] == "root_path" for error in response.json()["detail"])
 
 
 def test_storage_source_watched_folder_crud_api(tmp_path, monkeypatch):
