@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -7,6 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_db
+from app.services.source_registration import SourceRegistrationError, register_storage_source
 from app.services.watched_folders import (
     WatchedFolderValidationError,
     create_watched_folder,
@@ -17,6 +19,24 @@ from app.services.watched_folders import (
 
 
 router = APIRouter(prefix="/storage-sources", tags=["storage-sources"])
+
+
+class RegisterStorageSourceRequest(BaseModel):
+    root_path: str
+    alias_path: str | None = None
+    display_name: str | None = None
+
+
+class StorageSourceResponse(BaseModel):
+    storage_source_id: str
+    display_name: str
+    marker_filename: str
+    marker_version: int
+    availability_state: str
+    last_failure_reason: str | None = None
+    last_validated_ts: datetime | None = None
+    created_ts: datetime
+    updated_ts: datetime
 
 
 class CreateWatchedFolderRequest(BaseModel):
@@ -40,6 +60,25 @@ class WatchedFolderResponse(BaseModel):
     availability_state: str
     last_failure_reason: str | None = None
     last_successful_scan_ts: datetime | None = None
+
+
+@router.post(
+    "",
+    response_model=StorageSourceResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def register_storage_source_route(body: RegisterStorageSourceRequest) -> StorageSourceResponse:
+    try:
+        source = register_storage_source(
+            database_url=os.getenv("DATABASE_URL"),
+            root_path=body.root_path,
+            alias_path=body.alias_path,
+            display_name=body.display_name,
+        )
+    except SourceRegistrationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    return StorageSourceResponse.model_validate(source)
 
 
 @router.get("/{storage_source_id}/watched-folders", response_model=list[WatchedFolderResponse])

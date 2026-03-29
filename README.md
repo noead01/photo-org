@@ -91,7 +91,7 @@ At a high level, setup should look like this:
 4. rerun migrations with `PHOTO_ORG_ENVIRONMENT=dev make compose-migrate` if you need to repair its database
 5. open the web interface once the service is healthy
 6. sign in as an admin
-7. register one or more storage sources
+7. register one or more storage sources through the API at `POST /api/v1/storage-sources`
 8. add one or more watched folders under those sources
 9. let the system ingest the initial corpus
 
@@ -114,7 +114,7 @@ The default Compose file now bind-mounts `${PHOTO_ORG_PHOTO_LIBRARY_HOST_PATH}` 
 
 Typical usage is expected to be:
 
-- admin users register sources, then add, remove, or disable watched folders under those sources
+- admin users register sources through `POST /api/v1/storage-sources`, then add, remove, or disable watched folders under those sources
 - the system ingests new photos in the background
 - users search for photos by person, date, and location
 - authorized users confirm or correct face associations

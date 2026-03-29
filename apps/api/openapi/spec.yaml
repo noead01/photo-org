@@ -36,6 +36,31 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/storage-sources:
+    post:
+      tags:
+      - storage-sources
+      summary: Register Storage Source Route
+      operationId: register_storage_source_route_api_v1_storage_sources_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterStorageSourceRequest'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageSourceResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/storage-sources/{storage_source_id}/watched-folders:
     get:
       tags:
@@ -228,6 +253,71 @@ components:
       - failed
       - retryable_errors
       title: ProcessQueueResponse
+    RegisterStorageSourceRequest:
+      properties:
+        root_path:
+          type: string
+          title: Root Path
+        alias_path:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Alias Path
+        display_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Display Name
+      type: object
+      required:
+      - root_path
+      title: RegisterStorageSourceRequest
+    StorageSourceResponse:
+      properties:
+        storage_source_id:
+          type: string
+          title: Storage Source Id
+        display_name:
+          type: string
+          title: Display Name
+        marker_filename:
+          type: string
+          title: Marker Filename
+        marker_version:
+          type: integer
+          title: Marker Version
+        availability_state:
+          type: string
+          title: Availability State
+        last_failure_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Last Failure Reason
+        last_validated_ts:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Last Validated Ts
+        created_ts:
+          type: string
+          format: date-time
+          title: Created Ts
+        updated_ts:
+          type: string
+          format: date-time
+          title: Updated Ts
+      type: object
+      required:
+      - storage_source_id
+      - display_name
+      - marker_filename
+      - marker_version
+      - availability_state
+      - created_ts
+      - updated_ts
+      title: StorageSourceResponse
     UpdateWatchedFolderRequest:
       properties:
         is_enabled:
