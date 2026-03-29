@@ -28,31 +28,16 @@ def list_storage_source_statuses(connection: Connection) -> list[dict[str, Any]]
             select(storage_sources).order_by(storage_sources.c.created_ts, storage_sources.c.storage_source_id)
         ).mappings()
     )
-    statuses: list[dict[str, Any]] = []
-    for source in sources:
-        storage_source_id = str(source["storage_source_id"])
-        watched_folder_rows = list_watched_folder_statuses(connection, storage_source_id)
-        active_photo_count = _count_queryable_photos(connection, storage_source_id)
-        thumbnail_count = _count_photos_with_thumbnails(connection, storage_source_id)
-        latest_run = _load_latest_ingest_run_for_source(connection, storage_source_id)
-        statuses.append(
-            {
-                **dict(source),
-                "alias_paths": _list_alias_paths(connection, storage_source_id),
-                "watched_folder_count": len(watched_folder_rows),
-                "unreachable_watched_folder_count": sum(
-                    1 for row in watched_folder_rows if row["availability_state"] != "active"
-                ),
-                "catalog": {
-                    "metadata_queryable": active_photo_count > 0,
-                    "thumbnails_available": thumbnail_count > 0,
-                    "originals_available": source["availability_state"] == "active",
-                },
-                "latest_ingest_run": _serialize_ingest_run_summary(latest_run),
-                "recent_failures": _list_recent_failures(connection, storage_source_id),
-            }
-        )
-    return statuses
+    return [_build_storage_source_status(connection, source) for source in sources]
+
+
+def get_storage_source_status(connection: Connection, storage_source_id: str) -> dict[str, Any] | None:
+    source = connection.execute(
+        select(storage_sources).where(storage_sources.c.storage_source_id == storage_source_id)
+    ).mappings().first()
+    if source is None:
+        return None
+    return _build_storage_source_status(connection, source)
 
 
 def list_watched_folder_statuses(
@@ -75,6 +60,29 @@ def list_watched_folder_statuses(
         }
         for row in rows
     ]
+
+
+def _build_storage_source_status(connection: Connection, source: dict[str, Any]) -> dict[str, Any]:
+    storage_source_id = str(source["storage_source_id"])
+    watched_folder_rows = list_watched_folder_statuses(connection, storage_source_id)
+    active_photo_count = _count_queryable_photos(connection, storage_source_id)
+    thumbnail_count = _count_photos_with_thumbnails(connection, storage_source_id)
+    latest_run = _load_latest_ingest_run_for_source(connection, storage_source_id)
+    return {
+        **dict(source),
+        "alias_paths": _list_alias_paths(connection, storage_source_id),
+        "watched_folder_count": len(watched_folder_rows),
+        "unreachable_watched_folder_count": sum(
+            1 for row in watched_folder_rows if row["availability_state"] != "active"
+        ),
+        "catalog": {
+            "metadata_queryable": active_photo_count > 0,
+            "thumbnails_available": thumbnail_count > 0,
+            "originals_available": source["availability_state"] == "active",
+        },
+        "latest_ingest_run": _serialize_ingest_run_summary(latest_run),
+        "recent_failures": _list_recent_failures(connection, storage_source_id),
+    }
 
 
 def _list_alias_paths(connection: Connection, storage_source_id: str) -> list[str]:

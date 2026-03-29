@@ -78,6 +78,34 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/storage-sources/{storage_source_id}:
+    get:
+      tags:
+      - storage-sources
+      summary: Get Storage Source
+      operationId: get_storage_source_api_v1_storage_sources__storage_source_id__get
+      parameters:
+      - name: storage_source_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Storage Source Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageSourceStatusResponse'
+        '404':
+          description: Storage source not found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/storage-sources/{storage_source_id}/watched-folders:
     get:
       tags:

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.dependencies import get_db
 from app.services.storage_source_status import (
+    get_storage_source_status,
     list_storage_source_statuses,
     list_watched_folder_statuses,
 )
@@ -129,6 +130,25 @@ def list_storage_sources(
 ) -> list[StorageSourceStatusResponse]:
     rows = list_storage_source_statuses(db.connection())
     return [StorageSourceStatusResponse.model_validate(row) for row in rows]
+
+
+@router.get(
+    "/{storage_source_id}",
+    response_model=StorageSourceStatusResponse,
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "description": "Storage source not found",
+        }
+    },
+)
+def get_storage_source(
+    storage_source_id: str,
+    db: Session = Depends(get_db),
+) -> StorageSourceStatusResponse:
+    row = get_storage_source_status(db.connection(), storage_source_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Storage source not found")
+    return StorageSourceStatusResponse.model_validate(row)
 
 
 @router.get("/{storage_source_id}/watched-folders", response_model=list[WatchedFolderResponse])
