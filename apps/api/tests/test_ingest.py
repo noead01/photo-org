@@ -195,10 +195,13 @@ def test_ingest_facade_poll_registered_storage_sources_delegates_to_polling_modu
     monkeypatch,
 ):
     import importlib
+    import sys
+    import types
 
     from app.processing import ingest as ingest_module
 
     sentinel_result = object()
+    fake_module = types.ModuleType("app.processing.ingest_polling")
 
     def fake_poll_registered_storage_sources(
         database_url=None,
@@ -211,16 +214,16 @@ def test_ingest_facade_poll_registered_storage_sources_delegates_to_polling_modu
         assert missing_file_grace_period_days is None
         return sentinel_result
 
-    ingest_polling = importlib.import_module("app.processing.ingest_polling")
-    monkeypatch.setattr(
-        ingest_polling,
-        "poll_registered_storage_sources",
-        fake_poll_registered_storage_sources,
-    )
+    fake_module.poll_registered_storage_sources = fake_poll_registered_storage_sources
+    monkeypatch.setitem(sys.modules, "app.processing.ingest_polling", fake_module)
+    upgrade_database("sqlite:///facade-delegation.db")
+    reloaded_ingest_module = importlib.reload(ingest_module)
 
-    assert ingest_module.poll_registered_storage_sources(
+    result = reloaded_ingest_module.poll_registered_storage_sources(
         database_url="sqlite:///facade-delegation.db",
     )
+
+    assert result is sentinel_result
 
 
 def test_upgrade_database_creates_search_tables(tmp_path):
