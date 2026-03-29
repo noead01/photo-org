@@ -15,6 +15,7 @@ from app.domain.facets import (
     FacetResult,
     FacetValue,
 )
+from app.core.pagination import iso_utc
 
 
 class PhotosRepository:
@@ -56,6 +57,62 @@ class PhotosRepository:
         next_cursor = self._generate_cursor(items, sort) if items else None
 
         return items, total_count, next_cursor
+
+    def get_photo_detail(self, photo_id: str) -> Optional[Dict[str, Any]]:
+        query = select(
+            self.photos.c.photo_id,
+            self.photos.c.path,
+            self.photos.c.ext,
+            self.photos.c.camera_make,
+            self.photos.c.camera_model,
+            self.photos.c.software,
+            self.photos.c.orientation,
+            self.photos.c.shot_ts,
+            self.photos.c.shot_ts_source,
+            self.photos.c.filesize,
+            self.photos.c.sha256,
+            self.photos.c.phash,
+            self.photos.c.gps_latitude,
+            self.photos.c.gps_longitude,
+            self.photos.c.gps_altitude,
+            self.photos.c.thumbnail_jpeg,
+            self.photos.c.thumbnail_mime_type,
+            self.photos.c.thumbnail_width,
+            self.photos.c.thumbnail_height,
+            self.photos.c.created_ts,
+            self.photos.c.updated_ts,
+            self.photos.c.modified_ts,
+            self.photos.c.deleted_ts,
+            self.photos.c.faces_count,
+            self.photos.c.faces_detected_ts,
+        ).where(
+            self.photos.c.photo_id == photo_id,
+            self.photos.c.deleted_ts.is_(None),
+        )
+
+        rows = list(self.db.execute(query).all())
+        if not rows:
+            return None
+
+        item = self._hydrate_items(rows)[0]
+        row = rows[0]
+        item["metadata"] = {
+            "sha256": row.sha256,
+            "phash": row.phash,
+            "shot_ts_source": row.shot_ts_source,
+            "camera_model": row.camera_model,
+            "software": row.software,
+            "gps_latitude": row.gps_latitude,
+            "gps_longitude": row.gps_longitude,
+            "gps_altitude": row.gps_altitude,
+            "created_ts": row.created_ts,
+            "updated_ts": row.updated_ts,
+            "modified_ts": row.modified_ts,
+            "deleted_ts": row.deleted_ts,
+            "faces_count": int(row.faces_count or 0),
+            "faces_detected_ts": row.faces_detected_ts,
+        }
+        return item
 
     def list_photos(self) -> List[Dict[str, Any]]:
         """Return catalog photos in a deterministic browse order."""
@@ -241,7 +298,6 @@ class PhotosRepository:
         original_map = self._load_original_availability(pids)
 
         # Build final result items
-        from app.core.pagination import iso_utc
         return [
             {
                 "photo_id": r.photo_id,

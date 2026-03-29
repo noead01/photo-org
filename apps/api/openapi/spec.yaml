@@ -52,6 +52,34 @@ paths:
                   $ref: '#/components/schemas/PhotoHit'
                 type: array
                 title: Response List Photos Api V1 Photos Get
+  /api/v1/photos/{photo_id}:
+    get:
+      tags:
+      - photos
+      summary: Get Photo Detail
+      operationId: get_photo_detail_api_v1_photos__photo_id__get
+      parameters:
+      - name: photo_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Photo Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhotoDetailResponse'
+        '404':
+          description: Photo not found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/storage-sources:
     get:
       tags:
@@ -343,6 +371,70 @@ components:
       - is_available
       - availability_state
       title: OriginalAvailabilityHit
+    PhotoDetailResponse:
+      properties:
+        photo_id:
+          type: string
+          title: Photo Id
+        path:
+          type: string
+          title: Path
+        ext:
+          type: string
+          title: Ext
+        camera_make:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Camera Make
+        orientation:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Orientation
+        shot_ts:
+          type: string
+          title: Shot Ts
+        filesize:
+          type: integer
+          title: Filesize
+        tags:
+          items:
+            type: string
+          type: array
+          title: Tags
+          default: []
+        people:
+          items:
+            type: string
+          type: array
+          title: People
+          default: []
+        faces:
+          items:
+            $ref: '#/components/schemas/FaceHit'
+          type: array
+          title: Faces
+          default: []
+        thumbnail:
+          anyOf:
+          - $ref: '#/components/schemas/ThumbnailHit'
+          - type: 'null'
+        original:
+          anyOf:
+          - $ref: '#/components/schemas/OriginalAvailabilityHit'
+          - type: 'null'
+        metadata:
+          $ref: '#/components/schemas/PhotoMetadataProjection'
+      type: object
+      required:
+      - photo_id
+      - path
+      - ext
+      - shot_ts
+      - filesize
+      - metadata
+      title: PhotoDetailResponse
     PhotoHit:
       properties:
         photo_id:
@@ -409,6 +501,82 @@ components:
       - shot_ts
       - filesize
       title: PhotoHit
+    PhotoMetadataProjection:
+      properties:
+        sha256:
+          type: string
+          title: Sha256
+        phash:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Phash
+        shot_ts_source:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Shot Ts Source
+        camera_model:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Camera Model
+        software:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Software
+        gps_latitude:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Gps Latitude
+        gps_longitude:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Gps Longitude
+        gps_altitude:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Gps Altitude
+        created_ts:
+          type: string
+          format: date-time
+          title: Created Ts
+        updated_ts:
+          type: string
+          format: date-time
+          title: Updated Ts
+        modified_ts:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Modified Ts
+        deleted_ts:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Deleted Ts
+        faces_count:
+          type: integer
+          title: Faces Count
+        faces_detected_ts:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Faces Detected Ts
+      type: object
+      required:
+      - sha256
+      - created_ts
+      - updated_ts
+      - faces_count
+      title: PhotoMetadataProjection
     ProcessQueueRequest:
       properties:
         limit:
