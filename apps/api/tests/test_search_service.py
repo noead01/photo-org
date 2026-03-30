@@ -6,9 +6,12 @@ the repository and facet computation services.
 """
 
 import base64
-import pytest
-from unittest.mock import Mock
+import json
 from datetime import UTC, datetime
+from pathlib import Path
+from unittest.mock import Mock
+
+import pytest
 
 from sqlalchemy import create_engine, insert
 from sqlalchemy.orm import Session
@@ -19,7 +22,164 @@ from app.services.search_service import SearchService
 from app.schemas.search_request import SearchRequest, SearchFilters, SortSpec, PageSpec, DateFilter
 from app.schemas.search_response import SearchResponse, Hits, PhotoHit
 from app.core.enums import FilesizeRange
-from app.storage import photo_files, photos, storage_sources, watched_folders
+from app.storage import faces, photo_files, photo_tags, photos, storage_sources, watched_folders
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+SEED_CORPUS_DIR = REPO_ROOT / "seed-corpus"
+SEED_CORPUS_MANIFEST_PATH = SEED_CORPUS_DIR / "manifest.json"
+SEARCH_FIXTURES_PATH = SEED_CORPUS_DIR / "search-fixtures.json"
+
+
+def _load_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _load_seed_manifest() -> dict:
+    return _load_json(SEED_CORPUS_MANIFEST_PATH)
+
+
+def _load_search_fixtures() -> list[dict]:
+    data = _load_json(SEARCH_FIXTURES_PATH)
+    assert isinstance(data, dict)
+    fixtures = data["fixtures"]
+    assert isinstance(fixtures, list)
+    return fixtures
+
+
+def _fixture_scenarios_for_parametrize() -> list[dict]:
+    if not SEARCH_FIXTURES_PATH.exists():
+        return []
+    return _load_search_fixtures()
+
+
+def _asset_id_by_manifest_path() -> dict[str, str]:
+    return {
+        asset["path"]: asset["asset_id"]
+        for asset in _load_seed_manifest()["assets"]
+    }
+
+
+def _seed_search_fixture_catalog(connection) -> None:
+    manifest = _load_seed_manifest()
+    now = datetime(2026, 3, 29, tzinfo=UTC)
+
+    connection.execute(
+        insert(storage_sources).values(
+            storage_source_id="seed-source",
+            display_name="Seed Corpus",
+            marker_filename=".photo-org-source.json",
+            marker_version=1,
+            availability_state="active",
+            last_failure_reason=None,
+            last_validated_ts=now,
+            created_ts=now,
+            updated_ts=now,
+        )
+    )
+    connection.execute(
+        insert(watched_folders).values(
+            watched_folder_id="seed-watched-folder",
+            scan_path=str(SEED_CORPUS_DIR),
+            storage_source_id="seed-source",
+            relative_path=".",
+            display_name="Seed Corpus",
+            is_enabled=1,
+            availability_state="active",
+            last_failure_reason=None,
+            last_successful_scan_ts=now,
+            created_ts=now,
+            updated_ts=now,
+        )
+    )
+
+    photo_rows = []
+    photo_file_rows = []
+    face_rows = []
+    tag_rows = []
+
+    for index, asset in enumerate(manifest["assets"], start=1):
+        asset_id = asset["asset_id"]
+        expected = asset["expected"]
+        manifest_path = asset["path"]
+        relative_path = manifest_path.removeprefix("seed-corpus/")
+        shot_ts = expected.get("shot_ts")
+        parsed_shot_ts = datetime.fromisoformat(shot_ts) if shot_ts else None
+        photo_id = f"photo-{asset_id}"
+
+        photo_rows.append(
+            {
+                "photo_id": photo_id,
+                "path": manifest_path,
+                "sha256": f"{index:064x}",
+                "phash": None,
+                "filesize": expected["filesize_bytes"],
+                "ext": expected["format"],
+                "created_ts": now,
+                "modified_ts": now,
+                "shot_ts": parsed_shot_ts,
+                "shot_ts_source": "seed-manifest" if parsed_shot_ts else None,
+                "camera_make": expected.get("camera_make"),
+                "camera_model": expected.get("camera_model"),
+                "software": None,
+                "orientation": None,
+                "gps_latitude": None,
+                "gps_longitude": None,
+                "gps_altitude": None,
+                "updated_ts": now,
+                "deleted_ts": None,
+                "faces_count": 1 if expected["has_faces"] else 0,
+                "faces_detected_ts": now if expected["has_faces"] else None,
+            }
+        )
+        photo_file_rows.append(
+            {
+                "photo_file_id": f"photo-file-{asset_id}",
+                "photo_id": photo_id,
+                "watched_folder_id": "seed-watched-folder",
+                "relative_path": relative_path,
+                "filename": Path(relative_path).name,
+                "extension": expected["format"],
+                "filesize": expected["filesize_bytes"],
+                "created_ts": now,
+                "modified_ts": now,
+                "first_seen_ts": now,
+                "last_seen_ts": now,
+                "missing_ts": None,
+                "deleted_ts": None,
+                "lifecycle_state": "active",
+                "absence_reason": None,
+            }
+        )
+
+        if expected["has_faces"]:
+            face_rows.append(
+                {
+                    "face_id": f"face-{asset_id}",
+                    "photo_id": photo_id,
+                    "person_id": None,
+                    "bbox_x": 0,
+                    "bbox_y": 0,
+                    "bbox_w": 10,
+                    "bbox_h": 10,
+                    "bitmap": None,
+                    "embedding": None,
+                    "detector_name": "seed-fixture",
+                    "detector_version": "1",
+                    "provenance": None,
+                    "created_ts": now,
+                }
+            )
+
+        for tag in asset.get("scenario_tags", []):
+            tag_rows.append({"photo_id": photo_id, "tag": tag})
+
+    connection.execute(insert(photos), photo_rows)
+    connection.execute(insert(photo_files), photo_file_rows)
+    if face_rows:
+        connection.execute(insert(faces), face_rows)
+    if tag_rows:
+        connection.execute(insert(photo_tags), tag_rows)
 
 
 class TestSearchServiceExecution:
@@ -620,6 +780,54 @@ class TestPhotosRepositoryOfflineBrowseIntegration:
         assert hit.original.is_available is False
         assert hit.original.availability_state == "unreachable"
         assert hit.original.last_failure_reason == "permission_denied"
+
+
+class TestSeedCorpusSearchFixtureCatalog:
+    def test_fixture_catalog_references_known_manifest_assets(self):
+        manifest_asset_ids = {
+            asset["asset_id"]
+            for asset in _load_seed_manifest()["assets"]
+        }
+
+        fixtures = _load_search_fixtures()
+
+        assert fixtures
+        for fixture in fixtures:
+            assert fixture["scenario_id"]
+            assert fixture["description"]
+            assert fixture["phase_scope"] == "phase_3"
+            SearchRequest.model_validate(fixture["request"])
+            assert fixture["expected_asset_ids"]
+            assert set(fixture["expected_asset_ids"]).issubset(manifest_asset_ids)
+
+
+class TestSeedCorpusSearchFixtureExecution:
+    @pytest.mark.parametrize(
+        "fixture",
+        _fixture_scenarios_for_parametrize(),
+        ids=lambda fixture: fixture["scenario_id"],
+    )
+    def test_search_fixture_execution_matches_expected_asset_ids(self, tmp_path, fixture):
+        database_url = f"sqlite:///{tmp_path / 'search-fixtures.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+
+        with engine.begin() as connection:
+            _seed_search_fixture_catalog(connection)
+
+        request = SearchRequest.model_validate(fixture["request"])
+        expected_asset_ids = fixture["expected_asset_ids"]
+        asset_by_path = _asset_id_by_manifest_path()
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            service = SearchService(repo=repo)
+            response = service.execute(request)
+
+        returned_asset_ids = [asset_by_path[item.path] for item in response.hits.items]
+
+        assert set(returned_asset_ids) == set(expected_asset_ids)
+        assert response.hits.total == len(expected_asset_ids)
 
     def test_search_repository_excludes_missing_file_rows_from_original_availability(self, tmp_path):
         database_url = f"sqlite:///{tmp_path / 'search-missing-original-availability.db'}"
