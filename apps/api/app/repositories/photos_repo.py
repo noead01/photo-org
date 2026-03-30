@@ -326,7 +326,7 @@ class PhotosRepository:
                 "ext": (r.ext or "").lower(),
                 "camera_make": r.camera_make,
                 "orientation": r.orientation,
-                "shot_ts": iso_utc(r.shot_ts),
+                "shot_ts": iso_utc(r.shot_ts) if r.shot_ts is not None else None,
                 "filesize": int(r.filesize or 0),
                 "tags": tag_map.get(r.photo_id, []),
                 "people": ppl_map.get(r.photo_id, []),
