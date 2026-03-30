@@ -95,3 +95,44 @@ def test_photo_detail_api_returns_404_for_missing_photo(tmp_path, monkeypatch):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Photo not found"
+
+
+def test_photo_detail_api_allows_missing_shot_timestamp(tmp_path, monkeypatch):
+    database_url = f"sqlite:///{tmp_path / 'photo-detail-api-null-shot-ts.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 3, 28, 19, 30, tzinfo=UTC)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(photos).values(
+                photo_id="photo-1",
+                sha256="sha-1",
+                phash="phash-1",
+                shot_ts=None,
+                shot_ts_source=None,
+                camera_make="Apple",
+                camera_model="iPhone 15 Pro",
+                software="18.1",
+                orientation="Rotate 90 CW",
+                created_ts=now,
+                updated_ts=now,
+                path="/photos/photo-1.jpg",
+                filesize=1024,
+                ext="jpg",
+                modified_ts=now,
+                faces_count=0,
+                faces_detected_ts=None,
+            )
+        )
+
+    client = TestClient(app)
+    response = client.get("/api/v1/photos/photo-1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["photo_id"] == "photo-1"
+    assert payload["shot_ts"] is None
+    assert payload["faces"] == []

@@ -450,7 +450,9 @@ components:
           - type: 'null'
           title: Orientation
         shot_ts:
-          type: string
+          anyOf:
+          - type: string
+          - type: 'null'
           title: Shot Ts
         filesize:
           type: integer
@@ -488,7 +490,6 @@ components:
       - photo_id
       - path
       - ext
-      - shot_ts
       - filesize
       - metadata
       title: PhotoDetailResponse
@@ -514,7 +515,9 @@ components:
           - type: 'null'
           title: Orientation
         shot_ts:
-          type: string
+          anyOf:
+          - type: string
+          - type: 'null'
           title: Shot Ts
         filesize:
           type: integer
@@ -555,7 +558,6 @@ components:
       - photo_id
       - path
       - ext
-      - shot_ts
       - filesize
       title: PhotoHit
     PhotoMetadataProjection:

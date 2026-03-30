@@ -38,7 +38,7 @@ class PhotoDetailResponse(BaseModel):
     ext: str
     camera_make: str | None = None
     orientation: str | None = None
-    shot_ts: str
+    shot_ts: str | None = None
     filesize: int
     tags: list[str] = []
     people: list[str] = []

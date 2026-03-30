@@ -23,7 +23,7 @@ class PhotoHit(BaseModel):
     ext: str
     camera_make: Optional[str] = None
     orientation: Optional[str] = None
-    shot_ts: str
+    shot_ts: Optional[str] = None
     filesize: int
     tags: List[str] = []
     people: List[str] = []
