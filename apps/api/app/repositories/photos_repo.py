@@ -171,6 +171,11 @@ class PhotosRepository:
                 self.faces.c.photo_id == self.photos.c.photo_id
             ).limit(1)
             where_conditions.append(faces_subquery.exists())
+        elif filters.has_faces is False:
+            faces_subquery = select(self.faces.c.photo_id).where(
+                self.faces.c.photo_id == self.photos.c.photo_id
+            ).limit(1)
+            where_conditions.append(~faces_subquery.exists())
         
         # People filter (OR logic within people)
         if filters.people:
@@ -263,6 +268,8 @@ class PhotosRepository:
         
         # Convert ISO string back to datetime for cursor encoding
         shot_ts_str = last_item["shot_ts"]
+        if shot_ts_str is None:
+            return None
         shot_ts_dt = datetime.fromisoformat(shot_ts_str.replace("Z", "+00:00"))
         
         return encode_cursor(shot_ts_dt, last_item["photo_id"])

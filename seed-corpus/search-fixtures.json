@@ -1,0 +1,152 @@
+{
+  "version": 1,
+  "fixtures": [
+    {
+      "scenario_id": "SF01",
+      "description": "text search for lake photos matches the full lake-weekend subset",
+      "phase_scope": "phase_3",
+      "request": {
+        "q": "lake",
+        "filters": {},
+        "sort": {
+          "by": "shot_ts",
+          "dir": "desc"
+        },
+        "page": {
+          "limit": 50
+        }
+      },
+      "expected_asset_ids": [
+        "lake_weekend_001",
+        "lake_weekend_002",
+        "lake_weekend_003",
+        "lake_weekend_004",
+        "lake_weekend_005",
+        "lake_weekend_006"
+      ]
+    },
+    {
+      "scenario_id": "SF02",
+      "description": "camera make filter for Canon photos returns all Canon-tagged seed assets",
+      "phase_scope": "phase_3",
+      "request": {
+        "filters": {
+          "camera_make": [
+            "Canon"
+          ]
+        },
+        "sort": {
+          "by": "shot_ts",
+          "dir": "desc"
+        },
+        "page": {
+          "limit": 50
+        }
+      },
+      "expected_asset_ids": [
+        "birthday_park_001",
+        "birthday_park_002",
+        "lake_weekend_005",
+        "city_break_005",
+        "reference_face_001",
+        "reference_face_002",
+        "reference_face_003",
+        "reference_face_004"
+      ]
+    },
+    {
+      "scenario_id": "SF03",
+      "description": "date range filter for July 2022 returns only dated July assets",
+      "phase_scope": "phase_3",
+      "request": {
+        "filters": {
+          "date": {
+            "from": "2022-07-01",
+            "to": "2022-07-31"
+          }
+        },
+        "sort": {
+          "by": "shot_ts",
+          "dir": "desc"
+        },
+        "page": {
+          "limit": 50
+        }
+      },
+      "expected_asset_ids": [
+        "lake_weekend_001",
+        "lake_weekend_004",
+        "lake_weekend_005"
+      ]
+    },
+    {
+      "scenario_id": "SF04",
+      "description": "extension and path query combine with AND semantics for city-break jpeg photos",
+      "phase_scope": "phase_3",
+      "request": {
+        "q": "city-break",
+        "filters": {
+          "extension": [
+            "jpeg"
+          ]
+        },
+        "sort": {
+          "by": "shot_ts",
+          "dir": "desc"
+        },
+        "page": {
+          "limit": 50
+        }
+      },
+      "expected_asset_ids": [
+        "city_break_005"
+      ]
+    },
+    {
+      "scenario_id": "SF05",
+      "description": "birthday text search plus has_faces=true keeps only face-bearing birthday assets",
+      "phase_scope": "phase_3",
+      "request": {
+        "q": "birthday",
+        "filters": {
+          "has_faces": true
+        },
+        "sort": {
+          "by": "shot_ts",
+          "dir": "desc"
+        },
+        "page": {
+          "limit": 50
+        }
+      },
+      "expected_asset_ids": [
+        "birthday_park_001",
+        "birthday_park_002",
+        "birthday_park_003",
+        "birthday_park_005"
+      ]
+    },
+    {
+      "scenario_id": "SF06",
+      "description": "birthday text search plus has_faces=false keeps only no-face birthday assets",
+      "phase_scope": "phase_3",
+      "request": {
+        "q": "birthday",
+        "filters": {
+          "has_faces": false
+        },
+        "sort": {
+          "by": "shot_ts",
+          "dir": "desc"
+        },
+        "page": {
+          "limit": 50
+        }
+      },
+      "expected_asset_ids": [
+        "birthday_park_004",
+        "birthday_park_006"
+      ]
+    }
+  ]
+}
