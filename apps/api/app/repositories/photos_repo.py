@@ -9,6 +9,7 @@ from app.schemas.search_request import SearchFilters, SortSpec, PageSpec
 from app.domain.facets import (
     TagsFacet,
     PeopleFacet,
+    HasFacesFacet,
     DateHierarchyFacet,
     DuplicatesFacet,
     FacetContext,
@@ -157,6 +158,10 @@ class PhotosRepository:
             where_conditions.append(self.photos.c.camera_make.in_(filters.camera_make))
         if filters.extension:
             where_conditions.append(self.photos.c.ext.in_(filters.extension))
+        if filters.path_hints:
+            where_conditions.append(
+                or_(*[self.photos.c.path.ilike(f"%{hint}%") for hint in filters.path_hints])
+            )
         if filters.orientation:
             where_conditions.append(self.photos.c.orientation.in_(filters.orientation))
         
@@ -429,17 +434,20 @@ class PhotosRepository:
         
         tags_facet = TagsFacet()
         people_facet = PeopleFacet()
+        has_faces_facet = HasFacesFacet()
         date_facet = DateHierarchyFacet()
         duplicates_facet = DuplicatesFacet()
         
         date_result = date_facet.compute(filtered_photo_ids, context)
         tags_result = tags_facet.compute(filtered_photo_ids, context)
         people_result = people_facet.compute(filtered_photo_ids, context)
+        has_faces_result = has_faces_facet.compute(filtered_photo_ids, context)
         duplicates_result = duplicates_facet.compute(filtered_photo_ids, context)
         
         return {
             "date": self._format_date_facet(date_result),
             "people": self._format_simple_facet(people_result),
+            "has_faces": self._format_boolean_facet(has_faces_result),
             "tags": self._format_simple_facet(tags_result),
             "duplicates": self._format_duplicates_facet(duplicates_result),
         }
@@ -482,4 +490,11 @@ class PhotosRepository:
         return {
             "exact": int(metadata.get("exact", 0) or 0),
             "near": int(metadata.get("near", 0) or 0),
+        }
+
+    @staticmethod
+    def _format_boolean_facet(result: FacetResult) -> Dict[str, int]:
+        return {
+            str(value.value): int(value.count)
+            for value in (result.values or [])
         }

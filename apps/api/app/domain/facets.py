@@ -257,6 +257,51 @@ class DuplicatesFacet(Facet):
         return False
 
 
+class HasFacesFacet(Facet):
+    """Facet for face-bearing versus no-face photos."""
+
+    def __init__(self):
+        super().__init__("has_faces", FacetType.SIMPLE_COUNT)
+
+    def compute(self, filtered_photo_ids: List[str], context: 'FacetContext') -> FacetResult:
+        if not filtered_photo_ids:
+            return FacetResult(
+                facet_name=self.name,
+                facet_type=self.facet_type,
+                values=[],
+                total_count=0,
+            )
+
+        from sqlalchemy import case, select, func
+
+        has_faces_case = case(
+            (context.photos.c.faces_count > 0, "true"),
+            else_="false",
+        )
+        query = (
+            select(
+                has_faces_case.label("has_faces"),
+                func.count().label("count"),
+            )
+            .where(context.photos.c.photo_id.in_(filtered_photo_ids))
+            .group_by(has_faces_case)
+        )
+        rows = context.db.execute(query).all()
+
+        values = [FacetValue(value=value, count=int(count)) for value, count in rows]
+        values.sort(key=lambda v: v.value)
+
+        return FacetResult(
+            facet_name=self.name,
+            facet_type=self.facet_type,
+            values=values,
+            total_count=sum(v.count for v in values),
+        )
+
+    def supports_drill_sideways(self) -> bool:
+        return True
+
+
 @dataclass
 class FacetContext:
     """Context object providing dependencies for facet computation."""
