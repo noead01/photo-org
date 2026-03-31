@@ -1,7 +1,7 @@
 import base64
 from datetime import UTC, datetime, time
 from typing import List, Dict, Any, Optional, Tuple
-from sqlalchemy import MetaData, Table, select, func, or_, and_, text
+from sqlalchemy import MetaData, Table, select, func, or_, and_
 from sqlalchemy.engine import Row
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import Select
@@ -217,14 +217,26 @@ class PhotosRepository:
         if text_query:
             tokens = [t for t in text_query.lower().split() if t]
             if tokens:
-                tag_exists = select(self.photo_tags.c.photo_id).where(
-                    (self.photo_tags.c.photo_id == self.photos.c.photo_id) &
-                    or_(*[self.photo_tags.c.tag.ilike(f"%{t}%") for t in tokens])
-                ).limit(1).exists()
-                where_conditions.append(or_(
-                    self.photos.c.path.ilike(f"%{tokens[0]}%"), 
-                    tag_exists
-                ))
+                token_conditions = []
+                for token in tokens:
+                    tag_exists = (
+                        select(self.photo_tags.c.photo_id)
+                        .where(
+                            and_(
+                                self.photo_tags.c.photo_id == self.photos.c.photo_id,
+                                self.photo_tags.c.tag.ilike(f"%{token}%"),
+                            )
+                        )
+                        .limit(1)
+                        .exists()
+                    )
+                    token_conditions.append(
+                        or_(
+                            self.photos.c.path.ilike(f"%{token}%"),
+                            tag_exists,
+                        )
+                    )
+                where_conditions.append(and_(*token_conditions))
         
         if where_conditions:
             query = query.where(and_(*where_conditions))

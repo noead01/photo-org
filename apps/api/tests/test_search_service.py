@@ -1116,6 +1116,226 @@ class TestPhotosRepositorySoftDeleteFiltering:
         assert [item["photo_id"] for item in items] == ["birthday-no-faces"]
         assert total == 1
 
+    def test_search_repository_requires_all_text_query_tokens(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-text-query-all-tokens.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        now = datetime(2026, 3, 30, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            connection.execute(
+                insert(photos),
+                [
+                    {
+                        "photo_id": "lake-weekend",
+                        "path": "seed-corpus/family-events/lake-weekend/lake_weekend_001.jpg",
+                        "sha256": "7" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                    {
+                        "photo_id": "lake-only",
+                        "path": "seed-corpus/family-events/lake-house/lake_house_001.jpg",
+                        "sha256": "8" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                ],
+            )
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            items, total, _ = repo.search_photos(
+                filters=SearchFilters(),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+                text_query="lake weekend",
+            )
+
+        assert [item["photo_id"] for item in items] == ["lake-weekend"]
+        assert total == 1
+
+    def test_search_repository_matches_text_query_tokens_across_path_and_tags(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-text-query-path-and-tags.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        now = datetime(2026, 3, 30, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            connection.execute(
+                insert(photos),
+                [
+                    {
+                        "photo_id": "lake-tagged-sunset",
+                        "path": "seed-corpus/family-events/lake-weekend/lake_weekend_001.jpg",
+                        "sha256": "9" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                    {
+                        "photo_id": "lake-tagged-hike",
+                        "path": "seed-corpus/family-events/lake-weekend/lake_weekend_002.jpg",
+                        "sha256": "a" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                ],
+            )
+            connection.execute(
+                insert(photo_tags),
+                [
+                    {"photo_id": "lake-tagged-sunset", "tag": "sunset"},
+                    {"photo_id": "lake-tagged-hike", "tag": "hike"},
+                ],
+            )
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            items, total, _ = repo.search_photos(
+                filters=SearchFilters(),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+                text_query="LAKE sunset",
+            )
+
+        assert [item["photo_id"] for item in items] == ["lake-tagged-sunset"]
+        assert total == 1
+
+    def test_search_repository_ignores_whitespace_only_text_query(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-text-query-whitespace-only.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        now = datetime(2026, 3, 30, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            connection.execute(
+                insert(photos),
+                [
+                    {
+                        "photo_id": "first-photo",
+                        "path": "seed-corpus/family-events/lake-weekend/lake_weekend_001.jpg",
+                        "sha256": "b" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                    {
+                        "photo_id": "second-photo",
+                        "path": "seed-corpus/travel/city-break/city_break_001.jpg",
+                        "sha256": "c" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                ],
+            )
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            items, total, _ = repo.search_photos(
+                filters=SearchFilters(),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+                text_query="   \t  ",
+            )
+
+        assert {item["photo_id"] for item in items} == {"first-photo", "second-photo"}
+        assert total == 2
+
 
 class TestPhotosRepositoryOfflineBrowseIntegration:
     def test_search_repository_exposes_thumbnail_and_original_availability(self, tmp_path):
