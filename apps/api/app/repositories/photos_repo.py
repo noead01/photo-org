@@ -1,4 +1,5 @@
 import base64
+from datetime import UTC, datetime, time
 from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy import MetaData, Table, select, func, or_, and_, text
 from sqlalchemy.engine import Row
@@ -149,9 +150,19 @@ class PhotosRepository:
         # Date filters
         if filters.date:
             if filters.date.from_:
-                where_conditions.append(self.photos.c.shot_ts >= text(f"'{filters.date.from_}T00:00:00Z'"))
+                from_bound = datetime.combine(
+                    datetime.fromisoformat(filters.date.from_).date(),
+                    time.min,
+                    tzinfo=UTC,
+                )
+                where_conditions.append(self.photos.c.shot_ts >= from_bound)
             if filters.date.to:
-                where_conditions.append(self.photos.c.shot_ts <= text(f"'{filters.date.to}T23:59:59Z'"))
+                to_bound = datetime.combine(
+                    datetime.fromisoformat(filters.date.to).date(),
+                    time.max,
+                    tzinfo=UTC,
+                )
+                where_conditions.append(self.photos.c.shot_ts <= to_bound)
         
         # Simple list filters
         if filters.camera_make:

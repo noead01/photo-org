@@ -698,6 +698,267 @@ class TestPhotosRepositorySoftDeleteFiltering:
 
         assert photo_ids == ["active-photo"]
 
+    def test_date_filter_from_only_includes_start_of_day_matches(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-date-filter-from-only.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        start_of_day = datetime(2022, 7, 1, 0, 0, 0, tzinfo=UTC)
+        previous_day = datetime(2022, 6, 30, 23, 59, 59, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            connection.execute(
+                insert(photos),
+                [
+                    {
+                        "photo_id": "from-match",
+                        "path": "photos/from-match.jpg",
+                        "sha256": "1" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": start_of_day,
+                        "modified_ts": start_of_day,
+                        "shot_ts": start_of_day,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": start_of_day,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                    {
+                        "photo_id": "from-excluded",
+                        "path": "photos/from-excluded.jpg",
+                        "sha256": "2" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": previous_day,
+                        "modified_ts": previous_day,
+                        "shot_ts": previous_day,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": previous_day,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                ],
+            )
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            items, total, _ = repo.search_photos(
+                filters=SearchFilters(date=DateFilter(from_="2022-07-01")),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+            )
+
+        assert [item["photo_id"] for item in items] == ["from-match"]
+        assert total == 1
+
+    def test_date_filter_to_only_includes_end_of_day_fractional_second_matches(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-date-filter-to-only.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        end_of_day_fraction = datetime(2022, 7, 31, 23, 59, 59, 500000, tzinfo=UTC)
+        next_day = datetime(2022, 8, 1, 0, 0, 0, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            connection.execute(
+                insert(photos),
+                [
+                    {
+                        "photo_id": "to-match",
+                        "path": "photos/to-match.jpg",
+                        "sha256": "3" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": end_of_day_fraction,
+                        "modified_ts": end_of_day_fraction,
+                        "shot_ts": end_of_day_fraction,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": end_of_day_fraction,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                    {
+                        "photo_id": "to-excluded",
+                        "path": "photos/to-excluded.jpg",
+                        "sha256": "4" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": next_day,
+                        "modified_ts": next_day,
+                        "shot_ts": next_day,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": next_day,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                ],
+            )
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            items, total, _ = repo.search_photos(
+                filters=SearchFilters(date=DateFilter(to="2022-07-31")),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+            )
+
+        assert [item["photo_id"] for item in items] == ["to-match"]
+        assert total == 1
+
+    def test_date_filter_bounded_includes_full_end_day_and_excludes_null_timestamps(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-date-filter-bounded.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        match_ts = datetime(2022, 7, 31, 23, 59, 59, 999999, tzinfo=UTC)
+        outside_ts = datetime(2022, 8, 1, 0, 0, 0, tzinfo=UTC)
+        earlier_ts = datetime(2022, 6, 30, 23, 59, 59, tzinfo=UTC)
+        now = datetime(2026, 3, 30, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            connection.execute(
+                insert(photos),
+                [
+                    {
+                        "photo_id": "bounded-match",
+                        "path": "photos/bounded-match.jpg",
+                        "sha256": "5" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": match_ts,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                    {
+                        "photo_id": "bounded-outside",
+                        "path": "photos/bounded-outside.jpg",
+                        "sha256": "6" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": outside_ts,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                    {
+                        "photo_id": "bounded-earlier",
+                        "path": "photos/bounded-earlier.jpg",
+                        "sha256": "7" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": earlier_ts,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                    {
+                        "photo_id": "bounded-null",
+                        "path": "photos/bounded-null.jpg",
+                        "sha256": "8" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": None,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                ],
+            )
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            items, total, _ = repo.search_photos(
+                filters=SearchFilters(date=DateFilter(from_="2022-07-01", to="2022-07-31")),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+            )
+
+        assert [item["photo_id"] for item in items] == ["bounded-match"]
+        assert total == 1
+
     def test_search_repository_filters_by_path_hints(self, tmp_path):
         database_url = f"sqlite:///{tmp_path / 'search-path-hints.db'}"
         upgrade_database(database_url)
