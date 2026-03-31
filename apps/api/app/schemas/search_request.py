@@ -1,9 +1,11 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional, Literal
 
 from app.core.enums import FilesizeRange
 
 class DateFilter(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     from_: Optional[str] = Field(default=None, alias="from")
     to: Optional[str] = None
 
