@@ -308,6 +308,33 @@ class TestSearchServiceExecution:
         )
         mock_repo.get_filtered_photo_ids.assert_called_once_with(request.filters, "hawaii beach")
 
+    def test_given_path_hints_when_executing_search_then_passes_path_hints_to_repository(self):
+        """Given path hints, when executing search, then passes them through in typed filters."""
+        mock_repo = Mock()
+        service = SearchService(repo=mock_repo)
+
+        mock_repo.search_photos.return_value = ([], 0, None)
+        mock_repo.get_filtered_photo_ids.return_value = []
+        mock_repo.compute_facets.return_value = {}
+
+        filters = SearchFilters(path_hints=["lake-weekend", "travel"])
+        assert filters.model_dump().get("path_hints") == ["lake-weekend", "travel"]
+        request = SearchRequest(
+            filters=filters,
+            sort=SortSpec(by="shot_ts", dir="desc"),
+            page=PageSpec(limit=50),
+        )
+
+        service.execute(request)
+
+        mock_repo.search_photos.assert_called_once_with(
+            filters=filters,
+            sort=request.sort,
+            page=request.page,
+            text_query=None,
+        )
+        mock_repo.get_filtered_photo_ids.assert_called_once_with(filters, None)
+
     def test_given_empty_results_when_executing_search_then_returns_empty_response_with_facets(self):
         """Given empty results, when executing search, then returns empty response with facets."""
         # Given
@@ -671,6 +698,163 @@ class TestPhotosRepositorySoftDeleteFiltering:
 
         assert photo_ids == ["active-photo"]
 
+    def test_search_repository_filters_by_path_hints(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-path-hints.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        now = datetime(2026, 3, 30, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            connection.execute(
+                insert(photos),
+                [
+                    {
+                        "photo_id": "lake-photo",
+                        "path": "seed-corpus/family-events/lake-weekend/lake_weekend_001.jpg",
+                        "sha256": "e" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                    {
+                        "photo_id": "travel-photo",
+                        "path": "seed-corpus/travel/city-break/city_break_001.jpg",
+                        "sha256": "f" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                ],
+            )
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            items, total, _ = repo.search_photos(
+                filters=SearchFilters(path_hints=["lake-weekend"]),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+            )
+
+        assert [item["photo_id"] for item in items] == ["lake-photo"]
+        assert total == 1
+
+    def test_search_repository_combines_path_hints_with_has_faces_false(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-path-hints-no-faces.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        now = datetime(2026, 3, 30, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            connection.execute(
+                insert(photos),
+                [
+                    {
+                        "photo_id": "birthday-no-faces",
+                        "path": "seed-corpus/family-events/birthday-park/birthday_park_004.png",
+                        "sha256": "1" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "png",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                    {
+                        "photo_id": "birthday-with-face",
+                        "path": "seed-corpus/family-events/birthday-park/birthday_park_001.jpg",
+                        "sha256": "2" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 1,
+                        "faces_detected_ts": now,
+                    },
+                ],
+            )
+            connection.execute(
+                insert(faces).values(
+                    face_id="face-birthday-with-face",
+                    photo_id="birthday-with-face",
+                    person_id=None,
+                    bbox_x=0,
+                    bbox_y=0,
+                    bbox_w=10,
+                    bbox_h=10,
+                    bitmap=None,
+                    embedding=None,
+                    detector_name="seed",
+                    detector_version="1",
+                    provenance=None,
+                    created_ts=now,
+                )
+            )
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            items, total, _ = repo.search_photos(
+                filters=SearchFilters(path_hints=["birthday-park"], has_faces=False),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+            )
+
+        assert [item["photo_id"] for item in items] == ["birthday-no-faces"]
+        assert total == 1
+
 
 class TestPhotosRepositoryOfflineBrowseIntegration:
     def test_search_repository_exposes_thumbnail_and_original_availability(self, tmp_path):
@@ -780,6 +964,90 @@ class TestPhotosRepositoryOfflineBrowseIntegration:
         assert hit.original.is_available is False
         assert hit.original.availability_state == "unreachable"
         assert hit.original.last_failure_reason == "permission_denied"
+
+
+class TestPhotosRepositoryHasFacesFacet:
+    def test_compute_facets_includes_has_faces_facet_breakdown(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-has-faces-facet.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        now = datetime(2026, 3, 30, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            connection.execute(
+                insert(photos),
+                [
+                    {
+                        "photo_id": "face-photo",
+                        "path": "seed-corpus/family-events/lake-weekend/lake_weekend_003.png",
+                        "sha256": "3" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "png",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 1,
+                        "faces_detected_ts": now,
+                    },
+                    {
+                        "photo_id": "no-face-photo",
+                        "path": "seed-corpus/family-events/lake-weekend/lake_weekend_001.jpg",
+                        "sha256": "4" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                ],
+            )
+            connection.execute(
+                insert(faces).values(
+                    face_id="face-photo-face",
+                    photo_id="face-photo",
+                    person_id=None,
+                    bbox_x=0,
+                    bbox_y=0,
+                    bbox_w=10,
+                    bbox_h=10,
+                    bitmap=None,
+                    embedding=None,
+                    detector_name="seed",
+                    detector_version="1",
+                    provenance=None,
+                    created_ts=now,
+                )
+            )
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            facets = repo.compute_facets(["face-photo", "no-face-photo"])
+
+        assert facets["has_faces"] == {"true": 1, "false": 1}
 
 
 class TestSeedCorpusSearchFixtureCatalog:

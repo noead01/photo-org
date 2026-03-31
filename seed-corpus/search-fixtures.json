@@ -147,6 +147,30 @@
         "birthday_park_004",
         "birthday_park_006"
       ]
+    },
+    {
+      "scenario_id": "SF07",
+      "description": "typed path-hint filtering combines with has_faces=false for birthday photos",
+      "phase_scope": "phase_3",
+      "request": {
+        "filters": {
+          "path_hints": [
+            "birthday-park"
+          ],
+          "has_faces": false
+        },
+        "sort": {
+          "by": "shot_ts",
+          "dir": "desc"
+        },
+        "page": {
+          "limit": 50
+        }
+      },
+      "expected_asset_ids": [
+        "birthday_park_004",
+        "birthday_park_006"
+      ]
     }
   ]
 }
