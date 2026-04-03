@@ -28,6 +28,7 @@ class PhotosRepository:
         # Single source of truth for table objects
         self.photos: Table = Table("photos", md, autoload_with=bind)
         self.faces: Table = Table("faces", md, autoload_with=bind)
+        self.people: Table = Table("people", md, autoload_with=bind)
         self.photo_tags: Table = Table("photo_tags", md, autoload_with=bind)
         self.photo_files: Table = Table("photo_files", md, autoload_with=bind)
         self.watched_folders: Table = Table("watched_folders", md, autoload_with=bind)
@@ -202,6 +203,30 @@ class PhotosRepository:
                 )
             ).limit(1)
             where_conditions.append(people_subquery.exists())
+
+        if filters.person_names:
+            person_name_subquery = (
+                select(self.faces.c.photo_id)
+                .select_from(
+                    self.faces.join(
+                        self.people,
+                        self.faces.c.person_id == self.people.c.person_id,
+                    )
+                )
+                .where(
+                    and_(
+                        self.faces.c.photo_id == self.photos.c.photo_id,
+                        or_(
+                            *[
+                                self.people.c.display_name.ilike(f"%{name}%")
+                                for name in filters.person_names
+                            ]
+                        ),
+                    )
+                )
+                .limit(1)
+            )
+            where_conditions.append(person_name_subquery.exists())
         
         # Tags filter (OR logic within tags)
         if filters.tags:
