@@ -1328,6 +1328,29 @@ class TestPhotosRepositorySoftDeleteFiltering:
                         "faces_count": 1,
                         "faces_detected_ts": now,
                     },
+                    {
+                        "photo_id": "photo-jordan",
+                        "path": "seed-corpus/family/jordan_001.jpg",
+                        "sha256": "e" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 1,
+                        "faces_detected_ts": now,
+                    },
                 ],
             )
             connection.execute(
@@ -1342,6 +1365,12 @@ class TestPhotosRepositorySoftDeleteFiltering:
                     {
                         "person_id": "person-grandma",
                         "display_name": "Grandma Elena",
+                        "created_ts": now,
+                        "updated_ts": now,
+                    },
+                    {
+                        "person_id": "person-jordan",
+                        "display_name": "Jordan Lee",
                         "created_ts": now,
                         "updated_ts": now,
                     },
@@ -1380,6 +1409,21 @@ class TestPhotosRepositorySoftDeleteFiltering:
                         "provenance": None,
                         "created_ts": now,
                     },
+                    {
+                        "face_id": "face-jordan",
+                        "photo_id": "photo-jordan",
+                        "person_id": "person-jordan",
+                        "bbox_x": 0,
+                        "bbox_y": 0,
+                        "bbox_w": 10,
+                        "bbox_h": 10,
+                        "bitmap": None,
+                        "embedding": None,
+                        "detector_name": "seed",
+                        "detector_version": "1",
+                        "provenance": None,
+                        "created_ts": now,
+                    },
                 ],
             )
 
@@ -1392,6 +1436,7 @@ class TestPhotosRepositorySoftDeleteFiltering:
             )
 
         assert {item["photo_id"] for item in items} == {"photo-inez", "photo-grandma"}
+        assert "photo-jordan" not in {item["photo_id"] for item in items}
         assert total == 2
 
     def test_search_repository_person_names_ignore_unlabeled_faces(self, tmp_path):
