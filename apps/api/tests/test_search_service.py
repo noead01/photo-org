@@ -335,6 +335,32 @@ class TestSearchServiceExecution:
         )
         mock_repo.get_filtered_photo_ids.assert_called_once_with(filters, None)
 
+    def test_given_person_names_when_executing_search_then_passes_person_names_to_repository(self):
+        mock_repo = Mock()
+        service = SearchService(repo=mock_repo)
+
+        mock_repo.search_photos.return_value = ([], 0, None)
+        mock_repo.get_filtered_photo_ids.return_value = []
+        mock_repo.compute_facets.return_value = {}
+
+        filters = SearchFilters(person_names=["inez", "grandma"])
+        assert filters.model_dump().get("person_names") == ["inez", "grandma"]
+        request = SearchRequest(
+            filters=filters,
+            sort=SortSpec(by="shot_ts", dir="desc"),
+            page=PageSpec(limit=50),
+        )
+
+        service.execute(request)
+
+        mock_repo.search_photos.assert_called_once_with(
+            filters=filters,
+            sort=request.sort,
+            page=request.page,
+            text_query=None,
+        )
+        mock_repo.get_filtered_photo_ids.assert_called_once_with(filters, None)
+
     def test_given_empty_results_when_executing_search_then_returns_empty_response_with_facets(self):
         """Given empty results, when executing search, then returns empty response with facets."""
         # Given
