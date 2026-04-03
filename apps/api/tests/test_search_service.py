@@ -1162,7 +1162,7 @@ class TestPhotosRepositorySoftDeleteFiltering:
                 [
                     {
                         "photo_id": "photo-inez",
-                        "path": "seed-corpus/family/inez_001.jpg",
+                        "path": "seed-corpus/family/image_001.jpg",
                         "sha256": "a" * 64,
                         "phash": None,
                         "filesize": 100,
@@ -1185,7 +1185,7 @@ class TestPhotosRepositorySoftDeleteFiltering:
                     },
                     {
                         "photo_id": "photo-mateo",
-                        "path": "seed-corpus/family/mateo_001.jpg",
+                        "path": "seed-corpus/family/image_002.jpg",
                         "sha256": "b" * 64,
                         "phash": None,
                         "filesize": 100,
@@ -1284,7 +1284,7 @@ class TestPhotosRepositorySoftDeleteFiltering:
                 [
                     {
                         "photo_id": "photo-inez",
-                        "path": "seed-corpus/family/inez_001.jpg",
+                        "path": "seed-corpus/family/image_001.jpg",
                         "sha256": "c" * 64,
                         "phash": None,
                         "filesize": 100,
@@ -1307,7 +1307,7 @@ class TestPhotosRepositorySoftDeleteFiltering:
                     },
                     {
                         "photo_id": "photo-grandma",
-                        "path": "seed-corpus/family/grandma_001.jpg",
+                        "path": "seed-corpus/family/image_002.jpg",
                         "sha256": "d" * 64,
                         "phash": None,
                         "filesize": 100,
@@ -1330,7 +1330,7 @@ class TestPhotosRepositorySoftDeleteFiltering:
                     },
                     {
                         "photo_id": "photo-jordan",
-                        "path": "seed-corpus/family/jordan_001.jpg",
+                        "path": "seed-corpus/family/image_003.jpg",
                         "sha256": "e" * 64,
                         "phash": None,
                         "filesize": 100,
@@ -1451,7 +1451,7 @@ class TestPhotosRepositorySoftDeleteFiltering:
                 [
                     {
                         "photo_id": "photo-unlabeled",
-                        "path": "seed-corpus/family/unlabeled_001.jpg",
+                        "path": "seed-corpus/family/image_004.jpg",
                         "sha256": "e" * 64,
                         "phash": None,
                         "filesize": 100,
