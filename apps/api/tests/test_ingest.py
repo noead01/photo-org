@@ -957,7 +957,7 @@ def test_poll_registered_storage_sources_falls_back_to_later_alias_when_first_is
     assert watched_folder["last_successful_scan_ts"] == now
 
 
-def test_poll_registered_storage_sources_records_ingest_run_for_successful_scan(
+def test_poll_registered_storage_sources_records_chunked_ingest_runs_for_successful_scan(
     tmp_path, monkeypatch
 ):
     monkeypatch.chdir(tmp_path)
@@ -974,19 +974,30 @@ def test_poll_registered_storage_sources_records_ingest_run_for_successful_scan(
         now=now,
     )
 
-    result = poll_registered_storage_sources(database_url=db_url, now=now)
+    result = poll_registered_storage_sources(
+        database_url=db_url,
+        now=now,
+        poll_chunk_size=2,
+    )
 
     assert result.scanned == 6
 
     run_rows = load_ingest_runs(database_url=db_url)
-    assert len(run_rows) == 1
-    assert run_rows[0]["watched_folder_id"] == watched_folder_id
-    assert run_rows[0]["status"] == "completed"
-    assert run_rows[0]["files_seen"] == 6
-    assert run_rows[0]["files_created"] == 6
-    assert run_rows[0]["files_updated"] == 0
-    assert run_rows[0]["error_count"] == 0
-    assert run_rows[0]["error_summary"] is None
+    assert len(run_rows) == 3
+    assert [row["watched_folder_id"] for row in run_rows] == [
+        watched_folder_id,
+        watched_folder_id,
+        watched_folder_id,
+    ]
+    assert [(row["status"], row["files_seen"]) for row in run_rows] == [
+        ("completed", 2),
+        ("completed", 2),
+        ("completed", 2),
+    ]
+    assert sum(row["files_created"] for row in run_rows) == 6
+    assert all(row["files_updated"] == 0 for row in run_rows)
+    assert all(row["error_count"] == 0 for row in run_rows)
+    assert all(row["error_summary"] is None for row in run_rows)
 
 
 def test_poll_registered_storage_sources_records_ingest_run_for_source_validation_failure(
