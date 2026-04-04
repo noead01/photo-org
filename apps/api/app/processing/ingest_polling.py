@@ -169,11 +169,6 @@ def poll_registered_storage_sources(
                         result.inserted += outcome.inserted
                         result.updated += outcome.updated
                         result.errors.extend(outcome.error_messages)
-                        record_watched_folder_scan_success(
-                            connection,
-                            watched_folder_id=target.watched_folder_id,
-                            now=at,
-                        )
                         _record_ingest_run(
                             run_store,
                             connection=connection,
@@ -184,12 +179,43 @@ def poll_registered_storage_sources(
                             files_updated=outcome.updated,
                             error_messages=outcome.error_messages,
                         )
-            except OSError as exc:
+                with engine.begin() as connection:
+                    touched_photo_ids.update(
+                        reconcile_watched_folder(
+                            connection,
+                            watched_folder_id=target.watched_folder_id,
+                            observed_relative_paths=observed_relative_paths,
+                            now=at,
+                            missing_file_grace_period_days=grace_period_days,
+                        )
+                    )
+                    refresh_photo_deleted_timestamps(
+                        connection,
+                        photo_ids=touched_photo_ids,
+                        now=at,
+                    )
+                    record_watched_folder_scan_success(
+                        connection,
+                        watched_folder_id=target.watched_folder_id,
+                        now=at,
+                    )
+                    if chunk_count == 0:
+                        _record_ingest_run(
+                            run_store,
+                            connection=connection,
+                            watched_folder_id=target.watched_folder_id,
+                            status="completed",
+                            files_seen=0,
+                            files_created=0,
+                            files_updated=0,
+                            error_messages=(),
+                        )
+            except Exception as exc:
                 with engine.begin() as connection:
                     record_watched_folder_scan_failure(
                         connection,
                         watched_folder_id=target.watched_folder_id,
-                        reason=_classify_root_scan_failure(exc),
+                        reason=_classify_root_scan_failure(exc) if isinstance(exc, OSError) else "io_error",
                         now=at,
                     )
                     _record_ingest_run(
@@ -200,41 +226,10 @@ def poll_registered_storage_sources(
                         files_seen=0,
                         files_created=0,
                         files_updated=0,
-                        error_messages=(),
+                        error_messages=(str(exc),),
                     )
+                result.errors.append(f"watched_folder:{target.watched_folder_id}: {exc}")
                 continue
-
-            with engine.begin() as connection:
-                if chunk_count == 0:
-                    record_watched_folder_scan_success(
-                        connection,
-                        watched_folder_id=target.watched_folder_id,
-                        now=at,
-                    )
-                    _record_ingest_run(
-                        run_store,
-                        connection=connection,
-                        watched_folder_id=target.watched_folder_id,
-                        status="completed",
-                        files_seen=0,
-                        files_created=0,
-                        files_updated=0,
-                        error_messages=(),
-                    )
-                touched_photo_ids.update(
-                    reconcile_watched_folder(
-                        connection,
-                        watched_folder_id=target.watched_folder_id,
-                        observed_relative_paths=observed_relative_paths,
-                        now=at,
-                        missing_file_grace_period_days=grace_period_days,
-                    )
-                )
-                refresh_photo_deleted_timestamps(
-                    connection,
-                    photo_ids=touched_photo_ids,
-                    now=at,
-                )
 
     return result
 

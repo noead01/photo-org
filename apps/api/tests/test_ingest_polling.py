@@ -161,6 +161,95 @@ def test_poll_registered_storage_sources_records_one_completed_run_per_chunk(tmp
     ]
 
 
+def test_poll_registered_storage_sources_records_failed_outcome_for_late_reconciliation_error(
+    tmp_path, monkeypatch
+):
+    import app.processing.ingest_polling as ingest_polling
+
+    database_url = f"sqlite:///{tmp_path / 'poll-late-reconcile-failure.db'}"
+    upgrade_database(database_url)
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 4, 4, 12, 15, tzinfo=UTC)
+
+    root = tmp_path / "source-root"
+    watched = root / "imports"
+    watched.mkdir(parents=True)
+    for index in range(5):
+        _write_test_image(watched / f"photo_{index:03d}.jpg")
+
+    with engine.begin() as connection:
+        source = create_storage_source(
+            connection,
+            display_name="Source",
+            marker_filename=MARKER_FILENAME,
+            marker_version=1,
+            now=now,
+        )
+        attach_storage_source_alias(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            now=now,
+        )
+        watched_folder = create_watched_folder(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            watched_path=watched.as_posix(),
+            display_name="Imports",
+            now=now,
+        )
+        write_source_marker(root, storage_source_id=source["storage_source_id"])
+
+    def fail_on_reconcile(*args, **kwargs):
+        raise RuntimeError("late reconciliation failed")
+
+    monkeypatch.setattr(ingest_polling, "reconcile_watched_folder", fail_on_reconcile)
+
+    result = ingest_polling.poll_registered_storage_sources(
+        database_url=database_url,
+        now=now,
+        poll_chunk_size=2,
+    )
+
+    with engine.connect() as connection:
+        run_rows = list(
+            connection.execute(
+                select(ingest_runs)
+                .where(ingest_runs.c.watched_folder_id == watched_folder["watched_folder_id"])
+                .order_by(ingest_runs.c.completed_ts, ingest_runs.c.ingest_run_id)
+            ).mappings()
+        )
+        source_row = connection.execute(
+            select(
+                storage_sources.c.availability_state,
+                storage_sources.c.last_failure_reason,
+                storage_sources.c.last_validated_ts,
+            ).where(storage_sources.c.storage_source_id == source["storage_source_id"])
+        ).mappings().one()
+        watched_folder_row = connection.execute(
+            select(
+                watched_folders.c.availability_state,
+                watched_folders.c.last_failure_reason,
+                watched_folders.c.last_successful_scan_ts,
+            ).where(watched_folders.c.watched_folder_id == watched_folder["watched_folder_id"])
+        ).mappings().one()
+
+    assert result.errors == [f"watched_folder:{watched_folder['watched_folder_id']}: late reconciliation failed"]
+    assert [(row["status"], row["files_seen"]) for row in run_rows] == [
+        ("completed", 2),
+        ("completed", 2),
+        ("completed", 1),
+        ("failed", 0),
+    ]
+    assert source_row["availability_state"] == "unreachable"
+    assert source_row["last_failure_reason"] == "io_error"
+    assert source_row["last_validated_ts"] == now.replace(tzinfo=None)
+    assert watched_folder_row["availability_state"] == "unreachable"
+    assert watched_folder_row["last_failure_reason"] == "io_error"
+    assert watched_folder_row["last_successful_scan_ts"] is None
+
+
 def test_reconcile_directory_processes_a_watched_folder_end_to_end(tmp_path):
     from app.processing.ingest_polling import reconcile_directory
 
