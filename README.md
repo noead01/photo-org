@@ -138,6 +138,8 @@ The current Phase 0 development path now uses an API-owned persistence boundary 
 - the API owns queue processing and domain-table mutation
 - internal queue processing can be triggered through a bounded API endpoint for worker use
 
+The API publishes its code-defined OpenAPI contract as JSON at `/openapi.json`, YAML at `/openapi.yaml`, and Swagger UI at `/docs`.
+
 The repository also now includes a checked-in offline seed corpus for end-to-end validation and demos:
 
 - the corpus lives under `seed-corpus/`
