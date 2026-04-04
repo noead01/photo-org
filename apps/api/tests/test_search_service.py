@@ -1503,6 +1503,199 @@ class TestPhotosRepositorySoftDeleteFiltering:
         assert items == []
         assert total == 0
 
+    def test_search_repository_person_names_treat_like_wildcards_as_literals(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-person-names-literal-wildcards.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        now = datetime(2026, 4, 3, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            connection.execute(
+                insert(photos),
+                [
+                    {
+                        "photo_id": "photo-inez",
+                        "path": "seed-corpus/family/image_001.jpg",
+                        "sha256": "f" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 1,
+                        "faces_detected_ts": now,
+                    }
+                ],
+            )
+            connection.execute(
+                insert(people).values(
+                    person_id="person-inez",
+                    display_name="Inez Rivera",
+                    created_ts=now,
+                    updated_ts=now,
+                )
+            )
+            connection.execute(
+                insert(faces).values(
+                    face_id="face-inez",
+                    photo_id="photo-inez",
+                    person_id="person-inez",
+                    bbox_x=0,
+                    bbox_y=0,
+                    bbox_w=10,
+                    bbox_h=10,
+                    bitmap=None,
+                    embedding=None,
+                    detector_name="seed",
+                    detector_version="1",
+                    provenance=None,
+                    created_ts=now,
+                )
+            )
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            items, total, _ = repo.search_photos(
+                filters=SearchFilters(person_names=["%"]),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+            )
+
+        assert items == []
+        assert total == 0
+
+    def test_search_repository_person_names_drop_blank_terms_before_building_clause(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-person-names-blank.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        now = datetime(2026, 4, 3, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            connection.execute(
+                insert(photos),
+                [
+                    {
+                        "photo_id": "photo-inez",
+                        "path": "seed-corpus/family/image_001.jpg",
+                        "sha256": "1" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 1,
+                        "faces_detected_ts": now,
+                    },
+                    {
+                        "photo_id": "photo-mateo",
+                        "path": "seed-corpus/family/image_002.jpg",
+                        "sha256": "2" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 1,
+                        "faces_detected_ts": now,
+                    },
+                ],
+            )
+            connection.execute(
+                insert(people).values(
+                    person_id="person-inez",
+                    display_name="Inez Rivera",
+                    created_ts=now,
+                    updated_ts=now,
+                )
+            )
+            connection.execute(
+                insert(people).values(
+                    person_id="person-mateo",
+                    display_name="Mateo Rivera",
+                    created_ts=now,
+                    updated_ts=now,
+                )
+            )
+            connection.execute(
+                insert(faces),
+                [
+                    {
+                        "face_id": "face-inez",
+                        "photo_id": "photo-inez",
+                        "person_id": "person-inez",
+                        "bbox_x": 0,
+                        "bbox_y": 0,
+                        "bbox_w": 10,
+                        "bbox_h": 10,
+                        "bitmap": None,
+                        "embedding": None,
+                        "detector_name": "seed",
+                        "detector_version": "1",
+                        "provenance": None,
+                        "created_ts": now,
+                    },
+                    {
+                        "face_id": "face-mateo",
+                        "photo_id": "photo-mateo",
+                        "person_id": "person-mateo",
+                        "bbox_x": 0,
+                        "bbox_y": 0,
+                        "bbox_w": 10,
+                        "bbox_h": 10,
+                        "bitmap": None,
+                        "embedding": None,
+                        "detector_name": "seed",
+                        "detector_version": "1",
+                        "provenance": None,
+                        "created_ts": now,
+                    },
+                ],
+            )
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            items, total, _ = repo.search_photos(
+                filters=SearchFilters(person_names=["   ", "inez"]),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+            )
+
+        assert [item["photo_id"] for item in items] == ["photo-inez"]
+        assert total == 1
+
     def test_search_repository_requires_all_text_query_tokens(self, tmp_path):
         database_url = f"sqlite:///{tmp_path / 'search-text-query-all-tokens.db'}"
         upgrade_database(database_url)
