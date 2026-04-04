@@ -28,10 +28,24 @@ class PhotosRepository:
         # Single source of truth for table objects
         self.photos: Table = Table("photos", md, autoload_with=bind)
         self.faces: Table = Table("faces", md, autoload_with=bind)
+        self.people: Table = Table("people", md, autoload_with=bind)
         self.photo_tags: Table = Table("photo_tags", md, autoload_with=bind)
         self.photo_files: Table = Table("photo_files", md, autoload_with=bind)
         self.watched_folders: Table = Table("watched_folders", md, autoload_with=bind)
         self.storage_sources: Table = Table("storage_sources", md, autoload_with=bind)
+
+    @staticmethod
+    def _normalize_person_name_terms(person_names: List[str]) -> List[str]:
+        terms = []
+        for name in person_names:
+            term = name.strip()
+            if term:
+                terms.append(term)
+        return terms
+
+    @staticmethod
+    def _escape_like_literal(term: str) -> str:
+        return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
     def search_photos(self, filters: SearchFilters, sort: SortSpec, page: PageSpec,
                      text_query: Optional[str] = None) -> Tuple[List[Dict[str, Any]], int, Optional[str]]:
@@ -202,6 +216,34 @@ class PhotosRepository:
                 )
             ).limit(1)
             where_conditions.append(people_subquery.exists())
+
+        person_name_terms = self._normalize_person_name_terms(filters.person_names or [])
+        if person_name_terms:
+            person_name_subquery = (
+                select(self.faces.c.photo_id)
+                .select_from(
+                    self.faces.join(
+                        self.people,
+                        self.faces.c.person_id == self.people.c.person_id,
+                    )
+                )
+                .where(
+                    and_(
+                        self.faces.c.photo_id == self.photos.c.photo_id,
+                        or_(
+                            *[
+                                self.people.c.display_name.ilike(
+                                    f"%{self._escape_like_literal(name)}%",
+                                    escape="\\",
+                                )
+                                for name in person_name_terms
+                            ]
+                        ),
+                    )
+                )
+                .limit(1)
+            )
+            where_conditions.append(person_name_subquery.exists())
         
         # Tags filter (OR logic within tags)
         if filters.tags:

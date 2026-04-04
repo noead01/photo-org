@@ -27,6 +27,7 @@ class SearchFilters(BaseModel):
     has_faces: Optional[bool] = None
     tags: Optional[List[str]] = None
     people: Optional[List[str]] = None
+    person_names: Optional[List[str]] = None
 
 class VectorSpec(BaseModel):
     dim: int
