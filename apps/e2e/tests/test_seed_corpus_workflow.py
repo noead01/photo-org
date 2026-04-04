@@ -1,4 +1,7 @@
+import os
+
 from fastapi.testclient import TestClient
+import pytest
 from sqlalchemy import func, select
 
 from app.dev.seed_corpus import load_seed_corpus_into_database, validate_seed_corpus
@@ -40,6 +43,9 @@ def _load_seed_corpus(seed_corpus_database_url):
 
 
 def test_seed_corpus_can_be_ingested_and_persisted_end_to_end(seed_corpus_database_url):
+    if os.getenv("PHOTO_ORG_E2E_API_BASE_URL"):
+        pytest.skip("local ingest verification is skipped when using a preloaded Compose environment")
+
     report, engine, initial_photo_count, initial_detected_photo_count, processed = _load_seed_corpus(
         seed_corpus_database_url
     )
@@ -72,6 +78,9 @@ def test_seed_corpus_can_be_ingested_and_persisted_end_to_end(seed_corpus_databa
 
 
 def test_seed_corpus_read_endpoints_reflect_ingested_catalog(seed_corpus_database_url):
+    if os.getenv("PHOTO_ORG_E2E_API_BASE_URL"):
+        pytest.skip("local read-endpoint ingest verification is skipped for Compose-backed runs")
+
     report, engine, _, _, _ = _load_seed_corpus(seed_corpus_database_url)
 
     with engine.connect() as connection:
