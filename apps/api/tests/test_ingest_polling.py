@@ -161,6 +161,167 @@ def test_poll_registered_storage_sources_records_one_completed_run_per_chunk(tmp
     ]
 
 
+def test_poll_registered_storage_sources_rejects_invalid_poll_chunk_size_without_marking_source_failed(
+    tmp_path,
+):
+    from app.processing.ingest_polling import poll_registered_storage_sources
+
+    database_url = f"sqlite:///{tmp_path / 'poll-invalid-chunk-size.db'}"
+    upgrade_database(database_url)
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 4, 4, 12, 5, tzinfo=UTC)
+
+    root = tmp_path / "source-root"
+    watched = root / "imports"
+    watched.mkdir(parents=True)
+    _write_test_image(watched / "photo_000.jpg")
+
+    with engine.begin() as connection:
+        source = create_storage_source(
+            connection,
+            display_name="Source",
+            marker_filename=MARKER_FILENAME,
+            marker_version=1,
+            now=now,
+        )
+        attach_storage_source_alias(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            now=now,
+        )
+        watched_folder = create_watched_folder(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            watched_path=watched.as_posix(),
+            display_name="Imports",
+            now=now,
+        )
+        write_source_marker(root, storage_source_id=source["storage_source_id"])
+        initial_source_row = connection.execute(
+            select(
+                storage_sources.c.availability_state,
+                storage_sources.c.last_failure_reason,
+                storage_sources.c.last_validated_ts,
+            ).where(storage_sources.c.storage_source_id == source["storage_source_id"])
+        ).mappings().one()
+        initial_watched_folder_row = connection.execute(
+            select(
+                watched_folders.c.availability_state,
+                watched_folders.c.last_failure_reason,
+                watched_folders.c.last_successful_scan_ts,
+            ).where(watched_folders.c.watched_folder_id == watched_folder["watched_folder_id"])
+        ).mappings().one()
+
+    with pytest.raises(ValueError, match="chunk_size must be at least 1"):
+        poll_registered_storage_sources(
+            database_url=database_url,
+            now=now,
+            poll_chunk_size=0,
+        )
+
+    with engine.connect() as connection:
+        run_rows = list(connection.execute(select(ingest_runs)).mappings())
+        source_row = connection.execute(
+            select(
+                storage_sources.c.availability_state,
+                storage_sources.c.last_failure_reason,
+                storage_sources.c.last_validated_ts,
+            ).where(storage_sources.c.storage_source_id == source["storage_source_id"])
+        ).mappings().one()
+        watched_folder_row = connection.execute(
+            select(
+                watched_folders.c.availability_state,
+                watched_folders.c.last_failure_reason,
+                watched_folders.c.last_successful_scan_ts,
+            ).where(watched_folders.c.watched_folder_id == watched_folder["watched_folder_id"])
+        ).mappings().one()
+
+    assert run_rows == []
+    assert dict(source_row) == dict(initial_source_row)
+    assert dict(watched_folder_row) == dict(initial_watched_folder_row)
+
+
+def test_poll_registered_storage_sources_does_not_record_synthetic_run_for_empty_scan(tmp_path):
+    from app.processing.ingest_polling import poll_registered_storage_sources
+
+    database_url = f"sqlite:///{tmp_path / 'poll-empty-scan.db'}"
+    upgrade_database(database_url)
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 4, 4, 12, 10, tzinfo=UTC)
+
+    root = tmp_path / "source-root"
+    watched = root / "imports"
+    watched.mkdir(parents=True)
+
+    with engine.begin() as connection:
+        source = create_storage_source(
+            connection,
+            display_name="Source",
+            marker_filename=MARKER_FILENAME,
+            marker_version=1,
+            now=now,
+        )
+        attach_storage_source_alias(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            now=now,
+        )
+        watched_folder = create_watched_folder(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            watched_path=watched.as_posix(),
+            display_name="Imports",
+            now=now,
+        )
+        write_source_marker(root, storage_source_id=source["storage_source_id"])
+
+    result = poll_registered_storage_sources(
+        database_url=database_url,
+        now=now,
+        poll_chunk_size=2,
+    )
+
+    assert result.scanned == 0
+    assert result.inserted == 0
+    assert result.updated == 0
+    assert result.errors == []
+
+    with engine.connect() as connection:
+        run_rows = list(
+            connection.execute(
+                select(ingest_runs).where(
+                    ingest_runs.c.watched_folder_id == watched_folder["watched_folder_id"]
+                )
+            ).mappings()
+        )
+        source_row = connection.execute(
+            select(
+                storage_sources.c.availability_state,
+                storage_sources.c.last_failure_reason,
+                storage_sources.c.last_validated_ts,
+            ).where(storage_sources.c.storage_source_id == source["storage_source_id"])
+        ).mappings().one()
+        watched_folder_row = connection.execute(
+            select(
+                watched_folders.c.availability_state,
+                watched_folders.c.last_failure_reason,
+                watched_folders.c.last_successful_scan_ts,
+            ).where(watched_folders.c.watched_folder_id == watched_folder["watched_folder_id"])
+        ).mappings().one()
+
+    assert run_rows == []
+    assert source_row["availability_state"] == "active"
+    assert source_row["last_failure_reason"] is None
+    assert source_row["last_validated_ts"] == now.replace(tzinfo=None)
+    assert watched_folder_row["availability_state"] == "active"
+    assert watched_folder_row["last_failure_reason"] is None
+    assert watched_folder_row["last_successful_scan_ts"] == now.replace(tzinfo=None)
+
+
 def test_poll_registered_storage_sources_records_failed_outcome_for_late_reconciliation_error(
     tmp_path, monkeypatch
 ):

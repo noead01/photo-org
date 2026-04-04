@@ -102,6 +102,7 @@ def poll_registered_storage_sources(
     missing_file_grace_period_days: int | None = None,
     poll_chunk_size: int = 100,
 ) -> IngestResult:
+    _validate_chunk_size(poll_chunk_size)
     result = IngestResult()
     at = now if now is not None else utc_now()
     grace_period_days = resolve_missing_file_grace_period_days(missing_file_grace_period_days)
@@ -145,11 +146,9 @@ def poll_registered_storage_sources(
             )
             observed_relative_paths: set[str] = set()
             touched_photo_ids: set[str] = set()
-            chunk_count = 0
             try:
                 _validate_scan_root(scan_root)
                 for chunk_paths in _iter_chunks(iter_photo_files(scan_root), chunk_size=poll_chunk_size):
-                    chunk_count += 1
                     with engine.begin() as connection:
                         outcome, chunk_touched_photo_ids = _process_watched_folder_chunk(
                             connection,
@@ -193,17 +192,6 @@ def poll_registered_storage_sources(
                         watched_folder_id=target.watched_folder_id,
                         now=at,
                     )
-                    if chunk_count == 0:
-                        _record_ingest_run(
-                            run_store,
-                            connection=connection,
-                            watched_folder_id=target.watched_folder_id,
-                            status="completed",
-                            files_seen=0,
-                            files_created=0,
-                            files_updated=0,
-                            error_messages=(),
-                        )
             except Exception as exc:
                 with engine.begin() as connection:
                     record_watched_folder_scan_failure(
@@ -242,8 +230,7 @@ def _classify_root_scan_failure(exc: OSError) -> str:
 
 
 def _iter_chunks(items: Iterable[Path], *, chunk_size: int) -> Iterator[list[Path]]:
-    if chunk_size < 1:
-        raise ValueError("chunk_size must be at least 1")
+    _validate_chunk_size(chunk_size)
 
     chunk: list[Path] = []
     for item in items:
@@ -253,6 +240,11 @@ def _iter_chunks(items: Iterable[Path], *, chunk_size: int) -> Iterator[list[Pat
             chunk = []
     if chunk:
         yield chunk
+
+
+def _validate_chunk_size(chunk_size: int) -> None:
+    if chunk_size < 1:
+        raise ValueError("chunk_size must be at least 1")
 
 
 def _process_watched_folder_chunk(
