@@ -129,7 +129,16 @@ Current high-value targets:
 - `uv run python -m app.cli poll-storage-sources --database-url <url>`
   - poll enabled registered storage sources, validate each source marker, and reconcile watched folders through the central polling loop
 - `uv run python apps/api/scripts/generate_openapi.py`
-  - regenerate `apps/api/openapi/spec.yaml` from the current FastAPI app; the OpenAPI contract is authored in the FastAPI routes and Pydantic models, so regenerate this file after any API metadata change
+  - regenerate the generated OpenAPI YAML artifact at `apps/api/.generated/openapi.yaml` from the current FastAPI app
+  - the API also serves the same runtime schema at `GET /openapi.yaml` and the Swagger UI docs at `GET /docs`
+
+OpenAPI contribution notes:
+
+- the runtime FastAPI app is the source of truth for the contract
+- `GET /openapi.json` remains the canonical JSON schema emitted by FastAPI
+- `GET /openapi.yaml` serves the same schema as YAML for operators and docs consumers
+- `GET /docs` serves the Swagger UI docs surface
+- `apps/api/.generated/openapi.yaml` is generated locally and is ignored by git; do not commit it
 
 The `pre-push` target is intentionally scoped to checks that are currently expected to pass on this repo state.
 As broader lint and type-check coverage is cleaned up, that target should expand rather than drift into a second undocumented workflow.
