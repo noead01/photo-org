@@ -1,6 +1,5 @@
 from pathlib import Path
 
-import pytest
 import yaml
 from fastapi.testclient import TestClient
 from app.main import app
@@ -54,6 +53,48 @@ class TestHealthEndpoint:
         paths = response.json()["paths"]
         assert "/api/v1/search" not in paths
         assert "/healthz" in paths
+
+    def test_given_openapi_schema_when_fetching_then_exposes_documented_metadata(self):
+        """
+        Given: The runtime OpenAPI schema
+        When: Fetching /openapi.json
+        Then: The top-level metadata and selected operation/schema descriptions are present
+        """
+        client = TestClient(app)
+
+        response = client.get("/openapi.json")
+
+        assert response.status_code == 200
+        schema = response.json()
+
+        assert schema["info"]["title"] == "Photo Organizer API"
+        assert schema["info"]["version"] == "0.1.0"
+        assert "authored in the FastAPI routes and Pydantic models" in schema["info"]["description"]
+        assert schema["paths"]["/api/v1/photos"]["get"]["summary"] == "List photos"
+        assert schema["paths"]["/api/v1/storage-sources"]["post"]["responses"]["400"]["description"] == (
+            "Storage source registration failed"
+        )
+        assert schema["paths"]["/api/v1/storage-sources/{storage_source_id}/watched-folders"]["post"][
+            "responses"
+        ]["400"]["description"] == "Watched folder validation failed"
+        watched_folder_mutation_responses = schema["paths"][
+            "/api/v1/storage-sources/{storage_source_id}/watched-folders/{watched_folder_id}"
+        ]
+        assert watched_folder_mutation_responses["patch"]["responses"]["404"]["description"] == (
+            "Watched folder not found"
+        )
+        assert watched_folder_mutation_responses["delete"]["responses"]["404"]["description"] == (
+            "Watched folder not found"
+        )
+        assert schema["paths"]["/api/v1/internal/ingest-queue/process"]["post"]["responses"]["403"][
+            "description"
+        ] == "Worker role required"
+        assert (
+            schema["components"]["schemas"]["RegisterStorageSourceRequest"]["properties"]["root_path"][
+                "description"
+            ]
+            == "Absolute path to the storage root on the host."
+        )
 
     def test_given_checked_in_openapi_when_compared_to_runtime_then_matches_current_fastapi_schema(self):
         """

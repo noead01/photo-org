@@ -129,7 +129,7 @@ Current high-value targets:
 - `uv run python -m app.cli poll-storage-sources --database-url <url>`
   - poll enabled registered storage sources, validate each source marker, and reconcile watched folders through the central polling loop
 - `uv run python apps/api/scripts/generate_openapi.py`
-  - regenerate `apps/api/openapi/spec.yaml` from the current FastAPI app
+  - regenerate `apps/api/openapi/spec.yaml` from the current FastAPI app; the OpenAPI contract is authored in the FastAPI routes and Pydantic models, so regenerate this file after any API metadata change
 
 The `pre-push` target is intentionally scoped to checks that are currently expected to pass on this repo state.
 As broader lint and type-check coverage is cleaned up, that target should expand rather than drift into a second undocumented workflow.

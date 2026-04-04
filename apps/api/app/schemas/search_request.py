@@ -5,15 +5,18 @@ from typing import List, Optional, Literal
 
 from app.core.enums import FilesizeRange
 
+
 class DateFilter(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     from_: Optional[str] = Field(default=None, alias="from")
     to: Optional[str] = None
 
+
 class SortSpec(BaseModel):
     by: Literal["shot_ts", "relevance"] = "shot_ts"
     dir: Literal["asc", "desc"] = "desc"
+
 
 class PageSpec(BaseModel):
     limit: Optional[int] = 50
@@ -66,9 +69,11 @@ class SearchFilters(BaseModel):
     person_names: Optional[List[str]] = None
     location_radius: Optional[LocationRadiusFilter] = None
 
+
 class VectorSpec(BaseModel):
     dim: int
     values: List[float]
+
 
 class SearchRequest(BaseModel):
     q: Optional[str] = None

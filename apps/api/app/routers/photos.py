@@ -12,7 +12,12 @@ from app.schemas.search_response import PhotoHit
 router = APIRouter(prefix="/photos", tags=["photos"])
 
 
-@router.get("", response_model=list[PhotoHit])
+@router.get(
+    "",
+    summary="List photos",
+    description="Return searchable photo hits from the catalog.",
+    response_model=list[PhotoHit],
+)
 def list_photos(db: Session = Depends(get_db)) -> list[PhotoHit]:
     repo = PhotosRepository(db)
     return [PhotoHit(**item) for item in repo.list_photos()]
@@ -20,6 +25,8 @@ def list_photos(db: Session = Depends(get_db)) -> list[PhotoHit]:
 
 @router.get(
     "/{photo_id}",
+    summary="Get photo detail",
+    description="Return the full photo record, including metadata and availability details.",
     response_model=PhotoDetailResponse,
     responses={status.HTTP_404_NOT_FOUND: {"description": "Photo not found"}},
 )
