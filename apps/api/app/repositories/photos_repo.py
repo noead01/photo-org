@@ -1,7 +1,8 @@
 import base64
+import math
 from datetime import UTC, datetime, time
 from typing import List, Dict, Any, Optional, Tuple
-from sqlalchemy import MetaData, Table, select, func, or_, and_
+from sqlalchemy import MetaData, Table, select, func, or_, and_, case
 from sqlalchemy.engine import Row
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import Select
@@ -189,6 +190,39 @@ class PhotosRepository:
             )
         if filters.orientation:
             where_conditions.append(self.photos.c.orientation.in_(filters.orientation))
+
+        if filters.location_radius:
+            latitude = filters.location_radius.latitude
+            longitude = filters.location_radius.longitude
+            radius_km = filters.location_radius.radius_km
+
+            earth_radius_km = 6371.0088
+            degrees_to_radians = math.pi / 180.0
+            latitude_radians = latitude * degrees_to_radians
+            longitude_radians = longitude * degrees_to_radians
+            photo_latitude_radians = self.photos.c.gps_latitude * degrees_to_radians
+            photo_longitude_radians = self.photos.c.gps_longitude * degrees_to_radians
+
+            cosine_distance = (
+                func.sin(latitude_radians) * func.sin(photo_latitude_radians)
+                + func.cos(latitude_radians)
+                * func.cos(photo_latitude_radians)
+                * func.cos(photo_longitude_radians - longitude_radians)
+            )
+            clamped_cosine_distance = case(
+                (cosine_distance > 1.0, 1.0),
+                (cosine_distance < -1.0, -1.0),
+                else_=cosine_distance,
+            )
+            spherical_distance_km = earth_radius_km * func.acos(clamped_cosine_distance)
+
+            where_conditions.append(
+                and_(
+                    self.photos.c.gps_latitude.is_not(None),
+                    self.photos.c.gps_longitude.is_not(None),
+                    spherical_distance_km <= radius_km,
+                )
+            )
         
         # Filesize range filter
         if filters.filesize_range:
