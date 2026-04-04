@@ -31,6 +31,7 @@ from app.storage import (
     storage_sources,
     watched_folders,
 )
+from pydantic import ValidationError
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -66,6 +67,52 @@ def _asset_id_by_manifest_path() -> dict[str, str]:
         asset["path"]: asset["asset_id"]
         for asset in _load_seed_manifest()["assets"]
     }
+
+
+def test_location_radius_validation_accepts_coordinates_and_defaults_radius():
+    filters = SearchFilters(location_radius={"latitude": 37.7749, "longitude": -122.4194})
+
+    assert filters.location_radius.latitude == 37.7749
+    assert filters.location_radius.longitude == -122.4194
+    assert filters.location_radius.radius_km == 50
+
+    request = SearchRequest(filters={"location_radius": {"latitude": 37.7749, "longitude": -122.4194}})
+
+    assert request.filters.location_radius.radius_km == 50
+
+
+def test_location_radius_validation_rejects_latitude_outside_bounds():
+    with pytest.raises(ValidationError) as exc_info:
+        SearchFilters(location_radius={"latitude": 91, "longitude": 0})
+
+    assert "latitude must be between -90 and 90" in str(exc_info.value)
+
+
+def test_location_radius_validation_rejects_longitude_outside_bounds():
+    with pytest.raises(ValidationError) as exc_info:
+        SearchFilters(location_radius={"latitude": 0, "longitude": 181})
+
+    assert "longitude must be between -180 and 180" in str(exc_info.value)
+
+
+def test_location_radius_validation_rejects_non_positive_radius_km():
+    with pytest.raises(ValidationError) as exc_info:
+        SearchFilters(location_radius={"latitude": 0, "longitude": 0, "radius_km": 0})
+
+    assert "radius_km must be greater than 0" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "location_radius",
+    [
+        {"latitude": float("nan"), "longitude": 0},
+        {"latitude": 0, "longitude": float("nan")},
+        {"latitude": 0, "longitude": 0, "radius_km": float("nan")},
+    ],
+)
+def test_location_radius_validation_rejects_non_finite_values(location_radius):
+    with pytest.raises(ValidationError):
+        SearchFilters(location_radius=location_radius)
 
 
 def _seed_search_fixture_catalog(connection) -> None:
