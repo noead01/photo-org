@@ -156,8 +156,13 @@ def test_makefile_documents_compose_smoke_workflow():
     assert "compose-smoke:" in makefile
     assert "compose-e2e-smoke:" in makefile
     assert "compose.ephemeral.yaml" in makefile
-    assert "./scripts/photo-org seed-corpus load" in makefile
+    assert "./scripts/photo-org seed-corpus validate" in makefile
+    assert "ingest_directory('/photos')" in makefile
+    assert "http://127.0.0.1:$(PHOTO_ORG_API_HOST_PORT)/healthz" in makefile
     assert "/api/v1/internal/ingest-queue/process" in makefile
+    assert 'print("retryable_errors=%s" % result["retryable_errors"])' in makefile
+    assert "faces_detected=" in makefile
+    assert "face_rows=" in makefile
     assert "make test-e2e" in makefile
     assert "compose-down-volumes" in makefile
     assert "compose-smoke" in contributing
@@ -173,6 +178,7 @@ def test_makefile_compose_e2e_smoke_generates_its_own_environment():
     assert "test-e2e PHOTO_ORG_ENVIRONMENT=" in makefile
     assert "compose-down-volumes PHOTO_ORG_ENVIRONMENT=" in makefile
     assert "PHOTO_ORG_E2E_DATABASE_URL=" in makefile
+    assert "PHOTO_ORG_E2E_API_BASE_URL=" in makefile
 
 
 def test_makefile_compose_e2e_smoke_reanchors_nested_make_calls_to_repo_root():

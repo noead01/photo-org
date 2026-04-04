@@ -49,7 +49,7 @@ export PHOTO_ORG_API_HOST_PORT
 export PHOTO_ORG_DB_SERVICE_DATABASE_URL
 export PHOTO_ORG_COMPOSE_DATABASE_URL
 
-.PHONY: help sync lint test test-all test-e2e check pre-push migrate env-create compose-up compose-migrate compose-down compose-down-volumes compose-smoke compose-e2e-smoke print-compose-db-url seed-corpus-check seed-corpus-load ensure-environment
+.PHONY: help sync lint test test-all test-e2e check pre-push migrate env-create compose-up compose-migrate compose-down compose-down-volumes compose-smoke compose-e2e-smoke print-compose-db-url print-compose-api-base-url seed-corpus-check seed-corpus-load ensure-environment
 
 help:
 	@printf '%s\n' \
@@ -160,12 +160,21 @@ compose-smoke: ensure-environment
 		fi; \
 		sleep 1; \
 	done; \
-	./scripts/photo-org seed-corpus load --database-url "$(PHOTO_ORG_COMPOSE_DATABASE_URL)"; \
-	processed="$$( $(COMPOSE_STACK) exec -T db-service python -c "import json, urllib.request; req = urllib.request.Request('http://localhost:8000/api/v1/internal/ingest-queue/process', data=b'{\"limit\": 1000}', headers={'Content-Type': 'application/json', 'X-Worker-Role': 'ingest-processor'}); print(json.load(urllib.request.urlopen(req))['processed'])" )"; \
-	printf 'processed=%s\n' "$$processed"
+	until python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:$(PHOTO_ORG_API_HOST_PORT)/healthz').read()" >/dev/null 2>&1; do \
+		sleep 1; \
+	done; \
+	./scripts/photo-org seed-corpus validate >/dev/null; \
+	$(COMPOSE_STACK) exec -T db-service python -c "from app.processing.ingest import ingest_directory; result = ingest_directory('/photos'); print(f'scanned={result.scanned}'); print(f'enqueued={result.enqueued}')" ; \
+	process_json="$$( $(COMPOSE_STACK) exec -T db-service python -c "import json, urllib.request; req = urllib.request.Request('http://localhost:8000/api/v1/internal/ingest-queue/process', data=b'{\"limit\": 1000}', headers={'Content-Type': 'application/json', 'X-Worker-Role': 'ingest-processor'}); print(json.dumps(json.load(urllib.request.urlopen(req))))" )"; \
+	python3 -c 'import json, sys; result = json.loads(sys.argv[1]); print("processed=%s" % result["processed"]); print("failed=%s" % result["failed"]); print("retryable_errors=%s" % result["retryable_errors"]); raise SystemExit(1 if result["failed"] or result["retryable_errors"] else 0)' "$$process_json"; \
+	face_counts="$$( $(COMPOSE_STACK) exec -T db-service python -c "from sqlalchemy import func, select; from app.db.session import create_db_engine; from app.storage import faces, photos; engine = create_db_engine(); connection = engine.connect(); detected = connection.execute(select(func.count()).select_from(photos).where(photos.c.faces_detected_ts.is_not(None))).scalar_one(); face_rows = connection.execute(select(func.count()).select_from(faces)).scalar_one(); connection.close(); print(f'faces_detected={detected}'); print(f'face_rows={face_rows}'); raise SystemExit(0 if detected > 0 and face_rows > 0 else 1)" )"; \
+	printf '%s\n' "$$face_counts"
 
 print-compose-db-url:
 	@printf '%s\n' "$(PHOTO_ORG_COMPOSE_DATABASE_URL)"
+
+print-compose-api-base-url:
+	@printf '%s\n' "http://127.0.0.1:$(PHOTO_ORG_API_HOST_PORT)"
 
 compose-e2e-smoke:
 	@set -eu; \
@@ -181,7 +190,8 @@ compose-e2e-smoke:
 	cd "$(CURDIR)" && env -u PHOTO_ORG_ENVIRONMENT -u PHOTO_ORG_ENV_STORAGE_MODE -u PHOTO_ORG_ENV_REGISTRY_FILE -u PHOTO_ORG_COMPOSE_PROJECT_NAME -u PHOTO_ORG_POSTGRES_HOST_PORT -u PHOTO_ORG_API_HOST_PORT -u PHOTO_ORG_DB_SERVICE_DATABASE_URL -u PHOTO_ORG_COMPOSE_DATABASE_URL $(MAKE) --no-print-directory env-create PHOTO_ORG_ENVIRONMENT="$$env_name" PHOTO_ORG_ENV_STORAGE_MODE=ephemeral PHOTO_ORG_ENV_REGISTRY_DIR="$(PHOTO_ORG_ENV_REGISTRY_DIR)"; \
 	cd "$(CURDIR)" && env -u PHOTO_ORG_ENVIRONMENT -u PHOTO_ORG_ENV_STORAGE_MODE -u PHOTO_ORG_ENV_REGISTRY_FILE -u PHOTO_ORG_COMPOSE_PROJECT_NAME -u PHOTO_ORG_POSTGRES_HOST_PORT -u PHOTO_ORG_API_HOST_PORT -u PHOTO_ORG_DB_SERVICE_DATABASE_URL -u PHOTO_ORG_COMPOSE_DATABASE_URL $(MAKE) --no-print-directory compose-smoke PHOTO_ORG_ENVIRONMENT="$$env_name" PHOTO_ORG_ENV_REGISTRY_DIR="$(PHOTO_ORG_ENV_REGISTRY_DIR)" PHOTO_ORG_COMPOSE_SMOKE_KEEP_RUNNING=1; \
 	database_url="$$( cd "$(CURDIR)" && env -u PHOTO_ORG_ENVIRONMENT -u PHOTO_ORG_ENV_STORAGE_MODE -u PHOTO_ORG_ENV_REGISTRY_FILE -u PHOTO_ORG_COMPOSE_PROJECT_NAME -u PHOTO_ORG_POSTGRES_HOST_PORT -u PHOTO_ORG_API_HOST_PORT -u PHOTO_ORG_DB_SERVICE_DATABASE_URL -u PHOTO_ORG_COMPOSE_DATABASE_URL $(MAKE) --no-print-directory -s print-compose-db-url PHOTO_ORG_ENVIRONMENT="$$env_name" PHOTO_ORG_ENV_REGISTRY_DIR="$(PHOTO_ORG_ENV_REGISTRY_DIR)" )"; \
-	cd "$(CURDIR)" && PHOTO_ORG_E2E_DATABASE_URL="$$database_url" env -u PHOTO_ORG_ENVIRONMENT -u PHOTO_ORG_ENV_STORAGE_MODE -u PHOTO_ORG_ENV_REGISTRY_FILE -u PHOTO_ORG_COMPOSE_PROJECT_NAME -u PHOTO_ORG_POSTGRES_HOST_PORT -u PHOTO_ORG_API_HOST_PORT -u PHOTO_ORG_DB_SERVICE_DATABASE_URL -u PHOTO_ORG_COMPOSE_DATABASE_URL $(MAKE) --no-print-directory test-e2e PHOTO_ORG_ENVIRONMENT="$$env_name" PHOTO_ORG_ENV_REGISTRY_DIR="$(PHOTO_ORG_ENV_REGISTRY_DIR)"
+	api_base_url="$$( cd "$(CURDIR)" && env -u PHOTO_ORG_ENVIRONMENT -u PHOTO_ORG_ENV_STORAGE_MODE -u PHOTO_ORG_ENV_REGISTRY_FILE -u PHOTO_ORG_COMPOSE_PROJECT_NAME -u PHOTO_ORG_POSTGRES_HOST_PORT -u PHOTO_ORG_API_HOST_PORT -u PHOTO_ORG_DB_SERVICE_DATABASE_URL -u PHOTO_ORG_COMPOSE_DATABASE_URL $(MAKE) --no-print-directory -s print-compose-api-base-url PHOTO_ORG_ENVIRONMENT="$$env_name" PHOTO_ORG_ENV_REGISTRY_DIR="$(PHOTO_ORG_ENV_REGISTRY_DIR)" )"; \
+	cd "$(CURDIR)" && PHOTO_ORG_E2E_DATABASE_URL="$$database_url" PHOTO_ORG_E2E_API_BASE_URL="$$api_base_url" env -u PHOTO_ORG_ENVIRONMENT -u PHOTO_ORG_ENV_STORAGE_MODE -u PHOTO_ORG_ENV_REGISTRY_FILE -u PHOTO_ORG_COMPOSE_PROJECT_NAME -u PHOTO_ORG_POSTGRES_HOST_PORT -u PHOTO_ORG_API_HOST_PORT -u PHOTO_ORG_DB_SERVICE_DATABASE_URL -u PHOTO_ORG_COMPOSE_DATABASE_URL $(MAKE) --no-print-directory test-e2e PHOTO_ORG_ENVIRONMENT="$$env_name" PHOTO_ORG_ENV_REGISTRY_DIR="$(PHOTO_ORG_ENV_REGISTRY_DIR)"
 
 seed-corpus-check:
 	./scripts/photo-org seed-corpus validate
