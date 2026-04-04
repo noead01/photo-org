@@ -133,11 +133,7 @@ class PhotosRepository:
 
     def list_photos(self) -> List[Dict[str, Any]]:
         """Return catalog photos in a deterministic browse order."""
-        query = select(self.photos).order_by(
-            self.photos.c.shot_ts.is_(None),
-            self.photos.c.shot_ts.desc(),
-            self.photos.c.photo_id.desc(),
-        )
+        query = select(self.photos).order_by(*self._sorting_clauses(SortSpec()))
         rows = [row for row in self.db.execute(query).all() if row.deleted_ts is None]
         return self._hydrate_items(rows)
 
@@ -321,37 +317,15 @@ class PhotosRepository:
 
     def _apply_sorting(self, query: Select, sort: SortSpec) -> Select:
         """Apply sorting to the query."""
-        if sort.by == "shot_ts":
-            if sort.dir == "desc":
-                return query.order_by(self.photos.c.shot_ts.desc(), self.photos.c.photo_id.desc())
-            else:
-                return query.order_by(self.photos.c.shot_ts.asc(), self.photos.c.photo_id.asc())
-        elif sort.by == "relevance":
-            # For now, fallback to shot_ts sorting
-            # TODO: Implement actual relevance scoring
-            return query.order_by(self.photos.c.shot_ts.desc(), self.photos.c.photo_id.desc())
-        else:
-            return query.order_by(self.photos.c.shot_ts.desc(), self.photos.c.photo_id.desc())
+        return query.order_by(*self._sorting_clauses(sort))
 
     def _apply_pagination(self, query: Select, page: PageSpec, sort: SortSpec) -> Select:
         """Apply pagination to the query."""
         if page.cursor:
             from app.core.pagination import decode_cursor
             last_ts, last_pid = decode_cursor(page.cursor)
-            
-            # Cursor conditions depend on sort direction
-            if sort.dir == "desc":
-                # For descending: next page has timestamps < last_ts
-                query = query.where(or_(
-                    self.photos.c.shot_ts < last_ts,
-                    and_(self.photos.c.shot_ts == last_ts, self.photos.c.photo_id < last_pid)
-                ))
-            else:  # asc
-                # For ascending: next page has timestamps > last_ts
-                query = query.where(or_(
-                    self.photos.c.shot_ts > last_ts,
-                    and_(self.photos.c.shot_ts == last_ts, self.photos.c.photo_id > last_pid)
-                ))
+
+            query = query.where(self._cursor_boundary_clause(last_ts, last_pid, sort))
         
         limit = page.limit or 50
         return query.limit(limit)
@@ -372,11 +346,41 @@ class PhotosRepository:
         
         # Convert ISO string back to datetime for cursor encoding
         shot_ts_str = last_item["shot_ts"]
-        if shot_ts_str is None:
-            return None
-        shot_ts_dt = datetime.fromisoformat(shot_ts_str.replace("Z", "+00:00"))
+        shot_ts_dt = None if shot_ts_str is None else datetime.fromisoformat(shot_ts_str.replace("Z", "+00:00"))
         
         return encode_cursor(shot_ts_dt, last_item["photo_id"])
+
+    def _sorting_clauses(self, sort: SortSpec):
+        """Return a deterministic sort order with null timestamps last."""
+        direction = sort.dir if sort.by in {"shot_ts", "relevance"} else "desc"
+        shot_ts_order = self.photos.c.shot_ts.desc() if direction == "desc" else self.photos.c.shot_ts.asc()
+        photo_id_order = self.photos.c.photo_id.desc() if direction == "desc" else self.photos.c.photo_id.asc()
+        return (
+            self.photos.c.shot_ts.is_(None),
+            shot_ts_order,
+            photo_id_order,
+        )
+
+    def _cursor_boundary_clause(self, last_ts: Optional[datetime], last_pid: str, sort: SortSpec):
+        """Return the strict boundary for the next page in the current sort order."""
+        direction = sort.dir if sort.by in {"shot_ts", "relevance"} else "desc"
+
+        if last_ts is None:
+            pid_clause = self.photos.c.photo_id < last_pid if direction == "desc" else self.photos.c.photo_id > last_pid
+            return and_(self.photos.c.shot_ts.is_(None), pid_clause)
+
+        ts_clause = self.photos.c.shot_ts < last_ts if direction == "desc" else self.photos.c.shot_ts > last_ts
+        pid_clause = self.photos.c.photo_id < last_pid if direction == "desc" else self.photos.c.photo_id > last_pid
+        return or_(
+            and_(
+                self.photos.c.shot_ts.is_not(None),
+                or_(
+                    ts_clause,
+                    and_(self.photos.c.shot_ts == last_ts, pid_clause),
+                ),
+            ),
+            self.photos.c.shot_ts.is_(None),
+        )
 
     def _hydrate_items(self, rows: List[Row], *, include_face_regions: bool = False) -> List[Dict[str, Any]]:
         """Hydrate photo rows with related data (tags, people, faces)."""
@@ -501,26 +505,6 @@ class PhotosRepository:
                 "last_failure_reason": reason,
             }
         return availability
-
-    # Legacy methods for backward compatibility (can be removed after refactoring)
-    def select_hits(self, sel, order_desc, limit: int, cursor: str | None) -> List[Row]:
-        """Legacy method - deprecated, use search_photos instead."""
-        from app.core.pagination import decode_cursor
-        sel = sel.order_by(*order_desc)
-        if cursor:
-            last_ts, last_pid = decode_cursor(cursor)
-            sel = sel.where(or_(self.photos.c.shot_ts < last_ts,
-                                and_(self.photos.c.shot_ts == last_ts,
-                                     self.photos.c.photo_id < last_pid)))
-        return list(self.db.execute(sel.limit(limit)).all())
-
-    def count_total(self, sel) -> int:
-        """Legacy method - deprecated, use search_photos instead."""
-        return int(self.db.execute(select(func.count()).select_from(sel.subquery())).scalar_one())
-
-    def hydrate_items(self, rows: List[Row]) -> List[Dict[str, Any]]:
-        """Legacy method - deprecated, use search_photos instead."""
-        return self._hydrate_items(rows)
 
     def compute_facets(self, filtered_photo_ids: List[str]) -> Dict[str, Any]:
         """Compute facets for the filtered photo set."""

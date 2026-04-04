@@ -741,6 +741,228 @@ class TestPhotosRepositorySoftDeleteFiltering:
         assert total == 1
         assert cursor is not None
 
+    def test_search_repository_pages_deterministically_across_duplicate_and_null_timestamps(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-stable-pagination.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        shared_ts = datetime(2026, 3, 24, 12, 0, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            connection.execute(
+                insert(photos),
+                [
+                    {
+                        "photo_id": "photo-b",
+                        "path": "photos/photo-b.jpg",
+                        "sha256": "e" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": shared_ts,
+                        "modified_ts": shared_ts,
+                        "shot_ts": shared_ts,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": shared_ts,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                    {
+                        "photo_id": "photo-a",
+                        "path": "photos/photo-a.jpg",
+                        "sha256": "f" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": shared_ts,
+                        "modified_ts": shared_ts,
+                        "shot_ts": shared_ts,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": shared_ts,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                    {
+                        "photo_id": "photo-d",
+                        "path": "photos/photo-d.jpg",
+                        "sha256": "1" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": shared_ts,
+                        "modified_ts": shared_ts,
+                        "shot_ts": None,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": shared_ts,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                    {
+                        "photo_id": "photo-c",
+                        "path": "photos/photo-c.jpg",
+                        "sha256": "2" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": shared_ts,
+                        "modified_ts": shared_ts,
+                        "shot_ts": None,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": shared_ts,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                ],
+            )
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            first_page, total, first_cursor = repo.search_photos(
+                filters=SearchFilters(),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=1),
+            )
+            second_page, _, second_cursor = repo.search_photos(
+                filters=SearchFilters(),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=1, cursor=first_cursor),
+            )
+            third_page, _, third_cursor = repo.search_photos(
+                filters=SearchFilters(),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=1, cursor=second_cursor),
+            )
+            fourth_page, _, fourth_cursor = repo.search_photos(
+                filters=SearchFilters(),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=1, cursor=third_cursor),
+            )
+            fifth_page, _, fifth_cursor = repo.search_photos(
+                filters=SearchFilters(),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=1, cursor=fourth_cursor),
+            )
+
+        assert total == 4
+        assert [item["photo_id"] for item in first_page] == ["photo-b"]
+        assert [item["photo_id"] for item in second_page] == ["photo-a"]
+        assert [item["photo_id"] for item in third_page] == ["photo-d"]
+        assert [item["photo_id"] for item in fourth_page] == ["photo-c"]
+        assert first_cursor is not None
+        assert second_cursor is not None
+        assert third_cursor is not None
+        assert fourth_cursor is not None
+        assert fifth_page == []
+        assert fifth_cursor is None
+
+    def test_search_repository_uses_requested_direction_for_relevance_sorting(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-relevance-sort.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        shared_ts = datetime(2026, 3, 24, 12, 0, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            connection.execute(
+                insert(photos),
+                [
+                    {
+                        "photo_id": "photo-b",
+                        "path": "photos/photo-b.jpg",
+                        "sha256": "3" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": shared_ts,
+                        "modified_ts": shared_ts,
+                        "shot_ts": shared_ts,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": shared_ts,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                    {
+                        "photo_id": "photo-a",
+                        "path": "photos/photo-a.jpg",
+                        "sha256": "4" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": shared_ts,
+                        "modified_ts": shared_ts,
+                        "shot_ts": shared_ts,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": shared_ts,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                ],
+            )
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            first_page, _, first_cursor = repo.search_photos(
+                filters=SearchFilters(),
+                sort=SortSpec(by="relevance", dir="asc"),
+                page=PageSpec(limit=1),
+            )
+            second_page, _, second_cursor = repo.search_photos(
+                filters=SearchFilters(),
+                sort=SortSpec(by="relevance", dir="asc"),
+                page=PageSpec(limit=1, cursor=first_cursor),
+            )
+
+        assert [item["photo_id"] for item in first_page] == ["photo-a"]
+        assert [item["photo_id"] for item in second_page] == ["photo-b"]
+        assert first_cursor is not None
+        assert second_cursor is not None
+
     def test_get_filtered_photo_ids_excludes_soft_deleted_photos(self, tmp_path):
         database_url = f"sqlite:///{tmp_path / 'search-filtered-ids.db'}"
         upgrade_database(database_url)
