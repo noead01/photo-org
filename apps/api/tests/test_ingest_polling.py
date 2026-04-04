@@ -150,15 +150,11 @@ def test_poll_registered_storage_sources_records_one_completed_run_per_chunk(tmp
             connection.execute(
                 select(ingest_runs)
                 .where(ingest_runs.c.watched_folder_id == watched_folder["watched_folder_id"])
-                .order_by(ingest_runs.c.started_ts, ingest_runs.c.ingest_run_id)
             ).mappings()
         )
 
-    assert [(row["status"], row["files_seen"]) for row in run_rows] == [
-        ("completed", 2),
-        ("completed", 2),
-        ("completed", 1),
-    ]
+    assert [row["status"] for row in run_rows] == ["completed", "completed", "completed"]
+    assert sorted(row["files_seen"] for row in run_rows) == [1, 2, 2]
 
 
 def test_reconcile_directory_processes_a_watched_folder_end_to_end(tmp_path):

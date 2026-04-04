@@ -28,7 +28,6 @@ class IngestRunStore:
         self,
         *,
         watched_folder_id: str | None = None,
-        started_ts: datetime | None = None,
         connection: Connection | None = None,
     ) -> str:
         ingest_run_id = str(uuid4())
@@ -37,8 +36,6 @@ class IngestRunStore:
             "watched_folder_id": watched_folder_id,
             "status": "processing",
         }
-        if started_ts is not None:
-            values["started_ts"] = started_ts
         if connection is not None:
             connection.execute(ingest_runs.insert().values(**values))
             return ingest_run_id

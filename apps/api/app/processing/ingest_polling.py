@@ -532,7 +532,6 @@ def _record_ingest_run(
 ) -> None:
     ingest_run_id = run_store.create_run(
         watched_folder_id=watched_folder_id,
-        started_ts=utc_now(),
         connection=connection,
     )
     run_store.finalize_run(
