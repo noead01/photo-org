@@ -77,9 +77,11 @@ def poll_registered_storage_sources(
     *,
     now: datetime | None = None,
     missing_file_grace_period_days: int | None = None,
+    poll_chunk_size: int = 100,
 ) -> IngestResult:
     return ingest_polling_module.poll_registered_storage_sources(
         database_url=database_url,
         now=now,
         missing_file_grace_period_days=missing_file_grace_period_days,
+        poll_chunk_size=poll_chunk_size,
     )

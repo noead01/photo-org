@@ -100,6 +100,67 @@ def test_poll_registered_storage_sources_processes_a_registered_source_end_to_en
     assert photo_count == 1
 
 
+def test_poll_registered_storage_sources_records_one_completed_run_per_chunk(tmp_path):
+    from app.processing.ingest_polling import poll_registered_storage_sources
+
+    database_url = f"sqlite:///{tmp_path / 'poll-chunked-runs.db'}"
+    upgrade_database(database_url)
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 4, 4, 12, 0, tzinfo=UTC)
+
+    root = tmp_path / "source-root"
+    watched = root / "imports"
+    watched.mkdir(parents=True)
+    for index in range(5):
+        _write_test_image(watched / f"photo_{index:03d}.jpg")
+
+    with engine.begin() as connection:
+        source = create_storage_source(
+            connection,
+            display_name="Source",
+            marker_filename=MARKER_FILENAME,
+            marker_version=1,
+            now=now,
+        )
+        attach_storage_source_alias(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            now=now,
+        )
+        watched_folder = create_watched_folder(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            watched_path=watched.as_posix(),
+            display_name="Imports",
+            now=now,
+        )
+        write_source_marker(root, storage_source_id=source["storage_source_id"])
+
+    result = poll_registered_storage_sources(
+        database_url=database_url,
+        now=now,
+        poll_chunk_size=2,
+    )
+
+    assert result.scanned == 5
+    with engine.connect() as connection:
+        run_rows = list(
+            connection.execute(
+                select(ingest_runs)
+                .where(ingest_runs.c.watched_folder_id == watched_folder["watched_folder_id"])
+                .order_by(ingest_runs.c.started_ts, ingest_runs.c.ingest_run_id)
+            ).mappings()
+        )
+
+    assert [(row["status"], row["files_seen"]) for row in run_rows] == [
+        ("completed", 2),
+        ("completed", 2),
+        ("completed", 1),
+    ]
+
+
 def test_reconcile_directory_processes_a_watched_folder_end_to_end(tmp_path):
     from app.processing.ingest_polling import reconcile_directory
 

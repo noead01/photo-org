@@ -209,10 +209,12 @@ def test_ingest_facade_poll_registered_storage_sources_delegates_to_polling_modu
         *,
         now=None,
         missing_file_grace_period_days=None,
+        poll_chunk_size=100,
     ):
         assert database_url == f"sqlite:///{tmp_path / 'facade-delegation.db'}"
         assert now is None
         assert missing_file_grace_period_days is None
+        assert poll_chunk_size == 100
         return sentinel_result
 
     fake_module.poll_registered_storage_sources = fake_poll_registered_storage_sources
