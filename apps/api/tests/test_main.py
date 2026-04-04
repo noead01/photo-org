@@ -76,6 +76,8 @@ class TestHealthEndpoint:
         assert schema["paths"]["/api/v1/storage-sources/{storage_source_id}/watched-folders"]["post"][
             "responses"
         ]["400"]["description"] == "Watched folder validation failed"
+        assert "/api/v1/operations/activity" in schema["paths"]
+        assert any(tag["name"] == "operations" for tag in schema["tags"])
         watched_folder_mutation_responses = schema["paths"][
             "/api/v1/storage-sources/{storage_source_id}/watched-folders/{watched_folder_id}"
         ]
@@ -88,12 +90,14 @@ class TestHealthEndpoint:
         assert schema["paths"]["/api/v1/internal/ingest-queue/process"]["post"]["responses"]["403"][
             "description"
         ] == "Worker role required"
+        assert schema["paths"]["/api/v1/operations/activity"]["get"]["summary"] == "Get operational activity"
         assert (
             schema["components"]["schemas"]["RegisterStorageSourceRequest"]["properties"]["root_path"][
                 "description"
             ]
             == "Absolute path to the storage root on the host."
         )
+        assert any(tag["name"] == "operations" for tag in schema["tags"])
 
     def test_given_docs_route_when_fetching_then_serves_swagger_ui(self):
         client = TestClient(app)
