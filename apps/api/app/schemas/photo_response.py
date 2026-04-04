@@ -2,47 +2,87 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.search_response import OriginalAvailabilityHit, ThumbnailHit
 
 
 class PhotoDetailFace(BaseModel):
-    person_id: str | None = None
-    bbox_x: int | None = None
-    bbox_y: int | None = None
-    bbox_w: int | None = None
-    bbox_h: int | None = None
+    """Face detection bounding box attached to a photo detail response."""
+
+    model_config = ConfigDict(
+        json_schema_extra={"description": "A single detected face and its bounding box."}
+    )
+
+    person_id: str | None = Field(default=None, description="Recognized person identifier.")
+    bbox_x: int | None = Field(default=None, description="Bounding-box x coordinate.")
+    bbox_y: int | None = Field(default=None, description="Bounding-box y coordinate.")
+    bbox_w: int | None = Field(default=None, description="Bounding-box width in pixels.")
+    bbox_h: int | None = Field(default=None, description="Bounding-box height in pixels.")
 
 
 class PhotoMetadataProjection(BaseModel):
-    sha256: str
-    phash: str | None = None
-    shot_ts_source: str | None = None
-    camera_model: str | None = None
-    software: str | None = None
-    gps_latitude: float | None = None
-    gps_longitude: float | None = None
-    gps_altitude: float | None = None
-    created_ts: datetime
-    updated_ts: datetime
-    modified_ts: datetime | None = None
-    deleted_ts: datetime | None = None
-    faces_count: int
-    faces_detected_ts: datetime | None = None
+    """Low-level metadata projection attached to photo details."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "description": "Canonical photo metadata, timestamps, and face counts."
+        }
+    )
+
+    sha256: str = Field(description="SHA-256 digest for the original file.")
+    phash: str | None = Field(default=None, description="Perceptual hash, if available.")
+    shot_ts_source: str | None = Field(
+        default=None,
+        description="Source used to derive the shot timestamp.",
+    )
+    camera_model: str | None = Field(default=None, description="Camera model string.")
+    software: str | None = Field(default=None, description="Software string from metadata.")
+    gps_latitude: float | None = Field(default=None, description="GPS latitude in decimal degrees.")
+    gps_longitude: float | None = Field(default=None, description="GPS longitude in decimal degrees.")
+    gps_altitude: float | None = Field(default=None, description="GPS altitude in meters.")
+    created_ts: datetime = Field(description="Creation timestamp for the catalog record.")
+    updated_ts: datetime = Field(description="Last update timestamp for the catalog record.")
+    modified_ts: datetime | None = Field(
+        default=None,
+        description="Last modified timestamp from the source file, if present.",
+    )
+    deleted_ts: datetime | None = Field(
+        default=None,
+        description="Soft-delete timestamp when the file is missing or removed.",
+    )
+    faces_count: int = Field(description="Number of detected faces.")
+    faces_detected_ts: datetime | None = Field(
+        default=None,
+        description="Timestamp when face detection was last run.",
+    )
 
 
 class PhotoDetailResponse(BaseModel):
-    photo_id: str
-    path: str
-    ext: str
-    camera_make: str | None = None
-    orientation: str | None = None
-    shot_ts: str | None = None
-    filesize: int
-    tags: list[str] = []
-    people: list[str] = []
-    faces: list[PhotoDetailFace] = []
-    thumbnail: ThumbnailHit | None = None
-    original: OriginalAvailabilityHit | None = None
-    metadata: PhotoMetadataProjection
+    """Detailed photo record including metadata and related assets."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "description": "Photo identity, rich metadata, and attached assets."
+        }
+    )
+
+    photo_id: str = Field(description="Stable photo identifier.")
+    path: str = Field(description="Canonical file path for the photo.")
+    ext: str = Field(description="File extension for the photo.")
+    camera_make: str | None = Field(default=None, description="Camera make, if available.")
+    orientation: str | None = Field(default=None, description="Image orientation, if known.")
+    shot_ts: str | None = Field(default=None, description="Shot timestamp as an ISO-8601 string.")
+    filesize: int = Field(description="File size in bytes.")
+    tags: list[str] = Field(default_factory=list, description="Assigned tag values.")
+    people: list[str] = Field(default_factory=list, description="Recognized people attached to the photo.")
+    faces: list[PhotoDetailFace] = Field(default_factory=list, description="Detected faces and bounding boxes.")
+    thumbnail: ThumbnailHit | None = Field(
+        default=None,
+        description="Inline thumbnail payload, if available.",
+    )
+    original: OriginalAvailabilityHit | None = Field(
+        default=None,
+        description="Original-file availability summary, if available.",
+    )
+    metadata: PhotoMetadataProjection = Field(description="Canonical catalog metadata for the photo.")

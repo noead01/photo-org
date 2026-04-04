@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 
+
 class FaceHit(BaseModel):
     person_id: Optional[str] = None
 
@@ -17,6 +18,7 @@ class OriginalAvailabilityHit(BaseModel):
     availability_state: str
     last_failure_reason: Optional[str] = None
 
+
 class PhotoHit(BaseModel):
     photo_id: str
     path: str
@@ -32,10 +34,12 @@ class PhotoHit(BaseModel):
     original: Optional[OriginalAvailabilityHit] = None
     relevance: Optional[float] = None
 
+
 class Hits(BaseModel):
     total: int
     items: List[PhotoHit]
     cursor: Optional[str] = None
+
 
 class SearchResponse(BaseModel):
     hits: Hits

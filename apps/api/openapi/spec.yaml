@@ -1,13 +1,17 @@
 openapi: 3.1.0
 info:
   title: Photo Organizer API
+  summary: Photo search, browsing, and storage-source management API.
+  description: Photo Organizer's OpenAPI contract is authored in the FastAPI routes
+    and Pydantic models in this repository and checked in as generated output.
   version: 0.1.0
 paths:
   /api/v1/internal/ingest-queue/process:
     post:
       tags:
       - internal-ingest-queue
-      summary: Process Ingest Queue Endpoint
+      summary: Process ingest queue
+      description: Claim and process pending ingest queue items for the worker process.
       operationId: process_ingest_queue_endpoint_api_v1_internal_ingest_queue_process_post
       parameters:
       - name: X-Worker-Role
@@ -30,6 +34,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProcessQueueResponse'
+        '403':
+          description: Worker role required
         '422':
           description: Validation Error
           content:
@@ -40,7 +46,8 @@ paths:
     get:
       tags:
       - photos
-      summary: List Photos
+      summary: List photos
+      description: Return searchable photo hits from the catalog.
       operationId: list_photos_api_v1_photos_get
       responses:
         '200':
@@ -56,7 +63,9 @@ paths:
     get:
       tags:
       - photos
-      summary: Get Photo Detail
+      summary: Get photo detail
+      description: Return the full photo record, including metadata and availability
+        details.
       operationId: get_photo_detail_api_v1_photos__photo_id__get
       parameters:
       - name: photo_id
@@ -84,7 +93,8 @@ paths:
     get:
       tags:
       - storage-sources
-      summary: List Storage Sources
+      summary: List storage sources
+      description: Return the current storage-source status for all registered roots.
       operationId: list_storage_sources_api_v1_storage_sources_get
       responses:
         '200':
@@ -99,7 +109,8 @@ paths:
     post:
       tags:
       - storage-sources
-      summary: Register Storage Source Route
+      summary: Register storage source
+      description: Create or re-register a storage root that the API manages.
       operationId: register_storage_source_route_api_v1_storage_sources_post
       requestBody:
         content:
@@ -126,7 +137,8 @@ paths:
     get:
       tags:
       - storage-sources
-      summary: Get Storage Source
+      summary: Get storage source
+      description: Return the status for a single registered storage source.
       operationId: get_storage_source_api_v1_storage_sources__storage_source_id__get
       parameters:
       - name: storage_source_id
@@ -154,7 +166,8 @@ paths:
     get:
       tags:
       - storage-sources
-      summary: List Storage Source Watched Folders
+      summary: List watched folders
+      description: Return all watched folders attached to a storage source.
       operationId: list_storage_source_watched_folders_api_v1_storage_sources__storage_source_id__watched_folders_get
       parameters:
       - name: storage_source_id
@@ -183,7 +196,8 @@ paths:
     post:
       tags:
       - storage-sources
-      summary: Create Storage Source Watched Folder
+      summary: Create watched folder
+      description: Create a watched folder for an existing storage source.
       operationId: create_storage_source_watched_folder_api_v1_storage_sources__storage_source_id__watched_folders_post
       parameters:
       - name: storage_source_id
@@ -205,6 +219,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WatchedFolderResponse'
+        '400':
+          description: Watched folder validation failed
         '422':
           description: Validation Error
           content:
@@ -215,7 +231,8 @@ paths:
     patch:
       tags:
       - storage-sources
-      summary: Update Storage Source Watched Folder
+      summary: Update watched folder
+      description: Enable or disable an existing watched folder.
       operationId: update_storage_source_watched_folder_api_v1_storage_sources__storage_source_id__watched_folders__watched_folder_id__patch
       parameters:
       - name: storage_source_id
@@ -243,6 +260,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WatchedFolderResponse'
+        '404':
+          description: Watched folder not found
         '422':
           description: Validation Error
           content:
@@ -252,7 +271,8 @@ paths:
     delete:
       tags:
       - storage-sources
-      summary: Delete Storage Source Watched Folder
+      summary: Delete watched folder
+      description: Remove a watched folder from the storage source.
       operationId: delete_storage_source_watched_folder_api_v1_storage_sources__storage_source_id__watched_folders__watched_folder_id__delete
       parameters:
       - name: storage_source_id
@@ -270,6 +290,8 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '404':
+          description: Watched folder not found
         '422':
           description: Validation Error
           content:
@@ -278,11 +300,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
   /healthz:
     get:
-      summary: Healthz
+      summary: Health check
+      description: Return a minimal readiness response for the HTTP service.
       operationId: healthz_healthz_get
       responses:
         '200':
-          description: Successful Response
+          description: A small health payload used by local startup checks.
           content:
             application/json:
               schema: {}
@@ -305,24 +328,29 @@ components:
       - thumbnails_available
       - originals_available
       title: CatalogAvailabilityResponse
+      description: Whether metadata, thumbnails, and originals are available.
     CreateWatchedFolderRequest:
       properties:
         alias_path:
           type: string
           title: Alias Path
+          description: Alias path that identifies the storage source.
         watched_path:
           type: string
           title: Watched Path
+          description: Path to watch beneath the alias root.
         display_name:
           anyOf:
           - type: string
           - type: 'null'
           title: Display Name
+          description: Optional label for the watched folder.
       type: object
       required:
       - alias_path
       - watched_path
       title: CreateWatchedFolderRequest
+      description: Register a watched folder beneath a storage-source alias.
     FaceHit:
       properties:
         person_id:
@@ -381,6 +409,7 @@ components:
       - files_missing
       - error_count
       title: IngestRunSummaryResponse
+      description: Aggregate ingest counts and completion metadata.
     OriginalAvailabilityHit:
       properties:
         is_available:
@@ -406,85 +435,101 @@ components:
           - type: string
           - type: 'null'
           title: Person Id
+          description: Recognized person identifier.
         bbox_x:
           anyOf:
           - type: integer
           - type: 'null'
           title: Bbox X
+          description: Bounding-box x coordinate.
         bbox_y:
           anyOf:
           - type: integer
           - type: 'null'
           title: Bbox Y
+          description: Bounding-box y coordinate.
         bbox_w:
           anyOf:
           - type: integer
           - type: 'null'
           title: Bbox W
+          description: Bounding-box width in pixels.
         bbox_h:
           anyOf:
           - type: integer
           - type: 'null'
           title: Bbox H
+          description: Bounding-box height in pixels.
       type: object
       title: PhotoDetailFace
+      description: A single detected face and its bounding box.
     PhotoDetailResponse:
       properties:
         photo_id:
           type: string
           title: Photo Id
+          description: Stable photo identifier.
         path:
           type: string
           title: Path
+          description: Canonical file path for the photo.
         ext:
           type: string
           title: Ext
+          description: File extension for the photo.
         camera_make:
           anyOf:
           - type: string
           - type: 'null'
           title: Camera Make
+          description: Camera make, if available.
         orientation:
           anyOf:
           - type: string
           - type: 'null'
           title: Orientation
+          description: Image orientation, if known.
         shot_ts:
           anyOf:
           - type: string
           - type: 'null'
           title: Shot Ts
+          description: Shot timestamp as an ISO-8601 string.
         filesize:
           type: integer
           title: Filesize
+          description: File size in bytes.
         tags:
           items:
             type: string
           type: array
           title: Tags
-          default: []
+          description: Assigned tag values.
         people:
           items:
             type: string
           type: array
           title: People
-          default: []
+          description: Recognized people attached to the photo.
         faces:
           items:
             $ref: '#/components/schemas/PhotoDetailFace'
           type: array
           title: Faces
-          default: []
+          description: Detected faces and bounding boxes.
         thumbnail:
           anyOf:
           - $ref: '#/components/schemas/ThumbnailHit'
           - type: 'null'
+          description: Inline thumbnail payload, if available.
         original:
           anyOf:
           - $ref: '#/components/schemas/OriginalAvailabilityHit'
           - type: 'null'
+          description: Original-file availability summary, if available.
         metadata:
           $ref: '#/components/schemas/PhotoMetadataProjection'
+          description: Canonical catalog metadata for the photo.
       type: object
       required:
       - photo_id
@@ -493,6 +538,7 @@ components:
       - filesize
       - metadata
       title: PhotoDetailResponse
+      description: Photo identity, rich metadata, and attached assets.
     PhotoHit:
       properties:
         photo_id:
@@ -565,70 +611,84 @@ components:
         sha256:
           type: string
           title: Sha256
+          description: SHA-256 digest for the original file.
         phash:
           anyOf:
           - type: string
           - type: 'null'
           title: Phash
+          description: Perceptual hash, if available.
         shot_ts_source:
           anyOf:
           - type: string
           - type: 'null'
           title: Shot Ts Source
+          description: Source used to derive the shot timestamp.
         camera_model:
           anyOf:
           - type: string
           - type: 'null'
           title: Camera Model
+          description: Camera model string.
         software:
           anyOf:
           - type: string
           - type: 'null'
           title: Software
+          description: Software string from metadata.
         gps_latitude:
           anyOf:
           - type: number
           - type: 'null'
           title: Gps Latitude
+          description: GPS latitude in decimal degrees.
         gps_longitude:
           anyOf:
           - type: number
           - type: 'null'
           title: Gps Longitude
+          description: GPS longitude in decimal degrees.
         gps_altitude:
           anyOf:
           - type: number
           - type: 'null'
           title: Gps Altitude
+          description: GPS altitude in meters.
         created_ts:
           type: string
           format: date-time
           title: Created Ts
+          description: Creation timestamp for the catalog record.
         updated_ts:
           type: string
           format: date-time
           title: Updated Ts
+          description: Last update timestamp for the catalog record.
         modified_ts:
           anyOf:
           - type: string
             format: date-time
           - type: 'null'
           title: Modified Ts
+          description: Last modified timestamp from the source file, if present.
         deleted_ts:
           anyOf:
           - type: string
             format: date-time
           - type: 'null'
           title: Deleted Ts
+          description: Soft-delete timestamp when the file is missing or removed.
         faces_count:
           type: integer
           title: Faces Count
+          description: Number of detected faces.
         faces_detected_ts:
           anyOf:
           - type: string
             format: date-time
           - type: 'null'
           title: Faces Detected Ts
+          description: Timestamp when face detection was last run.
       type: object
       required:
       - sha256
@@ -636,6 +696,7 @@ components:
       - updated_ts
       - faces_count
       title: PhotoMetadataProjection
+      description: Canonical photo metadata, timestamps, and face counts.
     ProcessQueueRequest:
       properties:
         limit:
@@ -643,26 +704,32 @@ components:
           maximum: 1000.0
           minimum: 1.0
           title: Limit
+          description: Maximum number of pending queue items to process.
           default: 100
       type: object
       title: ProcessQueueRequest
+      description: Limit how many pending ingest items to process in one call.
     ProcessQueueResponse:
       properties:
         processed:
           type: integer
           title: Processed
+          description: Number of items processed successfully.
         failed:
           type: integer
           title: Failed
+          description: Number of items that failed permanently.
         retryable_errors:
           type: integer
           title: Retryable Errors
+          description: Number of items that can be retried.
       type: object
       required:
       - processed
       - failed
       - retryable_errors
       title: ProcessQueueResponse
+      description: Counts of processed items, failures, and retryable errors.
     RecentFailureResponse:
       properties:
         watched_folder_id:
@@ -687,26 +754,32 @@ components:
       - watched_folder_id
       - status
       title: RecentFailureResponse
+      description: A compact summary of a watched-folder failure.
     RegisterStorageSourceRequest:
       properties:
         root_path:
           type: string
           minLength: 1
           title: Root Path
+          description: Absolute path to the storage root on the host.
         alias_path:
           anyOf:
           - type: string
           - type: 'null'
           title: Alias Path
+          description: Optional canonical alias for the same storage root.
         display_name:
           anyOf:
           - type: string
           - type: 'null'
           title: Display Name
+          description: Human-readable label shown in the UI and API responses.
       type: object
       required:
       - root_path
       title: RegisterStorageSourceRequest
+      description: Register a storage root and optionally bind an alias or display
+        name.
     StorageSourceResponse:
       properties:
         storage_source_id:
@@ -753,6 +826,7 @@ components:
       - created_ts
       - updated_ts
       title: StorageSourceResponse
+      description: Storage-source identity, marker, and lifecycle metadata.
     StorageSourceStatusResponse:
       properties:
         storage_source_id:
@@ -826,6 +900,8 @@ components:
       - catalog
       - recent_failures
       title: StorageSourceStatusResponse
+      description: Storage-source registration details plus watched-folder and ingest
+        status.
     ThumbnailHit:
       properties:
         mime_type:
@@ -852,10 +928,12 @@ components:
         is_enabled:
           type: boolean
           title: Is Enabled
+          description: Whether the watched folder should be active.
       type: object
       required:
       - is_enabled
       title: UpdateWatchedFolderRequest
+      description: Enable or disable an existing watched folder.
     ValidationError:
       properties:
         loc:
@@ -933,3 +1011,13 @@ components:
       - is_enabled
       - availability_state
       title: WatchedFolderResponse
+      description: Watched-folder identity, status, and last ingest summary.
+tags:
+- name: photos
+  description: Browse and inspect photo records and metadata.
+- name: search
+  description: Search photos using text, filters, and similarity signals.
+- name: storage-sources
+  description: Register storage roots and manage watched folders.
+- name: internal-ingest-queue
+  description: Worker-only queue processing endpoint.

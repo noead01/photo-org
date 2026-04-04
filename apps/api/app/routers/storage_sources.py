@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import os
 from typing import Annotated
-from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_db
@@ -27,12 +27,38 @@ router = APIRouter(prefix="/storage-sources", tags=["storage-sources"])
 
 
 class RegisterStorageSourceRequest(BaseModel):
-    root_path: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
-    alias_path: str | None = None
-    display_name: str | None = None
+    """Register a storage root that the API can manage and validate."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "description": "Register a storage root and optionally bind an alias or display name."
+        }
+    )
+
+    root_path: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1),
+        Field(description="Absolute path to the storage root on the host."),
+    ]
+    alias_path: str | None = Field(
+        default=None,
+        description="Optional canonical alias for the same storage root.",
+    )
+    display_name: str | None = Field(
+        default=None,
+        description="Human-readable label shown in the UI and API responses.",
+    )
 
 
 class StorageSourceResponse(BaseModel):
+    """Canonical storage-source record returned after registration."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "description": "Storage-source identity, marker, and lifecycle metadata."
+        }
+    )
+
     storage_source_id: str
     display_name: str
     marker_filename: str
@@ -45,12 +71,28 @@ class StorageSourceResponse(BaseModel):
 
 
 class CatalogAvailabilityResponse(BaseModel):
+    """Availability summary for catalog-backed features."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "description": "Whether metadata, thumbnails, and originals are available."
+        }
+    )
+
     metadata_queryable: bool
     thumbnails_available: bool
     originals_available: bool
 
 
 class IngestRunSummaryResponse(BaseModel):
+    """Summary of the most recent ingest run for a storage source."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "description": "Aggregate ingest counts and completion metadata."
+        }
+    )
+
     status: str
     files_seen: int
     files_created: int
@@ -62,6 +104,14 @@ class IngestRunSummaryResponse(BaseModel):
 
 
 class RecentFailureResponse(BaseModel):
+    """Recent watched-folder failures associated with a storage source."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "description": "A compact summary of a watched-folder failure."
+        }
+    )
+
     watched_folder_id: str
     status: str
     error_summary: str | None = None
@@ -69,6 +119,14 @@ class RecentFailureResponse(BaseModel):
 
 
 class StorageSourceStatusResponse(StorageSourceResponse):
+    """Expanded storage-source state including watched-folder health."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "description": "Storage-source registration details plus watched-folder and ingest status."
+        }
+    )
+
     alias_paths: list[str]
     watched_folder_count: int
     unreachable_watched_folder_count: int
@@ -78,16 +136,43 @@ class StorageSourceStatusResponse(StorageSourceResponse):
 
 
 class CreateWatchedFolderRequest(BaseModel):
-    alias_path: str
-    watched_path: str
-    display_name: str | None = None
+    """Create a watched folder relative to a registered storage source."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "description": "Register a watched folder beneath a storage-source alias."
+        }
+    )
+
+    alias_path: str = Field(description="Alias path that identifies the storage source.")
+    watched_path: str = Field(description="Path to watch beneath the alias root.")
+    display_name: str | None = Field(
+        default=None,
+        description="Optional label for the watched folder.",
+    )
 
 
 class UpdateWatchedFolderRequest(BaseModel):
-    is_enabled: bool
+    """Toggle whether a watched folder participates in ingest polling."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "description": "Enable or disable an existing watched folder."
+        }
+    )
+
+    is_enabled: bool = Field(description="Whether the watched folder should be active.")
 
 
 class WatchedFolderResponse(BaseModel):
+    """Watched-folder state and recent ingest activity."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "description": "Watched-folder identity, status, and last ingest summary."
+        }
+    )
+
     watched_folder_id: str
     storage_source_id: str | None = None
     scan_path: str
@@ -102,6 +187,8 @@ class WatchedFolderResponse(BaseModel):
 
 @router.post(
     "",
+    summary="Register storage source",
+    description="Create or re-register a storage root that the API manages.",
     response_model=StorageSourceResponse,
     status_code=status.HTTP_201_CREATED,
     responses={
@@ -124,7 +211,12 @@ def register_storage_source_route(body: RegisterStorageSourceRequest) -> Storage
     return StorageSourceResponse.model_validate(source)
 
 
-@router.get("", response_model=list[StorageSourceStatusResponse])
+@router.get(
+    "",
+    summary="List storage sources",
+    description="Return the current storage-source status for all registered roots.",
+    response_model=list[StorageSourceStatusResponse],
+)
 def list_storage_sources(
     db: Session = Depends(get_db),
 ) -> list[StorageSourceStatusResponse]:
@@ -134,6 +226,8 @@ def list_storage_sources(
 
 @router.get(
     "/{storage_source_id}",
+    summary="Get storage source",
+    description="Return the status for a single registered storage source.",
     response_model=StorageSourceStatusResponse,
     responses={
         status.HTTP_404_NOT_FOUND: {
@@ -151,7 +245,12 @@ def get_storage_source(
     return StorageSourceStatusResponse.model_validate(row)
 
 
-@router.get("/{storage_source_id}/watched-folders", response_model=list[WatchedFolderResponse])
+@router.get(
+    "/{storage_source_id}/watched-folders",
+    summary="List watched folders",
+    description="Return all watched folders attached to a storage source.",
+    response_model=list[WatchedFolderResponse],
+)
 def list_storage_source_watched_folders(
     storage_source_id: str,
     db: Session = Depends(get_db),
@@ -162,8 +261,15 @@ def list_storage_source_watched_folders(
 
 @router.post(
     "/{storage_source_id}/watched-folders",
+    summary="Create watched folder",
+    description="Create a watched folder for an existing storage source.",
     response_model=WatchedFolderResponse,
     status_code=status.HTTP_201_CREATED,
+    responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "description": "Watched folder validation failed",
+        }
+    },
 )
 def create_storage_source_watched_folder(
     storage_source_id: str,
@@ -187,7 +293,14 @@ def create_storage_source_watched_folder(
 
 @router.patch(
     "/{storage_source_id}/watched-folders/{watched_folder_id}",
+    summary="Update watched folder",
+    description="Enable or disable an existing watched folder.",
     response_model=WatchedFolderResponse,
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "description": "Watched folder not found",
+        }
+    },
 )
 def update_storage_source_watched_folder(
     storage_source_id: str,
@@ -211,7 +324,14 @@ def update_storage_source_watched_folder(
 
 @router.delete(
     "/{storage_source_id}/watched-folders/{watched_folder_id}",
+    summary="Delete watched folder",
+    description="Remove a watched folder from the storage source.",
     status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "description": "Watched folder not found",
+        }
+    },
 )
 def delete_storage_source_watched_folder(
     storage_source_id: str,
