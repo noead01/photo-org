@@ -159,6 +159,23 @@ class TestEncodeCursor:
         assert decoded_dt == expected_dt
         assert decoded_id == photo_id
 
+    def test_given_null_timestamp_when_encoding_then_preserves_null_boundary(self):
+        """
+        Given: A null timestamp
+        When: Encoding as cursor
+        Then: Decoded timestamp remains null and the photo ID is preserved
+        """
+        # Given
+        photo_id = "photo123"
+
+        # When
+        result = encode_cursor(None, photo_id)
+
+        # Then
+        decoded_dt, decoded_id = decode_cursor(result)
+        assert decoded_dt is None
+        assert decoded_id == photo_id
+
 
 class TestDecodeCursor:
     def test_given_valid_encoded_cursor_when_decoding_then_returns_original_datetime_and_photo_id(self):
