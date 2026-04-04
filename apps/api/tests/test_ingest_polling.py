@@ -250,6 +250,86 @@ def test_poll_registered_storage_sources_records_failed_outcome_for_late_reconci
     assert watched_folder_row["last_successful_scan_ts"] is None
 
 
+def test_poll_registered_storage_sources_defers_missing_file_reconciliation_until_scan_finishes(
+    tmp_path, monkeypatch
+):
+    import app.processing.ingest_polling as ingest_polling
+
+    database_url = f"sqlite:///{tmp_path / 'poll-deferred-reconcile.db'}"
+    upgrade_database(database_url)
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 4, 4, 12, 30, tzinfo=UTC)
+
+    root = tmp_path / "source-root"
+    watched = root / "imports"
+    watched.mkdir(parents=True)
+    first_path = watched / "first.jpg"
+    second_path = watched / "second.jpg"
+    _write_test_image(first_path)
+    _write_test_image(second_path)
+
+    with engine.begin() as connection:
+        source = create_storage_source(
+            connection,
+            display_name="Source",
+            marker_filename=MARKER_FILENAME,
+            marker_version=1,
+            now=now,
+        )
+        attach_storage_source_alias(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            now=now,
+        )
+        create_watched_folder(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            watched_path=watched.as_posix(),
+            display_name="Imports",
+            now=now,
+        )
+        write_source_marker(root, storage_source_id=source["storage_source_id"])
+
+    ingest_polling.poll_registered_storage_sources(
+        database_url=database_url,
+        now=now,
+        poll_chunk_size=10,
+    )
+    second_path.unlink()
+
+    reconciliation_calls: list[set[str]] = []
+    original_reconcile = ingest_polling.reconcile_watched_folder
+
+    def capture_reconcile(
+        connection,
+        *,
+        watched_folder_id,
+        observed_relative_paths,
+        now,
+        missing_file_grace_period_days,
+    ):
+        reconciliation_calls.append(set(observed_relative_paths))
+        return original_reconcile(
+            connection,
+            watched_folder_id=watched_folder_id,
+            observed_relative_paths=observed_relative_paths,
+            now=now,
+            missing_file_grace_period_days=missing_file_grace_period_days,
+        )
+
+    monkeypatch.setattr(ingest_polling, "reconcile_watched_folder", capture_reconcile)
+
+    ingest_polling.poll_registered_storage_sources(
+        database_url=database_url,
+        now=now,
+        poll_chunk_size=1,
+    )
+
+    assert reconciliation_calls == [{"first.jpg"}]
+
+
 def test_reconcile_directory_processes_a_watched_folder_end_to_end(tmp_path):
     from app.processing.ingest_polling import reconcile_directory
 

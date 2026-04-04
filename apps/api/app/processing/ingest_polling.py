@@ -151,7 +151,7 @@ def poll_registered_storage_sources(
                 for chunk_paths in _iter_chunks(iter_photo_files(scan_root), chunk_size=poll_chunk_size):
                     chunk_count += 1
                     with engine.begin() as connection:
-                        outcome, chunk_touched_photo_ids = _process_watched_folder_paths(
+                        outcome, chunk_touched_photo_ids = _process_watched_folder_chunk(
                             connection,
                             watched_folder_id=target.watched_folder_id,
                             source_root=scan_root,
@@ -180,19 +180,13 @@ def poll_registered_storage_sources(
                             error_messages=outcome.error_messages,
                         )
                 with engine.begin() as connection:
-                    touched_photo_ids.update(
-                        reconcile_watched_folder(
-                            connection,
-                            watched_folder_id=target.watched_folder_id,
-                            observed_relative_paths=observed_relative_paths,
-                            now=at,
-                            missing_file_grace_period_days=grace_period_days,
-                        )
-                    )
-                    refresh_photo_deleted_timestamps(
+                    _finalize_watched_folder_scan(
                         connection,
-                        photo_ids=touched_photo_ids,
+                        watched_folder_id=target.watched_folder_id,
+                        observed_relative_paths=observed_relative_paths,
+                        touched_photo_ids=touched_photo_ids,
                         now=at,
+                        missing_file_grace_period_days=grace_period_days,
                     )
                     record_watched_folder_scan_success(
                         connection,
@@ -261,7 +255,7 @@ def _iter_chunks(items: Iterable[Path], *, chunk_size: int) -> Iterator[list[Pat
         yield chunk
 
 
-def _process_watched_folder_paths(
+def _process_watched_folder_chunk(
     connection: Connection,
     *,
     watched_folder_id: str,
@@ -336,6 +330,27 @@ def _process_watched_folder_paths(
     )
 
 
+def _finalize_watched_folder_scan(
+    connection: Connection,
+    *,
+    watched_folder_id: str,
+    observed_relative_paths: set[str],
+    touched_photo_ids: set[str],
+    now: datetime,
+    missing_file_grace_period_days: int,
+) -> None:
+    touched_photo_ids.update(
+        reconcile_watched_folder(
+            connection,
+            watched_folder_id=watched_folder_id,
+            observed_relative_paths=observed_relative_paths,
+            now=now,
+            missing_file_grace_period_days=missing_file_grace_period_days,
+        )
+    )
+    refresh_photo_deleted_timestamps(connection, photo_ids=touched_photo_ids, now=now)
+
+
 def _reconcile_watched_folder_root(
     connection: Connection,
     *,
@@ -370,7 +385,7 @@ def _reconcile_watched_folder_root(
         now=now,
     )
     observed_relative_paths: set[str] = set()
-    outcome, touched_photo_ids = _process_watched_folder_paths(
+    outcome, touched_photo_ids = _process_watched_folder_chunk(
         connection,
         watched_folder_id=watched_folder_id,
         source_root=source_root,
@@ -380,16 +395,14 @@ def _reconcile_watched_folder_root(
         now=now,
         observed_relative_paths=observed_relative_paths,
     )
-    touched_photo_ids.update(
-        reconcile_watched_folder(
-            connection,
-            watched_folder_id=watched_folder_id,
-            observed_relative_paths=observed_relative_paths,
-            now=now,
-            missing_file_grace_period_days=missing_file_grace_period_days,
-        )
+    _finalize_watched_folder_scan(
+        connection,
+        watched_folder_id=watched_folder_id,
+        observed_relative_paths=observed_relative_paths,
+        touched_photo_ids=touched_photo_ids,
+        now=now,
+        missing_file_grace_period_days=missing_file_grace_period_days,
     )
-    refresh_photo_deleted_timestamps(connection, photo_ids=touched_photo_ids, now=now)
     return outcome
 
 
