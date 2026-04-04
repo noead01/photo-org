@@ -31,6 +31,7 @@ from app.storage import (
     storage_sources,
     watched_folders,
 )
+from pydantic import ValidationError
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -66,6 +67,52 @@ def _asset_id_by_manifest_path() -> dict[str, str]:
         asset["path"]: asset["asset_id"]
         for asset in _load_seed_manifest()["assets"]
     }
+
+
+def test_location_radius_validation_accepts_coordinates_and_defaults_radius():
+    filters = SearchFilters(location_radius={"latitude": 37.7749, "longitude": -122.4194})
+
+    assert filters.location_radius.latitude == 37.7749
+    assert filters.location_radius.longitude == -122.4194
+    assert filters.location_radius.radius_km == 50
+
+    request = SearchRequest(filters={"location_radius": {"latitude": 37.7749, "longitude": -122.4194}})
+
+    assert request.filters.location_radius.radius_km == 50
+
+
+def test_location_radius_validation_rejects_latitude_outside_bounds():
+    with pytest.raises(ValidationError) as exc_info:
+        SearchFilters(location_radius={"latitude": 91, "longitude": 0})
+
+    assert "latitude must be between -90 and 90" in str(exc_info.value)
+
+
+def test_location_radius_validation_rejects_longitude_outside_bounds():
+    with pytest.raises(ValidationError) as exc_info:
+        SearchFilters(location_radius={"latitude": 0, "longitude": 181})
+
+    assert "longitude must be between -180 and 180" in str(exc_info.value)
+
+
+def test_location_radius_validation_rejects_non_positive_radius_km():
+    with pytest.raises(ValidationError) as exc_info:
+        SearchFilters(location_radius={"latitude": 0, "longitude": 0, "radius_km": 0})
+
+    assert "radius_km must be greater than 0" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "location_radius",
+    [
+        {"latitude": float("nan"), "longitude": 0},
+        {"latitude": 0, "longitude": float("nan")},
+        {"latitude": 0, "longitude": 0, "radius_km": float("nan")},
+    ],
+)
+def test_location_radius_validation_rejects_non_finite_values(location_radius):
+    with pytest.raises(ValidationError):
+        SearchFilters(location_radius=location_radius)
 
 
 def _seed_search_fixture_catalog(connection) -> None:
@@ -353,6 +400,33 @@ class TestSearchServiceExecution:
 
         filters = SearchFilters(person_names=["inez", "grandma"])
         assert filters.model_dump().get("person_names") == ["inez", "grandma"]
+        request = SearchRequest(
+            filters=filters,
+            sort=SortSpec(by="shot_ts", dir="desc"),
+            page=PageSpec(limit=50),
+        )
+
+        service.execute(request)
+
+        mock_repo.search_photos.assert_called_once_with(
+            filters=filters,
+            sort=request.sort,
+            page=request.page,
+            text_query=None,
+        )
+        mock_repo.get_filtered_photo_ids.assert_called_once_with(filters, None)
+
+    def test_given_location_radius_when_executing_search_then_passes_location_radius_to_repository(self):
+        mock_repo = Mock()
+        service = SearchService(repo=mock_repo)
+
+        mock_repo.search_photos.return_value = ([], 0, None)
+        mock_repo.get_filtered_photo_ids.return_value = []
+        mock_repo.compute_facets.return_value = {}
+
+        filters = SearchFilters(
+            location_radius={"latitude": 37.7749, "longitude": -122.4194, "radius_km": 25}
+        )
         request = SearchRequest(
             filters=filters,
             sort=SortSpec(by="shot_ts", dir="desc"),
@@ -731,6 +805,267 @@ class TestPhotosRepositorySoftDeleteFiltering:
             photo_ids = repo.get_filtered_photo_ids(SearchFilters())
 
         assert photo_ids == ["active-photo"]
+
+    @staticmethod
+    def _insert_location_filter_photos(connection, now: datetime) -> None:
+        connection.execute(
+            insert(photos),
+            [
+                {
+                    "photo_id": "nearby-geotagged",
+                    "path": "photos/nearby-geotagged.jpg",
+                    "sha256": "e" * 64,
+                    "phash": None,
+                    "filesize": 100,
+                    "ext": "jpg",
+                    "created_ts": now,
+                    "modified_ts": now,
+                    "shot_ts": now,
+                    "shot_ts_source": None,
+                    "camera_make": "Apple",
+                    "camera_model": None,
+                    "software": None,
+                    "orientation": None,
+                    "gps_latitude": 37.7790,
+                    "gps_longitude": -122.4192,
+                    "gps_altitude": None,
+                    "updated_ts": now,
+                    "deleted_ts": None,
+                    "faces_count": 0,
+                    "faces_detected_ts": None,
+                },
+                {
+                    "photo_id": "nearby-other-camera",
+                    "path": "photos/nearby-other-camera.jpg",
+                    "sha256": "f" * 64,
+                    "phash": None,
+                    "filesize": 100,
+                    "ext": "jpg",
+                    "created_ts": now,
+                    "modified_ts": now,
+                    "shot_ts": now,
+                    "shot_ts_source": None,
+                    "camera_make": "Canon",
+                    "camera_model": None,
+                    "software": None,
+                    "orientation": None,
+                    "gps_latitude": 37.7840,
+                    "gps_longitude": -122.4090,
+                    "gps_altitude": None,
+                    "updated_ts": now,
+                    "deleted_ts": None,
+                    "faces_count": 0,
+                    "faces_detected_ts": None,
+                },
+                {
+                    "photo_id": "far-geotagged",
+                    "path": "photos/far-geotagged.jpg",
+                    "sha256": "g" * 64,
+                    "phash": None,
+                    "filesize": 100,
+                    "ext": "jpg",
+                    "created_ts": now,
+                    "modified_ts": now,
+                    "shot_ts": now,
+                    "shot_ts_source": None,
+                    "camera_make": "Apple",
+                    "camera_model": None,
+                    "software": None,
+                    "orientation": None,
+                    "gps_latitude": 34.0522,
+                    "gps_longitude": -118.2437,
+                    "gps_altitude": None,
+                    "updated_ts": now,
+                    "deleted_ts": None,
+                    "faces_count": 0,
+                    "faces_detected_ts": None,
+                },
+                {
+                    "photo_id": "missing-gps",
+                    "path": "photos/missing-gps.jpg",
+                    "sha256": "h" * 64,
+                    "phash": None,
+                    "filesize": 100,
+                    "ext": "jpg",
+                    "created_ts": now,
+                    "modified_ts": now,
+                    "shot_ts": now,
+                    "shot_ts_source": None,
+                    "camera_make": "Apple",
+                    "camera_model": None,
+                    "software": None,
+                    "orientation": None,
+                    "gps_latitude": None,
+                    "gps_longitude": None,
+                    "gps_altitude": None,
+                    "updated_ts": now,
+                    "deleted_ts": None,
+                    "faces_count": 0,
+                    "faces_detected_ts": None,
+                },
+            ],
+        )
+
+    def test_location_radius_filter_returns_only_nearby_geotagged_photos(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-location-radius-nearby.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        now = datetime(2026, 4, 1, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            self._insert_location_filter_photos(connection, now)
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            items, total, _ = repo.search_photos(
+                filters=SearchFilters(
+                    location_radius={
+                        "latitude": 37.7749,
+                        "longitude": -122.4194,
+                        "radius_km": 15,
+                    }
+                ),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+            )
+
+        assert {item["photo_id"] for item in items} == {
+            "nearby-geotagged",
+            "nearby-other-camera",
+        }
+        assert total == 2
+
+    def test_location_radius_filter_excludes_photos_with_null_gps_coordinates(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-location-radius-null-gps.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        now = datetime(2026, 4, 1, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            self._insert_location_filter_photos(connection, now)
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            items, total, _ = repo.search_photos(
+                filters=SearchFilters(
+                    location_radius={
+                        "latitude": 37.7749,
+                        "longitude": -122.4194,
+                        "radius_km": 500,
+                    }
+                ),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+            )
+
+        assert {item["photo_id"] for item in items} == {
+            "nearby-geotagged",
+            "nearby-other-camera",
+        }
+        assert total == 2
+
+    def test_location_radius_filter_composes_with_camera_make_using_and_semantics(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-location-radius-and-semantics.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        now = datetime(2026, 4, 1, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            self._insert_location_filter_photos(connection, now)
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            items, total, _ = repo.search_photos(
+                filters=SearchFilters(
+                    camera_make=["Apple"],
+                    location_radius={
+                        "latitude": 37.7749,
+                        "longitude": -122.4194,
+                        "radius_km": 15,
+                    },
+                ),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+            )
+
+        assert [item["photo_id"] for item in items] == ["nearby-geotagged"]
+        assert total == 1
+
+    def test_location_radius_filter_uses_spherical_distance_across_antimeridian(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-location-radius-antimeridian.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        now = datetime(2026, 4, 1, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            connection.execute(
+                insert(photos),
+                [
+                    {
+                        "photo_id": "cross-dateline-nearby",
+                        "path": "photos/cross-dateline-nearby.jpg",
+                        "sha256": "i" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": "Apple",
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": 0.0,
+                        "gps_longitude": -179.9,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                    {
+                        "photo_id": "cross-dateline-far",
+                        "path": "photos/cross-dateline-far.jpg",
+                        "sha256": "j" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": "Apple",
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": 0.0,
+                        "gps_longitude": -179.4,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                ],
+            )
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            items, total, _ = repo.search_photos(
+                filters=SearchFilters(
+                    location_radius={
+                        "latitude": 0.0,
+                        "longitude": 179.9,
+                        "radius_km": 30,
+                    }
+                ),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+            )
+
+        assert [item["photo_id"] for item in items] == ["cross-dateline-nearby"]
+        assert total == 1
 
     def test_date_filter_from_only_includes_start_of_day_matches(self, tmp_path):
         database_url = f"sqlite:///{tmp_path / 'search-date-filter-from-only.db'}"
