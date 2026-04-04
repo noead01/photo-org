@@ -120,6 +120,10 @@ Typical usage is expected to be:
 - authorized users confirm or correct face associations
 - users monitor ingestion status and recent issues from the UI
 
+For operator troubleshooting during long imports or background processing, the API also exposes `GET /api/v1/operations/activity`.
+That endpoint is read-only and intended for repeated polling by a UI or CLI.
+It summarizes whether the system is currently idle, actively polling watched folders, actively processing queued ingest work, or surfacing attention signals such as recent failures or stalled queue work.
+
 ## Current Documentation
 
 - [DESIGN.md](DESIGN.md): how the system is structured and how components interact

@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
 from app.routers.ingest_queue import router as ingest_queue_router
+from app.routers.operations import router as operations_router
 from app.routers.photos import router as photos_router
 from app.routers.storage_sources import router as storage_sources_router
 from app.openapi_docs import openapi_yaml_response
@@ -30,11 +31,16 @@ app = FastAPI(
             "name": "internal-ingest-queue",
             "description": "Worker-only queue processing endpoint.",
         },
+        {
+            "name": "operations",
+            "description": "Read-only operational activity and troubleshooting signals.",
+        },
     ],
     redoc_url=None,
 )
 
 app.include_router(ingest_queue_router, prefix="/api/v1")
+app.include_router(operations_router, prefix="/api/v1")
 app.include_router(photos_router, prefix="/api/v1")
 app.include_router(storage_sources_router, prefix="/api/v1")
 
