@@ -263,10 +263,14 @@ def test_poll_registered_storage_sources_defers_missing_file_reconciliation_unti
     root = tmp_path / "source-root"
     watched = root / "imports"
     watched.mkdir(parents=True)
-    first_path = watched / "first.jpg"
-    second_path = watched / "second.jpg"
-    _write_test_image(first_path)
-    _write_test_image(second_path)
+    paths = {
+        "first.jpg": watched / "first.jpg",
+        "second.jpg": watched / "second.jpg",
+        "third.jpg": watched / "third.jpg",
+        "fourth.jpg": watched / "fourth.jpg",
+    }
+    for path in paths.values():
+        _write_test_image(path)
 
     with engine.begin() as connection:
         source = create_storage_source(
@@ -297,7 +301,7 @@ def test_poll_registered_storage_sources_defers_missing_file_reconciliation_unti
         now=now,
         poll_chunk_size=10,
     )
-    second_path.unlink()
+    paths["second.jpg"].unlink()
 
     reconciliation_calls: list[set[str]] = []
     original_reconcile = ingest_polling.reconcile_watched_folder
@@ -321,13 +325,14 @@ def test_poll_registered_storage_sources_defers_missing_file_reconciliation_unti
 
     monkeypatch.setattr(ingest_polling, "reconcile_watched_folder", capture_reconcile)
 
-    ingest_polling.poll_registered_storage_sources(
+    result = ingest_polling.poll_registered_storage_sources(
         database_url=database_url,
         now=now,
         poll_chunk_size=1,
     )
 
-    assert reconciliation_calls == [{"first.jpg"}]
+    assert result.scanned == 3
+    assert reconciliation_calls == [{"first.jpg", "third.jpg", "fourth.jpg"}]
 
 
 def test_reconcile_directory_processes_a_watched_folder_end_to_end(tmp_path):
