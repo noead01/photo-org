@@ -138,7 +138,7 @@ OpenAPI contribution notes:
 - `GET /openapi.json` remains the canonical JSON schema emitted by FastAPI
 - `GET /openapi.yaml` serves the same schema as YAML for operators and docs consumers
 - `GET /docs` serves the Swagger UI docs surface
-- `apps/api/.generated/openapi.yaml` is generated locally or in CI and is ignored by git; do not commit it
+- `apps/api/.generated/openapi.yaml` is generated locally and is ignored by git; do not commit it
 
 The `pre-push` target is intentionally scoped to checks that are currently expected to pass on this repo state.
 As broader lint and type-check coverage is cleaned up, that target should expand rather than drift into a second undocumented workflow.
