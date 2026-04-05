@@ -625,7 +625,7 @@ def test_process_pending_rows_revives_failed_extracted_photo_row_on_idempotency_
         "modified_mtime_ns": 123456789,
         "idempotency_key": "wf-1:candidate-revive.jpg:123:123456789",
     }
-    queue_store.enqueue(
+    candidate_queue_id = queue_store.enqueue(
         payload_type="ingest_candidate",
         payload=candidate_payload,
         idempotency_key=candidate_payload["idempotency_key"],
@@ -639,6 +639,13 @@ def test_process_pending_rows_revives_failed_extracted_photo_row_on_idempotency_
         payload_type="extracted_photo",
         payload=stale_extracted_payload,
         idempotency_key="extracted:shared-photo-id",
+    )
+    base_time = datetime(2024, 1, 1, tzinfo=UTC)
+    set_queue_row_enqueued_ts(database_url, candidate_queue_id, enqueued_ts=base_time)
+    set_queue_row_enqueued_ts(
+        database_url,
+        extracted_queue_id,
+        enqueued_ts=base_time + timedelta(seconds=1),
     )
     engine = create_engine(database_url, future=True)
     with engine.begin() as connection:
@@ -721,7 +728,7 @@ def test_process_pending_rows_requeues_completed_extracted_photo_row_when_payloa
         "modified_mtime_ns": 123456789,
         "idempotency_key": "wf-1:candidate-refresh.jpg:123:123456789",
     }
-    queue_store.enqueue(
+    candidate_queue_id = queue_store.enqueue(
         payload_type="ingest_candidate",
         payload=candidate_payload,
         idempotency_key=candidate_payload["idempotency_key"],
@@ -741,6 +748,13 @@ def test_process_pending_rows_requeues_completed_extracted_photo_row_when_payloa
         payload_type="extracted_photo",
         payload=stale_extracted_payload,
         idempotency_key="extracted:shared-photo-id",
+    )
+    base_time = datetime(2024, 1, 1, tzinfo=UTC)
+    set_queue_row_enqueued_ts(database_url, candidate_queue_id, enqueued_ts=base_time)
+    set_queue_row_enqueued_ts(
+        database_url,
+        extracted_queue_id,
+        enqueued_ts=base_time + timedelta(seconds=1),
     )
     engine = create_engine(database_url, future=True)
     with engine.begin() as connection:
@@ -797,6 +811,112 @@ def test_process_pending_rows_requeues_completed_extracted_photo_row_when_payloa
     )
 
     result = process_pending_ingest_queue(database_url, limit=10)
+
+    completed_rows = queue_store.list_by_status("completed")
+    pending_rows = queue_store.list_by_status("pending")
+    assert result.processed == 1
+    assert result.failed == 0
+    assert result.retryable_errors == 0
+    assert len(completed_rows) == 1
+    assert completed_rows[0].payload_type == "ingest_candidate"
+    assert len(pending_rows) == 1
+    assert pending_rows[0].ingest_queue_id == extracted_queue_id
+    assert pending_rows[0].payload_type == "extracted_photo"
+    assert pending_rows[0].payload_json == refreshed_payload
+    assert pending_rows[0].last_error is None
+
+
+def test_process_pending_rows_refreshes_pending_extracted_photo_row_when_payload_refreshes(
+    tmp_path, monkeypatch
+):
+    database_url = f"sqlite:///{tmp_path / 'queue-processor-ingest-candidate-refresh-pending.db'}"
+    upgrade_database(database_url)
+    queue_store = IngestQueueStore(database_url)
+
+    candidate_payload = {
+        "payload_version": 1,
+        "storage_source_id": "source-1",
+        "watched_folder_id": "wf-1",
+        "canonical_path": "/library/candidate-refresh-pending.jpg",
+        "runtime_path": str((tmp_path / "candidate-refresh-pending.jpg").resolve()),
+        "relative_path": "candidate-refresh-pending.jpg",
+        "filesize": 123,
+        "modified_ts": "2024-01-02T00:00:00+00:00",
+        "modified_mtime_ns": 123456789,
+        "idempotency_key": "wf-1:candidate-refresh-pending.jpg:123:123456789",
+    }
+    candidate_queue_id = queue_store.enqueue(
+        payload_type="ingest_candidate",
+        payload=candidate_payload,
+        idempotency_key=candidate_payload["idempotency_key"],
+    )
+
+    stale_extracted_payload = build_payload(
+        photo_id="shared-photo-id",
+        path="/library/stale-pending.jpg",
+        detections=[],
+        warnings=["face detection failed: detector exploded"],
+        payload_version=1,
+        storage_source_id="source-1",
+        watched_folder_id="wf-1",
+        relative_path="candidate-refresh-pending.jpg",
+    )
+    extracted_queue_id = queue_store.enqueue(
+        payload_type="extracted_photo",
+        payload=stale_extracted_payload,
+        idempotency_key="extracted:shared-photo-id",
+    )
+    base_time = datetime(2024, 1, 1, tzinfo=UTC)
+    set_queue_row_enqueued_ts(database_url, candidate_queue_id, enqueued_ts=base_time)
+    set_queue_row_enqueued_ts(
+        database_url,
+        extracted_queue_id,
+        enqueued_ts=base_time + timedelta(seconds=1),
+    )
+
+    refreshed_payload = build_payload(
+        photo_id="shared-photo-id",
+        path="/library/candidate-refresh-pending.jpg",
+        thumbnail_jpeg="dGh1bWI=",
+        thumbnail_mime_type="image/jpeg",
+        thumbnail_width=128,
+        thumbnail_height=128,
+        detections=[
+            {
+                "face_id": "face-1",
+                "bbox_x": 1,
+                "bbox_y": 2,
+                "bbox_w": 3,
+                "bbox_h": 4,
+                "bitmap": "ZmFjZS1iaXRtYXA=",
+                "embedding": None,
+                "provenance": {"detector": "fresh"},
+            }
+        ],
+        warnings=[],
+        payload_version=1,
+        storage_source_id="source-1",
+        watched_folder_id="wf-1",
+        relative_path="candidate-refresh-pending.jpg",
+    )
+
+    def fake_process_candidate_payload(database_url_arg, *, payload, face_detector=None):
+        assert database_url_arg == database_url
+        assert payload == candidate_payload
+        return ExtractionResult(
+            extracted_payload=refreshed_payload,
+            reused_existing_artifacts=False,
+            analysis_performed=True,
+        )
+
+    monkeypatch.setattr(
+        ingest_queue_processor,
+        "process_candidate_payload",
+        fake_process_candidate_payload,
+        raising=False,
+    )
+
+    result = process_pending_ingest_queue(database_url, limit=1)
 
     completed_rows = queue_store.list_by_status("completed")
     pending_rows = queue_store.list_by_status("pending")

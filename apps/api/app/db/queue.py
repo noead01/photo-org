@@ -137,7 +137,7 @@ class IngestQueueStore:
         )
         return bool(result.rowcount)
 
-    def requeue_terminal_in_transaction(
+    def refresh_nonprocessing_in_transaction(
         self,
         ingest_queue_id: str,
         *,
@@ -147,7 +147,7 @@ class IngestQueueStore:
         result = connection.execute(
             update(ingest_queue)
             .where(ingest_queue.c.ingest_queue_id == ingest_queue_id)
-            .where(ingest_queue.c.status.in_(("failed", "completed")))
+            .where(ingest_queue.c.status.in_(("pending", "failed", "completed")))
             .values(
                 status="pending",
                 payload_json=payload,
