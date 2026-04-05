@@ -408,6 +408,25 @@ def test_operational_activity_history_keeps_polling_and_queue_pagination_separat
     assert payload["ingest_queue"]["next_cursor"] is not None
 
 
+def test_operational_activity_history_rejects_malformed_cursor_with_client_error(
+    tmp_path, monkeypatch
+):
+    database_url = f"sqlite:///{tmp_path / 'operational-activity-history-bad-cursor.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    client = TestClient(app)
+
+    response = client.get(
+        "/api/v1/operations/activity/history",
+        params={"polling_cursor": "not-a-valid-cursor"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Invalid polling_cursor"}
+
+
 def _seed_source_with_watched_folder(*, tmp_path, monkeypatch, database_name: str, database_url: str):
     from app.services.storage_sources import attach_storage_source_alias, create_storage_source
     from app.services.watched_folders import create_watched_folder

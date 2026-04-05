@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 from datetime import UTC, datetime
 from typing import Any
@@ -10,6 +11,10 @@ from sqlalchemy.engine import Connection
 
 from app.db.queue import _processing_lease_cutoff
 from app.storage import ingest_queue, ingest_runs, watched_folders
+
+
+class InvalidOperationalActivityCursor(ValueError):
+    pass
 
 
 def get_operational_activity(
@@ -188,7 +193,7 @@ def _load_polling_history(
         .where(ingest_runs.c.watched_folder_id.is_not(None))
     )
 
-    cursor_values = _decode_cursor(cursor)
+    cursor_values = _decode_cursor(cursor, parameter_name="polling_cursor")
     if cursor_values is not None:
         query = query.where(_polling_history_after_cursor(cursor_values))
 
@@ -238,7 +243,7 @@ def _load_queue_history(
     cursor: str | None,
 ) -> dict[str, Any]:
     normalized_limit = max(1, limit)
-    cursor_values = _decode_cursor(cursor)
+    cursor_values = _decode_cursor(cursor, parameter_name="queue_cursor")
     event_ts = func.coalesce(
         ingest_queue.c.processed_ts,
         ingest_queue.c.last_attempt_ts,
@@ -331,15 +336,22 @@ def _encode_cursor(
     return base64.urlsafe_b64encode(raw).decode("ascii")
 
 
-def _decode_cursor(cursor: str | None) -> dict[str, Any] | None:
+def _decode_cursor(
+    cursor: str | None,
+    *,
+    parameter_name: str,
+) -> dict[str, Any] | None:
     if not cursor:
         return None
-    payload = json.loads(base64.urlsafe_b64decode(cursor.encode("ascii")))
-    return {
-        "completed_ts": _parse_cursor_timestamp(payload.get("completed_ts")),
-        "started_ts": _parse_cursor_timestamp(payload.get("started_ts")),
-        "row_id": str(payload["row_id"]),
-    }
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(cursor.encode("ascii")))
+        return {
+            "completed_ts": _parse_cursor_timestamp(payload.get("completed_ts")),
+            "started_ts": _parse_cursor_timestamp(payload.get("started_ts")),
+            "row_id": str(payload["row_id"]),
+        }
+    except (KeyError, ValueError, TypeError, binascii.Error, json.JSONDecodeError) as exc:
+        raise InvalidOperationalActivityCursor(parameter_name) from exc
 
 
 def _parse_cursor_timestamp(value: str | None) -> datetime | None:

@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_db
 from app.services.operational_activity import (
+    InvalidOperationalActivityCursor,
     get_operational_activity,
     get_operational_activity_history,
 )
@@ -164,11 +165,14 @@ def get_operational_activity_history_endpoint(
     queue_cursor: str | None = None,
     db: Session = Depends(get_db),
 ) -> OperationalActivityHistoryResponse:
-    payload = get_operational_activity_history(
-        db.connection(),
-        polling_limit=polling_limit,
-        polling_cursor=polling_cursor,
-        queue_limit=queue_limit,
-        queue_cursor=queue_cursor,
-    )
+    try:
+        payload = get_operational_activity_history(
+            db.connection(),
+            polling_limit=polling_limit,
+            polling_cursor=polling_cursor,
+            queue_limit=queue_limit,
+            queue_cursor=queue_cursor,
+        )
+    except InvalidOperationalActivityCursor as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid {exc}") from exc
     return OperationalActivityHistoryResponse.model_validate(payload)
