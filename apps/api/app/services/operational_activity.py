@@ -67,10 +67,12 @@ def _list_active_polling(connection: Connection) -> list[dict[str, Any]]:
 
 
 def _build_polling_live_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
-    files_seen_values = [item["files_seen"] for item in items if item["files_seen"] is not None]
+    files_seen = None
+    if all(item["files_seen"] is not None for item in items):
+        files_seen = sum(int(item["files_seen"]) for item in items)
     return {
         "active_count": len(items),
-        "files_seen": sum(files_seen_values) if files_seen_values else 0,
+        "files_seen": files_seen,
         "estimated_files_total": None,
         "percent_complete": None,
     }
@@ -114,7 +116,7 @@ def _load_live_ingest_queue(
                 "path": _extract_queue_path(row["payload_json"]),
                 "last_attempt_ts": _iso_utc(last_attempt_ts),
                 "is_stalled": is_stalled,
-                "processed_count": 0,
+                "processed_count": None,
                 "estimated_total": None,
                 "percent_complete": None,
             }
@@ -126,7 +128,7 @@ def _load_live_ingest_queue(
             "pending_count": pending_count,
             "processing_count": processing_count,
             "stalled_count": stalled_count,
-            "processed_count": 0,
+            "processed_count": None,
             "estimated_total": None,
             "percent_complete": None,
         },

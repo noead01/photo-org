@@ -206,7 +206,7 @@ def test_operational_activity_api_returns_active_queue_work_with_summary(tmp_pat
     assert payload["ingest_queue"]["summary"]["pending_count"] == 1
     assert payload["ingest_queue"]["summary"]["processing_count"] == 1
     assert payload["ingest_queue"]["summary"]["stalled_count"] == 0
-    assert payload["ingest_queue"]["summary"]["processed_count"] == 0
+    assert payload["ingest_queue"]["summary"]["processed_count"] is None
     assert payload["ingest_queue"]["summary"]["estimated_total"] is None
     assert payload["ingest_queue"]["summary"]["percent_complete"] is None
     assert payload["ingest_queue"]["items"][0]["ingest_queue_id"] == "queue-processing"
@@ -214,7 +214,7 @@ def test_operational_activity_api_returns_active_queue_work_with_summary(tmp_pat
     assert payload["ingest_queue"]["items"][0]["path"] == "queued/active.jpg"
     assert payload["ingest_queue"]["items"][0]["last_attempt_ts"] is not None
     assert payload["ingest_queue"]["items"][0]["is_stalled"] is False
-    assert payload["ingest_queue"]["items"][0]["processed_count"] == 0
+    assert payload["ingest_queue"]["items"][0]["processed_count"] is None
     assert payload["ingest_queue"]["items"][0]["estimated_total"] is None
     assert payload["ingest_queue"]["items"][0]["percent_complete"] is None
 
@@ -254,7 +254,7 @@ def test_operational_activity_api_keeps_unresolved_stalled_queue_work_visible(tm
     assert payload["ingest_queue"]["summary"]["pending_count"] == 0
     assert payload["ingest_queue"]["summary"]["processing_count"] == 0
     assert payload["ingest_queue"]["summary"]["stalled_count"] == 1
-    assert payload["ingest_queue"]["summary"]["processed_count"] == 0
+    assert payload["ingest_queue"]["summary"]["processed_count"] is None
     assert payload["ingest_queue"]["summary"]["estimated_total"] is None
     assert payload["ingest_queue"]["summary"]["percent_complete"] is None
     assert payload["ingest_queue"]["items"][0]["ingest_queue_id"] == "queue-stalled"
