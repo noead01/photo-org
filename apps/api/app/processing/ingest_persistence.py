@@ -44,6 +44,25 @@ def build_photo_record(path: Path, *, canonical_path: str) -> PhotoRecord:
     stat = path.stat()
     image_metadata = extract_image_metadata(path)
     sha256 = _sha256_file(path)
+    return build_photo_record_from_sha(
+        path,
+        canonical_path=canonical_path,
+        sha256=sha256,
+        stat=stat,
+        image_metadata=image_metadata,
+    )
+
+
+def build_photo_record_from_sha(
+    path: Path,
+    *,
+    canonical_path: str,
+    sha256: str,
+    stat=None,
+    image_metadata=None,
+) -> PhotoRecord:
+    stat = stat or path.stat()
+    image_metadata = image_metadata or extract_image_metadata(path)
     photo_id = str(uuid5(NAMESPACE_URL, f"{canonical_path}:{sha256}"))
 
     return PhotoRecord(
@@ -64,6 +83,10 @@ def build_photo_record(path: Path, *, canonical_path: str) -> PhotoRecord:
         gps_longitude=image_metadata.gps_longitude,
         gps_altitude=image_metadata.gps_altitude,
     )
+
+
+def compute_photo_sha256(path: Path) -> str:
+    return _sha256_file(path)
 
 
 def build_ingest_submission(
@@ -135,6 +158,7 @@ def serialize_reused_content_submission(
     record: PhotoRecord,
     candidate_payload: dict,
     warnings: list[str],
+    detections: list[dict] | None = None,
 ) -> dict:
     payload = _serialize_record(record)
     payload.update(
@@ -143,11 +167,44 @@ def serialize_reused_content_submission(
             "storage_source_id": candidate_payload["storage_source_id"],
             "watched_folder_id": candidate_payload["watched_folder_id"],
             "relative_path": candidate_payload["relative_path"],
-            "detections": [],
+            "detections": _serialize_detections(detections or []),
             "warnings": warnings,
         }
     )
     return payload
+
+
+def lookup_existing_artifacts_by_sha(
+    connection: Connection,
+    sha256: str,
+) -> dict[str, object | None] | None:
+    rows = connection.execute(
+        select(
+            photos.c.photo_id,
+            photos.c.shot_ts,
+            photos.c.shot_ts_source,
+            photos.c.camera_make,
+            photos.c.camera_model,
+            photos.c.software,
+            photos.c.orientation,
+            photos.c.gps_latitude,
+            photos.c.gps_longitude,
+            photos.c.gps_altitude,
+            photos.c.thumbnail_jpeg,
+            photos.c.thumbnail_mime_type,
+            photos.c.thumbnail_width,
+            photos.c.thumbnail_height,
+            photos.c.faces_count,
+            photos.c.faces_detected_ts,
+        ).where(photos.c.sha256 == sha256)
+    ).mappings().all()
+
+    for row in rows:
+        reusable = _build_reusable_artifacts_payload(connection, row)
+        if reusable is not None:
+            return reusable
+
+    return None
 
 
 def upsert_photo(connection: Connection, record: PhotoRecord) -> bool:
@@ -338,6 +395,59 @@ def _face_row(photo_id: str, detection: dict) -> dict[str, object]:
     }
 
 
+def _build_reusable_artifacts_payload(
+    connection: Connection,
+    row: dict[str, object | None],
+) -> dict[str, object | None] | None:
+    if (
+        row["thumbnail_jpeg"] is None
+        or row["thumbnail_mime_type"] is None
+        or row["thumbnail_width"] is None
+        or row["thumbnail_height"] is None
+        or row["faces_detected_ts"] is None
+    ):
+        return None
+
+    detections = connection.execute(
+        select(
+            faces.c.face_id,
+            faces.c.person_id,
+            faces.c.bbox_x,
+            faces.c.bbox_y,
+            faces.c.bbox_w,
+            faces.c.bbox_h,
+            faces.c.bitmap,
+            faces.c.embedding,
+            faces.c.provenance,
+        )
+        .where(faces.c.photo_id == row["photo_id"])
+        .order_by(faces.c.face_id)
+    ).mappings().all()
+
+    if int(row["faces_count"] or 0) != len(detections):
+        return None
+
+    return {
+        "photo_id": row["photo_id"],
+        "shot_ts": row["shot_ts"],
+        "shot_ts_source": row["shot_ts_source"],
+        "camera_make": row["camera_make"],
+        "camera_model": row["camera_model"],
+        "software": row["software"],
+        "orientation": row["orientation"],
+        "gps_latitude": row["gps_latitude"],
+        "gps_longitude": row["gps_longitude"],
+        "gps_altitude": row["gps_altitude"],
+        "thumbnail_jpeg": row["thumbnail_jpeg"],
+        "thumbnail_mime_type": row["thumbnail_mime_type"],
+        "thumbnail_width": row["thumbnail_width"],
+        "thumbnail_height": row["thumbnail_height"],
+        "faces_count": int(row["faces_count"] or 0),
+        "faces_detected_ts": row["faces_detected_ts"],
+        "detections": [dict(detection) for detection in detections],
+    }
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -401,6 +511,9 @@ __all__ = [
     "build_ingest_candidate_submission",
     "build_ingest_submission",
     "build_photo_record",
+    "build_photo_record_from_sha",
+    "compute_photo_sha256",
+    "lookup_existing_artifacts_by_sha",
     "serialize_extracted_content_submission",
     "serialize_reused_content_submission",
     "store_face_detections",
