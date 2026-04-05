@@ -1428,6 +1428,10 @@ def test_duplicate_sha_candidate_reuses_complete_artifacts_even_when_an_incomple
     original_photo = load_photo_row(db_url, original_canonical_path)
     assert original_photo["thumbnail_mime_type"] == "image/jpeg"
     assert original_photo["faces_count"] == 1
+    original_file = load_photo_file_row(db_url, "original.jpg")
+    assert original_file["photo_id"] == original_photo["photo_id"]
+    assert original_file["watched_folder_id"] == _watched_folder_id
+    assert original_file["lifecycle_state"] == "active"
 
     shutil.copy2(source_asset, duplicate_path)
     result = poll_registered_storage_sources(database_url=db_url, now=now + timedelta(minutes=1))
@@ -1443,30 +1447,36 @@ def test_duplicate_sha_candidate_reuses_complete_artifacts_even_when_an_incomple
         limit=10,
         face_detector=RaisingFaceDetector(),
     )
+    persist_reuse_pass = process_pending_ingest_queue(
+        db_url,
+        limit=10,
+        face_detector=RaisingFaceDetector(),
+    )
 
     assert reuse_pass.processed == 1
+    assert persist_reuse_pass.processed == 1
     pending_rows = load_pending_queue_rows(db_url)
-    reused_payload = next(
-        row.payload_json
-        for row in pending_rows
-        if row.payload_type == "extracted_photo" and row.payload_json["relative_path"] == "dup.jpg"
-    )
-    assert reused_payload["path"] == duplicate_canonical_path
-    assert base64.b64decode(reused_payload["thumbnail_jpeg"]) == original_photo["thumbnail_jpeg"]
-    assert reused_payload["faces_count"] == 1
-    assert reused_payload["detections"] == [
-        {
-            "face_id": "face-1",
-            "bbox_x": 10,
-            "bbox_y": 11,
-            "bbox_w": 12,
-            "bbox_h": 13,
-            "bitmap": "ZXhpc3RpbmctZmFjZQ==",
-            "embedding": None,
-            "provenance": {"detector": "existing"},
-            "person_id": None,
-        }
-    ]
+    assert pending_rows == []
+
+    engine = create_engine(db_url, future=True)
+    with engine.connect() as connection:
+        same_sha_count = connection.execute(
+            select(func.count())
+            .select_from(photos)
+            .where(photos.c.sha256 == original_photo["sha256"])
+        ).scalar_one()
+    assert same_sha_count == 1
+
+    updated_photo = load_photo_row_by_id(db_url, original_photo["photo_id"])
+    assert updated_photo["path"] == duplicate_canonical_path
+
+    duplicate_file = load_photo_file_row(db_url, "dup.jpg")
+    assert duplicate_file["photo_id"] == original_photo["photo_id"]
+    assert duplicate_file["watched_folder_id"] == _watched_folder_id
+    assert duplicate_file["lifecycle_state"] == "active"
+
+    file_rows = load_photo_file_rows(db_url, original_photo["photo_id"])
+    assert [row["relative_path"] for row in file_rows] == ["dup.jpg", "original.jpg"]
 
 
 def test_poll_registered_storage_sources_preserves_existing_face_detection_timestamp(

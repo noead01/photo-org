@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import create_engine, select, update
+from sqlalchemy import create_engine, insert, select, update
 from sqlalchemy.engine import Connection
 
 from app.db.queue import IngestQueueStore
@@ -13,7 +13,7 @@ from app.services.ingest_queue_processor import (
     PROCESSING_LEASE_SECONDS,
     process_pending_ingest_queue,
 )
-from app.storage import faces, photos
+from app.storage import faces, photo_files, photos, watched_folders
 from photoorg_db_schema import ingest_queue, ingest_run_files, ingest_runs
 
 
@@ -84,6 +84,17 @@ def load_face_rows(database_url: str, photo_id: str) -> list[dict]:
             )
             .where(faces.c.photo_id == photo_id)
             .order_by(faces.c.face_id)
+        ).mappings()
+    return [dict(row) for row in rows]
+
+
+def load_photo_file_rows(database_url: str, photo_id: str) -> list[dict]:
+    engine = create_engine(database_url, future=True)
+    with engine.connect() as connection:
+        rows = connection.execute(
+            select(photo_files)
+            .where(photo_files.c.photo_id == photo_id)
+            .order_by(photo_files.c.relative_path)
         ).mappings()
     return [dict(row) for row in rows]
 
@@ -810,6 +821,21 @@ def test_process_pending_rows_persists_payload_faces_for_extracted_photo_without
     database_url = f"sqlite:///{tmp_path / 'queue-processor-extracted-photo.db'}"
     upgrade_database(database_url)
     queue_store = IngestQueueStore(database_url)
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(watched_folders).values(
+                watched_folder_id="wf-1",
+                scan_path="/library/imports",
+                storage_source_id="source-1",
+                relative_path="imports",
+                display_name="Imports",
+                is_enabled=1,
+                availability_state="active",
+                created_ts=datetime(2024, 1, 1, tzinfo=UTC),
+                updated_ts=datetime(2024, 1, 1, tzinfo=UTC),
+            )
+        )
 
     extracted_payload = serialize_extracted_content_submission(
         record=ingest_queue_processor.PhotoRecord(
@@ -891,6 +917,17 @@ def test_process_pending_rows_persists_payload_faces_for_extracted_photo_without
     assert len(completed_rows) == 1
     assert completed_rows[0].payload_type == "extracted_photo"
     assert completed_rows[0].last_error is None
+    photo_file_rows = load_photo_file_rows(database_url, "photo-extracted-1")
+    assert len(photo_file_rows) == 1
+    assert photo_file_rows[0]["photo_id"] == "photo-extracted-1"
+    assert photo_file_rows[0]["watched_folder_id"] == "wf-1"
+    assert photo_file_rows[0]["relative_path"] == "extracted.jpg"
+    assert photo_file_rows[0]["filename"] == "extracted.jpg"
+    assert photo_file_rows[0]["extension"] == "jpg"
+    assert photo_file_rows[0]["filesize"] == 123
+    assert photo_file_rows[0]["lifecycle_state"] == "active"
+    assert photo_file_rows[0]["missing_ts"] is None
+    assert photo_file_rows[0]["deleted_ts"] is None
     assert len(run_rows) == 1
     assert run_rows[0]["status"] == "completed"
     assert run_rows[0]["files_seen"] == 1
@@ -901,6 +938,119 @@ def test_process_pending_rows_persists_payload_faces_for_extracted_photo_without
     assert file_rows[0]["path"] == "/library/extracted.jpg"
     assert file_rows[0]["outcome"] == "completed"
     assert file_rows[0]["error_detail"] is None
+
+
+def test_process_pending_rows_reuses_existing_photo_row_for_duplicate_sha_extracted_payload(
+    tmp_path,
+):
+    database_url = f"sqlite:///{tmp_path / 'queue-processor-extracted-photo-duplicate-sha.db'}"
+    upgrade_database(database_url)
+    queue_store = IngestQueueStore(database_url)
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(watched_folders).values(
+                watched_folder_id="wf-1",
+                scan_path="/library/imports",
+                storage_source_id="source-1",
+                relative_path="imports",
+                display_name="Imports",
+                is_enabled=1,
+                availability_state="active",
+                created_ts=datetime(2024, 1, 1, tzinfo=UTC),
+                updated_ts=datetime(2024, 1, 1, tzinfo=UTC),
+            )
+        )
+        connection.execute(
+            insert(photos).values(
+                photo_id="photo-existing",
+                path="/library/original.jpg",
+                sha256="d" * 64,
+                phash=None,
+                filesize=100,
+                ext="jpg",
+                created_ts=datetime(2024, 1, 1, tzinfo=UTC),
+                modified_ts=datetime(2024, 1, 1, tzinfo=UTC),
+                shot_ts=None,
+                shot_ts_source=None,
+                camera_make=None,
+                camera_model=None,
+                software=None,
+                orientation=None,
+                gps_latitude=None,
+                gps_longitude=None,
+                gps_altitude=None,
+                thumbnail_jpeg=b"old-thumb",
+                thumbnail_mime_type="image/jpeg",
+                thumbnail_width=64,
+                thumbnail_height=64,
+                updated_ts=datetime(2024, 1, 1, tzinfo=UTC),
+                deleted_ts=None,
+                faces_count=1,
+                faces_detected_ts=datetime(2024, 1, 1, tzinfo=UTC),
+            )
+        )
+    extracted_payload = serialize_extracted_content_submission(
+        record=ingest_queue_processor.PhotoRecord(
+            photo_id="photo-new-path",
+            path="/library/duplicate.jpg",
+            sha256="d" * 64,
+            filesize=123,
+            ext="jpg",
+            created_ts=datetime(2024, 1, 2, tzinfo=UTC),
+            modified_ts=datetime(2024, 1, 3, tzinfo=UTC),
+            shot_ts=None,
+            shot_ts_source=None,
+            camera_make=None,
+            camera_model=None,
+            software=None,
+            orientation=None,
+            gps_latitude=None,
+            gps_longitude=None,
+            gps_altitude=None,
+            thumbnail_jpeg=b"thumb",
+            thumbnail_mime_type="image/jpeg",
+            thumbnail_width=128,
+            thumbnail_height=96,
+            faces_count=1,
+        ),
+        storage_source_id="source-1",
+        watched_folder_id="wf-1",
+        relative_path="duplicate.jpg",
+        detections=[
+            {
+                "face_id": "face-from-payload",
+                "bbox_x": 11,
+                "bbox_y": 22,
+                "bbox_w": 33,
+                "bbox_h": 44,
+                "bitmap": b"face-bitmap",
+                "embedding": None,
+                "provenance": {"detector": "staged"},
+            }
+        ],
+        warnings=[],
+    )
+    queue_store.enqueue(
+        payload_type="extracted_photo",
+        payload=extracted_payload,
+        idempotency_key="extracted:photo-new-path",
+    )
+
+    result = process_pending_ingest_queue(
+        database_url,
+        limit=10,
+        face_detector=RaisingFaceDetector("should not run"),
+    )
+
+    assert result.processed == 1
+    assert result.failed == 0
+    assert result.retryable_errors == 0
+    photo = load_photo_row(database_url, "photo-existing")
+    assert photo["photo_id"] == "photo-existing"
+    assert photo["path"] == "/library/duplicate.jpg"
+    file_rows = load_photo_file_rows(database_url, "photo-existing")
+    assert [row["relative_path"] for row in file_rows] == ["duplicate.jpg"]
 
 
 def test_process_pending_rows_marks_detection_complete_when_no_faces_found(tmp_path):

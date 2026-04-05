@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from dataclasses import dataclass
 from pathlib import Path
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.engine import Connection
 
@@ -16,8 +18,11 @@ from app.processing.ingest_persistence import (
     deserialize_photo_record,
     store_face_detections,
     upsert_photo,
+    upsert_source_photo,
 )
+from app.services.file_reconciliation import activate_observed_file
 from app.services.ingest_extraction_worker import process_candidate_payload
+from app.storage import photo_files
 
 
 @dataclass(frozen=True)
@@ -268,9 +273,14 @@ def _process_claimed_row(
         return None, _payload_warning_detail(extraction.extracted_payload)
 
     record = payload_to_photo_record(claimed_row.payload_json)
-    created = upsert_photo(connection, record)
-
     if claimed_row.payload_type == "extracted_photo":
+        created, photo_id = upsert_source_photo(connection, record)
+        record = PhotoRecord(**{**record.__dict__, "photo_id": photo_id})
+        _activate_source_backed_file_instance(
+            connection,
+            payload=claimed_row.payload_json,
+            record=record,
+        )
         store_face_detections(
             connection,
             record.photo_id,
@@ -278,6 +288,7 @@ def _process_claimed_row(
         )
         return created, _payload_warning_detail(claimed_row.payload_json)
 
+    created = upsert_photo(connection, record)
     detection_warning = _apply_face_detection(
         connection,
         record,
@@ -340,6 +351,37 @@ def _payload_warning_detail(payload: dict) -> str | None:
 
 def _extracted_payload_idempotency_key(payload: dict) -> str:
     return f"extracted:{payload['photo_id']}"
+
+
+def _activate_source_backed_file_instance(
+    connection: Connection,
+    *,
+    payload: dict,
+    record: PhotoRecord,
+) -> None:
+    watched_folder_id = payload.get("watched_folder_id")
+    relative_path = payload.get("relative_path")
+    if not isinstance(watched_folder_id, str) or not isinstance(relative_path, str):
+        return
+
+    existing_created_ts = connection.execute(
+        select(photo_files.c.created_ts).where(
+            photo_files.c.watched_folder_id == watched_folder_id,
+            photo_files.c.relative_path == relative_path,
+        )
+    ).scalar_one_or_none()
+    activate_observed_file(
+        connection,
+        watched_folder_id=watched_folder_id,
+        photo_id=record.photo_id,
+        relative_path=relative_path,
+        filename=Path(relative_path).name,
+        extension=record.ext or None,
+        filesize=record.filesize,
+        created_ts=existing_created_ts or record.created_ts,
+        modified_ts=record.modified_ts,
+        now=datetime.now(tz=UTC),
+    )
 
 
 def _apply_face_detection(connection, record: PhotoRecord, detector) -> str | None:
