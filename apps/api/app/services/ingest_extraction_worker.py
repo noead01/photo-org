@@ -34,6 +34,7 @@ def process_candidate_payload(
 ) -> ExtractionResult:
     runtime_path = Path(payload["runtime_path"]).expanduser().resolve()
     sha256 = compute_photo_sha256(runtime_path)
+    warnings: list[str] = []
 
     engine = create_db_engine(database_url)
     with engine.begin() as connection:
@@ -63,16 +64,33 @@ def process_candidate_payload(
         sha256=sha256,
     )
 
-    thumbnail = generate_thumbnail(runtime_path)
+    thumbnail_jpeg = None
+    thumbnail_mime_type = None
+    thumbnail_width = None
+    thumbnail_height = None
+    try:
+        thumbnail = generate_thumbnail(runtime_path)
+    except Exception as exc:
+        warnings.append(f"thumbnail generation failed: {exc}")
+    else:
+        thumbnail_jpeg = thumbnail.jpeg_bytes
+        thumbnail_mime_type = thumbnail.mime_type
+        thumbnail_width = thumbnail.width
+        thumbnail_height = thumbnail.height
+
     detector = face_detector if face_detector is not None else OpenCvFaceDetector()
-    detections = detector.detect(runtime_path)
+    try:
+        detections = detector.detect(runtime_path)
+    except Exception as exc:
+        warnings.append(f"face detection failed: {exc}")
+        detections = []
     extracted_record = PhotoRecord(
         **{
             **record.__dict__,
-            "thumbnail_jpeg": thumbnail.jpeg_bytes,
-            "thumbnail_mime_type": thumbnail.mime_type,
-            "thumbnail_width": thumbnail.width,
-            "thumbnail_height": thumbnail.height,
+            "thumbnail_jpeg": thumbnail_jpeg,
+            "thumbnail_mime_type": thumbnail_mime_type,
+            "thumbnail_width": thumbnail_width,
+            "thumbnail_height": thumbnail_height,
             "faces_count": len(detections),
         }
     )
@@ -83,7 +101,7 @@ def process_candidate_payload(
             watched_folder_id=payload["watched_folder_id"],
             relative_path=payload["relative_path"],
             detections=detections,
-            warnings=[],
+            warnings=warnings,
         ),
         reused_existing_artifacts=False,
         analysis_performed=True,

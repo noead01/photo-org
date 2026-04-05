@@ -530,6 +530,82 @@ def test_process_pending_rows_records_canonical_path_for_retryable_ingest_candid
     assert file_rows[0]["error_detail"] == "staged extraction exploded"
 
 
+def test_process_pending_rows_persists_candidate_warning_payloads_instead_of_retrying(
+    tmp_path, monkeypatch
+):
+    database_url = f"sqlite:///{tmp_path / 'queue-processor-ingest-candidate-warning.db'}"
+    upgrade_database(database_url)
+    queue_store = IngestQueueStore(database_url)
+
+    candidate_payload = {
+        "payload_version": 1,
+        "storage_source_id": "source-1",
+        "watched_folder_id": "wf-1",
+        "canonical_path": "/library/candidate-warning.jpg",
+        "runtime_path": str((tmp_path / "candidate-warning.jpg").resolve()),
+        "relative_path": "candidate-warning.jpg",
+        "filesize": 123,
+        "modified_ts": "2024-01-02T00:00:00+00:00",
+        "modified_mtime_ns": 123456789,
+        "idempotency_key": "wf-1:candidate-warning.jpg:123:123456789",
+    }
+    queue_store.enqueue(
+        payload_type="ingest_candidate",
+        payload=candidate_payload,
+        idempotency_key=candidate_payload["idempotency_key"],
+    )
+
+    extracted_payload = build_payload(
+        photo_id="candidate-warning-photo",
+        path="/library/candidate-warning.jpg",
+        thumbnail_jpeg=None,
+        thumbnail_mime_type=None,
+        thumbnail_width=None,
+        thumbnail_height=None,
+        detections=[],
+        warnings=["thumbnail generation failed: thumbnail exploded"],
+        payload_version=1,
+        storage_source_id="source-1",
+        watched_folder_id="wf-1",
+        relative_path="candidate-warning.jpg",
+    )
+
+    def fake_process_candidate_payload(database_url_arg, *, payload, face_detector=None):
+        assert database_url_arg == database_url
+        assert payload == candidate_payload
+        return ExtractionResult(
+            extracted_payload=extracted_payload,
+            reused_existing_artifacts=False,
+            analysis_performed=True,
+        )
+
+    monkeypatch.setattr(
+        ingest_queue_processor,
+        "process_candidate_payload",
+        fake_process_candidate_payload,
+        raising=False,
+    )
+
+    result = process_pending_ingest_queue(database_url, limit=10)
+
+    completed_rows = queue_store.list_by_status("completed")
+    pending_rows = queue_store.list_by_status("pending")
+    file_rows = load_ingest_run_files(database_url)
+
+    assert result.processed == 1
+    assert result.failed == 0
+    assert result.retryable_errors == 0
+    assert len(completed_rows) == 1
+    assert completed_rows[0].payload_type == "ingest_candidate"
+    assert completed_rows[0].last_error == "thumbnail generation failed: thumbnail exploded"
+    assert len(pending_rows) == 1
+    assert pending_rows[0].payload_type == "extracted_photo"
+    assert pending_rows[0].payload_json == extracted_payload
+    assert len(file_rows) == 1
+    assert file_rows[0]["outcome"] == "completed"
+    assert file_rows[0]["error_detail"] == "thumbnail generation failed: thumbnail exploded"
+
+
 def test_process_pending_rows_revives_failed_extracted_photo_row_on_idempotency_collision(
     tmp_path, monkeypatch
 ):

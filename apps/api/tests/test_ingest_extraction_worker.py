@@ -75,6 +75,14 @@ class RaisingFaceDetector:
         raise AssertionError("face detector should not have been called")
 
 
+class RuntimeErrorFaceDetector:
+    def __init__(self, message: str) -> None:
+        self._message = message
+
+    def detect(self, path: Path) -> list[dict]:
+        raise RuntimeError(self._message)
+
+
 class FakeMappingsResult:
     def __init__(self, rows: list[dict]) -> None:
         self._rows = rows
@@ -384,4 +392,78 @@ def test_process_candidate_payload_extracts_new_sha_and_returns_detections(tmp_p
             "provenance": {"detector": "test"},
             "person_id": None,
         }
+    ]
+
+
+def test_process_candidate_payload_keeps_thumbnail_failure_as_warning(tmp_path, monkeypatch):
+    from app.services.ingest_extraction_worker import process_candidate_payload
+
+    database_url = f"sqlite:///{tmp_path / 'ingest-worker-thumbnail-warning.db'}"
+    upgrade_database(database_url)
+
+    photo_path = tmp_path / "sample.jpg"
+    _write_test_image(photo_path)
+    detector = StaticFaceDetector(detections=[])
+
+    def _raise_thumbnail_failure(path: Path):
+        raise RuntimeError("thumbnail exploded")
+
+    monkeypatch.setattr(
+        "app.services.ingest_extraction_worker.generate_thumbnail",
+        _raise_thumbnail_failure,
+    )
+
+    result = process_candidate_payload(
+        database_url,
+        payload={
+            "storage_source_id": "source-1",
+            "watched_folder_id": "wf-1",
+            "canonical_path": "/library/sample.jpg",
+            "runtime_path": str(photo_path),
+            "relative_path": "sample.jpg",
+        },
+        face_detector=detector,
+    )
+
+    assert detector.calls == 1
+    assert result.reused_existing_artifacts is False
+    assert result.analysis_performed is True
+    assert result.extracted_payload["thumbnail_jpeg"] is None
+    assert result.extracted_payload["thumbnail_mime_type"] is None
+    assert result.extracted_payload["thumbnail_width"] is None
+    assert result.extracted_payload["thumbnail_height"] is None
+    assert result.extracted_payload["faces_count"] == 0
+    assert result.extracted_payload["warnings"] == [
+        "thumbnail generation failed: thumbnail exploded"
+    ]
+
+
+def test_process_candidate_payload_keeps_face_detection_failure_as_warning(tmp_path):
+    from app.services.ingest_extraction_worker import process_candidate_payload
+
+    database_url = f"sqlite:///{tmp_path / 'ingest-worker-face-warning.db'}"
+    upgrade_database(database_url)
+
+    photo_path = tmp_path / "sample.jpg"
+    _write_test_image(photo_path)
+
+    result = process_candidate_payload(
+        database_url,
+        payload={
+            "storage_source_id": "source-1",
+            "watched_folder_id": "wf-1",
+            "canonical_path": "/library/sample.jpg",
+            "runtime_path": str(photo_path),
+            "relative_path": "sample.jpg",
+        },
+        face_detector=RuntimeErrorFaceDetector("detector exploded"),
+    )
+
+    assert result.reused_existing_artifacts is False
+    assert result.analysis_performed is True
+    assert result.extracted_payload["thumbnail_jpeg"] is not None
+    assert result.extracted_payload["faces_count"] == 0
+    assert result.extracted_payload["detections"] == []
+    assert result.extracted_payload["warnings"] == [
+        "face detection failed: detector exploded"
     ]
