@@ -265,7 +265,7 @@ def _process_claimed_row(
             connection=connection,
         )
         if not enqueue_result.created:
-            queue_store.revive_failed_in_transaction(
+            queue_store.requeue_terminal_in_transaction(
                 enqueue_result.ingest_queue_id,
                 payload=extraction.extracted_payload,
                 connection=connection,

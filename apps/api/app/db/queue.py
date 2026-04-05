@@ -137,6 +137,26 @@ class IngestQueueStore:
         )
         return bool(result.rowcount)
 
+    def requeue_terminal_in_transaction(
+        self,
+        ingest_queue_id: str,
+        *,
+        payload: dict,
+        connection: Connection,
+    ) -> bool:
+        result = connection.execute(
+            update(ingest_queue)
+            .where(ingest_queue.c.ingest_queue_id == ingest_queue_id)
+            .where(ingest_queue.c.status.in_(("failed", "completed")))
+            .values(
+                status="pending",
+                payload_json=payload,
+                processed_ts=None,
+                last_error=None,
+            )
+        )
+        return bool(result.rowcount)
+
     def list_pending(self) -> list[QueueRow]:
         return self.list_by_status("pending")
 

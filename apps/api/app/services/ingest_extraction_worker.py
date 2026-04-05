@@ -50,12 +50,17 @@ def process_candidate_payload(
         existing_artifacts = lookup_existing_artifacts_by_sha(connection, sha256)
 
     if existing_artifacts is not None:
-        reused_record = _build_reused_photo_record(
-            runtime_path,
-            canonical_path=payload["canonical_path"],
-            sha256=sha256,
-            existing_artifacts=existing_artifacts,
-        )
+        try:
+            reused_record = _build_reused_photo_record(
+                runtime_path,
+                canonical_path=payload["canonical_path"],
+                sha256=sha256,
+                existing_artifacts=existing_artifacts,
+            )
+        except OSError as exc:
+            if _is_missing_file_error(exc):
+                raise CandidateFileMissingError(f"candidate file missing: {runtime_path}") from exc
+            raise
         return ExtractionResult(
             extracted_payload=serialize_reused_content_submission(
                 record=reused_record,

@@ -467,3 +467,60 @@ def test_process_candidate_payload_keeps_face_detection_failure_as_warning(tmp_p
     assert result.extracted_payload["warnings"] == [
         "face detection failed: detector exploded"
     ]
+
+
+def test_process_candidate_payload_converts_sha_reuse_stat_race_into_missing_file_error(
+    tmp_path, monkeypatch
+):
+    from app.services.ingest_extraction_worker import (
+        CandidateFileMissingError,
+        process_candidate_payload,
+    )
+
+    database_url = f"sqlite:///{tmp_path / 'ingest-worker-reuse-missing-file.db'}"
+    upgrade_database(database_url)
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 4, 5, 12, 0, tzinfo=UTC)
+
+    photo_path = tmp_path / "sample.jpg"
+    _write_test_image(photo_path)
+    record_sha = hashlib.sha256(photo_path.read_bytes()).hexdigest()
+
+    with engine.begin() as connection:
+        connection.execute(
+            insert(photos).values(
+                _photo_row_values(
+                    photo_id="existing-photo",
+                    path="/library/already-imported.jpg",
+                    sha256=record_sha,
+                    now=now,
+                    thumbnail_jpeg=b"existing-thumbnail",
+                    thumbnail_mime_type="image/jpeg",
+                    thumbnail_width=64,
+                    thumbnail_height=64,
+                    faces_count=0,
+                    faces_detected_ts=now,
+                )
+            )
+        )
+
+    def _raise_missing_stat(*args, **kwargs):
+        raise FileNotFoundError("gone")
+
+    monkeypatch.setattr(
+        "app.services.ingest_extraction_worker._build_reused_photo_record",
+        _raise_missing_stat,
+    )
+
+    with pytest.raises(CandidateFileMissingError, match="candidate file missing"):
+        process_candidate_payload(
+            database_url,
+            payload={
+                "storage_source_id": "source-1",
+                "watched_folder_id": "wf-1",
+                "canonical_path": "/library/sample.jpg",
+                "runtime_path": str(photo_path),
+                "relative_path": "sample.jpg",
+            },
+            face_detector=RaisingFaceDetector(),
+        )
