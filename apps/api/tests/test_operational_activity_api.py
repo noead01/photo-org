@@ -156,7 +156,7 @@ def test_operational_activity_api_excludes_completed_and_failed_work_from_live_s
     assert payload["ingest_queue"]["items"] == []
 
 
-def test_operational_activity_api_reports_active_queue_processing(tmp_path, monkeypatch):
+def test_operational_activity_api_returns_active_queue_work_with_summary(tmp_path, monkeypatch):
     database_url = f"sqlite:///{tmp_path / 'operational-activity-queue.db'}"
     upgrade_database(database_url)
     monkeypatch.setenv("DATABASE_URL", database_url)
@@ -206,10 +206,17 @@ def test_operational_activity_api_reports_active_queue_processing(tmp_path, monk
     assert payload["ingest_queue"]["summary"]["pending_count"] == 1
     assert payload["ingest_queue"]["summary"]["processing_count"] == 1
     assert payload["ingest_queue"]["summary"]["stalled_count"] == 0
+    assert payload["ingest_queue"]["summary"]["processed_count"] == 0
+    assert payload["ingest_queue"]["summary"]["estimated_total"] is None
+    assert payload["ingest_queue"]["summary"]["percent_complete"] is None
     assert payload["ingest_queue"]["items"][0]["ingest_queue_id"] == "queue-processing"
     assert payload["ingest_queue"]["items"][0]["payload_type"] == "photo_metadata"
     assert payload["ingest_queue"]["items"][0]["path"] == "queued/active.jpg"
+    assert payload["ingest_queue"]["items"][0]["last_attempt_ts"] is not None
     assert payload["ingest_queue"]["items"][0]["is_stalled"] is False
+    assert payload["ingest_queue"]["items"][0]["processed_count"] == 0
+    assert payload["ingest_queue"]["items"][0]["estimated_total"] is None
+    assert payload["ingest_queue"]["items"][0]["percent_complete"] is None
 
 
 def test_operational_activity_api_keeps_unresolved_stalled_queue_work_visible(tmp_path, monkeypatch):
@@ -244,7 +251,12 @@ def test_operational_activity_api_keeps_unresolved_stalled_queue_work_visible(tm
     assert response.status_code == 200
     payload = response.json()
     assert payload["polling"]["items"] == []
+    assert payload["ingest_queue"]["summary"]["pending_count"] == 0
+    assert payload["ingest_queue"]["summary"]["processing_count"] == 0
     assert payload["ingest_queue"]["summary"]["stalled_count"] == 1
+    assert payload["ingest_queue"]["summary"]["processed_count"] == 0
+    assert payload["ingest_queue"]["summary"]["estimated_total"] is None
+    assert payload["ingest_queue"]["summary"]["percent_complete"] is None
     assert payload["ingest_queue"]["items"][0]["ingest_queue_id"] == "queue-stalled"
     assert payload["ingest_queue"]["items"][0]["is_stalled"] is True
 
