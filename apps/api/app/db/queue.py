@@ -117,6 +117,26 @@ class IngestQueueStore:
             )
         return EnqueueResult(ingest_queue_id=existing_id, created=False)
 
+    def revive_failed_in_transaction(
+        self,
+        ingest_queue_id: str,
+        *,
+        payload: dict,
+        connection: Connection,
+    ) -> bool:
+        result = connection.execute(
+            update(ingest_queue)
+            .where(ingest_queue.c.ingest_queue_id == ingest_queue_id)
+            .where(ingest_queue.c.status == "failed")
+            .values(
+                status="pending",
+                payload_json=payload,
+                processed_ts=None,
+                last_error=None,
+            )
+        )
+        return bool(result.rowcount)
+
     def list_pending(self) -> list[QueueRow]:
         return self.list_by_status("pending")
 

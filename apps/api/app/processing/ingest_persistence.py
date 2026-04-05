@@ -292,6 +292,42 @@ def store_face_detections(connection: Connection, photo_id: str, detections: lis
     )
 
 
+def deserialize_photo_record(payload: dict) -> PhotoRecord:
+    return PhotoRecord(
+        photo_id=payload["photo_id"],
+        path=payload["path"],
+        sha256=payload["sha256"],
+        filesize=payload["filesize"],
+        ext=payload["ext"],
+        created_ts=_parse_timestamp(payload["created_ts"]),
+        modified_ts=_parse_timestamp(payload["modified_ts"]),
+        shot_ts=_parse_timestamp(payload.get("shot_ts")),
+        shot_ts_source=payload.get("shot_ts_source"),
+        camera_make=payload.get("camera_make"),
+        camera_model=payload.get("camera_model"),
+        software=payload.get("software"),
+        orientation=payload.get("orientation"),
+        gps_latitude=payload.get("gps_latitude"),
+        gps_longitude=payload.get("gps_longitude"),
+        gps_altitude=payload.get("gps_altitude"),
+        thumbnail_jpeg=_decode_optional_bytes(payload.get("thumbnail_jpeg")),
+        thumbnail_mime_type=payload.get("thumbnail_mime_type"),
+        thumbnail_width=payload.get("thumbnail_width"),
+        thumbnail_height=payload.get("thumbnail_height"),
+        faces_count=payload.get("faces_count", 0),
+    )
+
+
+def deserialize_detections(payload: list[dict] | None) -> list[dict]:
+    return [
+        {
+            **detection,
+            "bitmap": _decode_optional_bytes(detection.get("bitmap")),
+        }
+        for detection in (payload or [])
+    ]
+
+
 def _serialize_record(record: PhotoRecord) -> dict:
     return {
         "photo_id": record.photo_id,
@@ -472,6 +508,12 @@ def _encode_optional_thumbnail(value: bytes | None) -> str | None:
     return _encode_optional_bytes(value)
 
 
+def _decode_optional_bytes(value: str | None) -> bytes | None:
+    if value is None:
+        return None
+    return base64.b64decode(value)
+
+
 def _format_optional_timestamp(value: datetime | None) -> str | None:
     if value is None:
         return None
@@ -513,6 +555,8 @@ __all__ = [
     "build_photo_record",
     "build_photo_record_from_sha",
     "compute_photo_sha256",
+    "deserialize_detections",
+    "deserialize_photo_record",
     "lookup_existing_artifacts_by_sha",
     "serialize_extracted_content_submission",
     "serialize_reused_content_submission",

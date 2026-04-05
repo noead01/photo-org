@@ -6,6 +6,8 @@ from sqlalchemy.engine import Connection
 
 from app.db.queue import IngestQueueStore
 from app.migrations import upgrade_database
+from app.processing.ingest_persistence import serialize_extracted_content_submission
+from app.services.ingest_extraction_worker import ExtractionResult
 from app.services import ingest_queue_processor
 from app.services.ingest_queue_processor import (
     PROCESSING_LEASE_SECONDS,
@@ -290,6 +292,329 @@ def test_process_pending_rows_marks_unsupported_payload_failed_without_stranding
     assert file_rows[0]["error_detail"] == "Unsupported payload_type: unknown_payload"
 
 
+def test_process_pending_rows_routes_ingest_candidate_to_extracted_payload_queue(
+    tmp_path, monkeypatch
+):
+    database_url = f"sqlite:///{tmp_path / 'queue-processor-ingest-candidate.db'}"
+    upgrade_database(database_url)
+    queue_store = IngestQueueStore(database_url)
+
+    candidate_payload = {
+        "payload_version": 1,
+        "storage_source_id": "source-1",
+        "watched_folder_id": "wf-1",
+        "canonical_path": "/library/candidate.jpg",
+        "runtime_path": str((tmp_path / "candidate.jpg").resolve()),
+        "relative_path": "candidate.jpg",
+        "filesize": 123,
+        "modified_ts": "2024-01-02T00:00:00+00:00",
+        "modified_mtime_ns": 123456789,
+        "idempotency_key": "wf-1:candidate.jpg:123:123456789",
+    }
+    queue_store.enqueue(
+        payload_type="ingest_candidate",
+        payload=candidate_payload,
+        idempotency_key=candidate_payload["idempotency_key"],
+    )
+
+    extracted_payload = build_payload(
+        photo_id="extracted-photo-1",
+        path="/library/candidate.jpg",
+        thumbnail_jpeg="dGh1bWI=",
+        thumbnail_mime_type="image/jpeg",
+        thumbnail_width=128,
+        thumbnail_height=128,
+        detections=[],
+        warnings=[],
+        payload_version=1,
+        storage_source_id="source-1",
+        watched_folder_id="wf-1",
+        relative_path="candidate.jpg",
+    )
+
+    def fake_process_candidate_payload(database_url_arg, *, payload, face_detector=None):
+        assert database_url_arg == database_url
+        assert payload == candidate_payload
+        return ExtractionResult(
+            extracted_payload=extracted_payload,
+            reused_existing_artifacts=False,
+            analysis_performed=True,
+        )
+
+    monkeypatch.setattr(
+        ingest_queue_processor,
+        "process_candidate_payload",
+        fake_process_candidate_payload,
+        raising=False,
+    )
+
+    result = process_pending_ingest_queue(database_url, limit=10)
+
+    completed_rows = queue_store.list_by_status("completed")
+    pending_rows = queue_store.list_by_status("pending")
+    run_rows = load_ingest_runs(database_url)
+    file_rows = load_ingest_run_files(database_url)
+
+    assert result.processed == 1
+    assert result.failed == 0
+    assert result.retryable_errors == 0
+    assert len(completed_rows) == 1
+    assert completed_rows[0].payload_type == "ingest_candidate"
+    assert completed_rows[0].payload_json == candidate_payload
+    assert completed_rows[0].last_error is None
+    assert len(pending_rows) == 1
+    assert pending_rows[0].payload_type == "extracted_photo"
+    assert pending_rows[0].payload_json == extracted_payload
+    assert pending_rows[0].idempotency_key == f"extracted:{extracted_payload['photo_id']}"
+    assert load_photo_paths(database_url) == []
+    assert len(run_rows) == 1
+    assert run_rows[0]["status"] == "completed"
+    assert run_rows[0]["files_seen"] == 1
+    assert run_rows[0]["files_created"] == 0
+    assert run_rows[0]["files_updated"] == 0
+    assert run_rows[0]["error_count"] == 0
+    assert len(file_rows) == 1
+    assert file_rows[0]["path"] == candidate_payload["canonical_path"]
+    assert file_rows[0]["outcome"] == "completed"
+    assert file_rows[0]["error_detail"] is None
+
+
+def test_process_pending_rows_scopes_extracted_photo_idempotency_key_away_from_legacy_rows(
+    tmp_path, monkeypatch
+):
+    database_url = f"sqlite:///{tmp_path / 'queue-processor-ingest-candidate-idempotency.db'}"
+    upgrade_database(database_url)
+    queue_store = IngestQueueStore(database_url)
+
+    legacy_payload = build_payload(photo_id="shared-photo-id", path="queued/legacy.heic")
+    legacy_queue_id = queue_store.enqueue(
+        payload_type="photo_metadata",
+        payload=legacy_payload,
+        idempotency_key="shared-photo-id",
+    )
+    mark_queue_row_processing(
+        database_url,
+        legacy_queue_id,
+        last_attempt_ts=datetime.now(tz=UTC),
+    )
+
+    candidate_payload = {
+        "payload_version": 1,
+        "storage_source_id": "source-1",
+        "watched_folder_id": "wf-1",
+        "canonical_path": "/library/candidate-collision.jpg",
+        "runtime_path": str((tmp_path / "candidate-collision.jpg").resolve()),
+        "relative_path": "candidate-collision.jpg",
+        "filesize": 123,
+        "modified_ts": "2024-01-02T00:00:00+00:00",
+        "modified_mtime_ns": 123456789,
+        "idempotency_key": "wf-1:candidate-collision.jpg:123:123456789",
+    }
+    queue_store.enqueue(
+        payload_type="ingest_candidate",
+        payload=candidate_payload,
+        idempotency_key=candidate_payload["idempotency_key"],
+    )
+
+    extracted_payload = build_payload(
+        photo_id="shared-photo-id",
+        path="/library/candidate-collision.jpg",
+        thumbnail_jpeg="dGh1bWI=",
+        thumbnail_mime_type="image/jpeg",
+        thumbnail_width=128,
+        thumbnail_height=128,
+        detections=[],
+        warnings=[],
+        payload_version=1,
+        storage_source_id="source-1",
+        watched_folder_id="wf-1",
+        relative_path="candidate-collision.jpg",
+    )
+
+    def fake_process_candidate_payload(database_url_arg, *, payload, face_detector=None):
+        assert database_url_arg == database_url
+        assert payload == candidate_payload
+        return ExtractionResult(
+            extracted_payload=extracted_payload,
+            reused_existing_artifacts=False,
+            analysis_performed=True,
+        )
+
+    monkeypatch.setattr(
+        ingest_queue_processor,
+        "process_candidate_payload",
+        fake_process_candidate_payload,
+        raising=False,
+    )
+
+    result = process_pending_ingest_queue(database_url, limit=10)
+
+    pending_rows = queue_store.list_by_status("pending")
+    processing_rows = queue_store.list_by_status("processing")
+    assert result.processed == 1
+    assert result.failed == 0
+    assert result.retryable_errors == 0
+    assert len(processing_rows) == 1
+    assert processing_rows[0].ingest_queue_id == legacy_queue_id
+    assert len(pending_rows) == 1
+    extracted_row = next(row for row in pending_rows if row.payload_type == "extracted_photo")
+    assert extracted_row.payload_json == extracted_payload
+    assert extracted_row.idempotency_key == "extracted:shared-photo-id"
+
+
+def test_process_pending_rows_records_canonical_path_for_retryable_ingest_candidate_failure(
+    tmp_path, monkeypatch
+):
+    database_url = f"sqlite:///{tmp_path / 'queue-processor-ingest-candidate-failure.db'}"
+    upgrade_database(database_url)
+    queue_store = IngestQueueStore(database_url)
+
+    candidate_payload = {
+        "payload_version": 1,
+        "storage_source_id": "source-1",
+        "watched_folder_id": "wf-1",
+        "canonical_path": "/library/candidate-failure.jpg",
+        "runtime_path": str((tmp_path / "candidate-failure.jpg").resolve()),
+        "relative_path": "candidate-failure.jpg",
+        "filesize": 123,
+        "modified_ts": "2024-01-02T00:00:00+00:00",
+        "modified_mtime_ns": 123456789,
+        "idempotency_key": "wf-1:candidate-failure.jpg:123:123456789",
+    }
+    queue_id = queue_store.enqueue(
+        payload_type="ingest_candidate",
+        payload=candidate_payload,
+        idempotency_key=candidate_payload["idempotency_key"],
+    )
+
+    def failing_process_candidate_payload(database_url_arg, *, payload, face_detector=None):
+        assert database_url_arg == database_url
+        assert payload == candidate_payload
+        raise RuntimeError("staged extraction exploded")
+
+    monkeypatch.setattr(
+        ingest_queue_processor,
+        "process_candidate_payload",
+        failing_process_candidate_payload,
+        raising=False,
+    )
+
+    result = process_pending_ingest_queue(database_url, limit=10)
+
+    run_rows = load_ingest_runs(database_url)
+    file_rows = load_ingest_run_files(database_url)
+
+    assert result.processed == 0
+    assert result.failed == 0
+    assert result.retryable_errors == 1
+    assert len(run_rows) == 1
+    assert run_rows[0]["status"] == "partial"
+    assert run_rows[0]["files_seen"] == 1
+    assert run_rows[0]["error_count"] == 1
+    assert run_rows[0]["error_summary"] == "staged extraction exploded"
+    assert len(file_rows) == 1
+    assert file_rows[0]["ingest_queue_id"] == queue_id
+    assert file_rows[0]["path"] == candidate_payload["canonical_path"]
+    assert file_rows[0]["outcome"] == "retryable_error"
+    assert file_rows[0]["error_detail"] == "staged extraction exploded"
+
+
+def test_process_pending_rows_revives_failed_extracted_photo_row_on_idempotency_collision(
+    tmp_path, monkeypatch
+):
+    database_url = f"sqlite:///{tmp_path / 'queue-processor-ingest-candidate-revive.db'}"
+    upgrade_database(database_url)
+    queue_store = IngestQueueStore(database_url)
+
+    candidate_payload = {
+        "payload_version": 1,
+        "storage_source_id": "source-1",
+        "watched_folder_id": "wf-1",
+        "canonical_path": "/library/candidate-revive.jpg",
+        "runtime_path": str((tmp_path / "candidate-revive.jpg").resolve()),
+        "relative_path": "candidate-revive.jpg",
+        "filesize": 123,
+        "modified_ts": "2024-01-02T00:00:00+00:00",
+        "modified_mtime_ns": 123456789,
+        "idempotency_key": "wf-1:candidate-revive.jpg:123:123456789",
+    }
+    queue_store.enqueue(
+        payload_type="ingest_candidate",
+        payload=candidate_payload,
+        idempotency_key=candidate_payload["idempotency_key"],
+    )
+
+    stale_extracted_payload = build_payload(
+        photo_id="shared-photo-id",
+        path="/library/stale.jpg",
+    )
+    extracted_queue_id = queue_store.enqueue(
+        payload_type="extracted_photo",
+        payload=stale_extracted_payload,
+        idempotency_key="extracted:shared-photo-id",
+    )
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            update(ingest_queue)
+            .where(ingest_queue.c.ingest_queue_id == extracted_queue_id)
+            .values(
+                status="failed",
+                last_error="old failure",
+                processed_ts=datetime.now(tz=UTC),
+            )
+        )
+
+    refreshed_payload = build_payload(
+        photo_id="shared-photo-id",
+        path="/library/candidate-revive.jpg",
+        thumbnail_jpeg="dGh1bWI=",
+        thumbnail_mime_type="image/jpeg",
+        thumbnail_width=128,
+        thumbnail_height=128,
+        detections=[],
+        warnings=[],
+        payload_version=1,
+        storage_source_id="source-1",
+        watched_folder_id="wf-1",
+        relative_path="candidate-revive.jpg",
+    )
+
+    def fake_process_candidate_payload(database_url_arg, *, payload, face_detector=None):
+        assert database_url_arg == database_url
+        assert payload == candidate_payload
+        return ExtractionResult(
+            extracted_payload=refreshed_payload,
+            reused_existing_artifacts=False,
+            analysis_performed=True,
+        )
+
+    monkeypatch.setattr(
+        ingest_queue_processor,
+        "process_candidate_payload",
+        fake_process_candidate_payload,
+        raising=False,
+    )
+
+    result = process_pending_ingest_queue(database_url, limit=10)
+
+    completed_rows = queue_store.list_by_status("completed")
+    pending_rows = queue_store.list_by_status("pending")
+    failed_rows = queue_store.list_by_status("failed")
+
+    assert result.processed == 1
+    assert result.failed == 0
+    assert result.retryable_errors == 0
+    assert len(completed_rows) == 1
+    assert completed_rows[0].payload_type == "ingest_candidate"
+    assert failed_rows == []
+    assert len(pending_rows) == 1
+    assert pending_rows[0].ingest_queue_id == extracted_queue_id
+    assert pending_rows[0].payload_type == "extracted_photo"
+    assert pending_rows[0].payload_json == refreshed_payload
+    assert pending_rows[0].last_error is None
+
+
 def test_process_pending_rows_records_failed_and_retryable_file_outcomes(tmp_path, monkeypatch):
     database_url = f"sqlite:///{tmp_path / 'queue-processor-ingest-run-errors.db'}"
     upgrade_database(database_url)
@@ -477,6 +802,105 @@ def test_process_pending_rows_persists_detected_faces_for_photo_metadata(tmp_pat
     completed_rows = queue_store.list_by_status("completed")
     assert len(completed_rows) == 1
     assert completed_rows[0].last_error is None
+
+
+def test_process_pending_rows_persists_payload_faces_for_extracted_photo_without_detection(
+    tmp_path,
+):
+    database_url = f"sqlite:///{tmp_path / 'queue-processor-extracted-photo.db'}"
+    upgrade_database(database_url)
+    queue_store = IngestQueueStore(database_url)
+
+    extracted_payload = serialize_extracted_content_submission(
+        record=ingest_queue_processor.PhotoRecord(
+            photo_id="photo-extracted-1",
+            path="/library/extracted.jpg",
+            sha256="c" * 64,
+            filesize=123,
+            ext="jpg",
+            created_ts=datetime(2024, 1, 1, tzinfo=UTC),
+            modified_ts=datetime(2024, 1, 2, tzinfo=UTC),
+            shot_ts=None,
+            shot_ts_source=None,
+            camera_make=None,
+            camera_model=None,
+            software=None,
+            orientation=None,
+            gps_latitude=None,
+            gps_longitude=None,
+            gps_altitude=None,
+            thumbnail_jpeg=b"thumb",
+            thumbnail_mime_type="image/jpeg",
+            thumbnail_width=128,
+            thumbnail_height=96,
+            faces_count=1,
+        ),
+        storage_source_id="source-1",
+        watched_folder_id="wf-1",
+        relative_path="extracted.jpg",
+        detections=[
+            {
+                "face_id": "face-from-payload",
+                "bbox_x": 11,
+                "bbox_y": 22,
+                "bbox_w": 33,
+                "bbox_h": 44,
+                "bitmap": b"face-bitmap",
+                "embedding": None,
+                "provenance": {"detector": "staged"},
+            }
+        ],
+        warnings=[],
+    )
+    queue_store.enqueue(
+        payload_type="extracted_photo",
+        payload=extracted_payload,
+        idempotency_key=f"extracted:{extracted_payload['photo_id']}",
+    )
+
+    result = process_pending_ingest_queue(
+        database_url,
+        limit=10,
+        face_detector=RaisingFaceDetector("should not run"),
+    )
+
+    run_rows = load_ingest_runs(database_url)
+    file_rows = load_ingest_run_files(database_url)
+
+    assert result.processed == 1
+    assert result.failed == 0
+    assert result.retryable_errors == 0
+    assert load_photo_paths(database_url) == ["/library/extracted.jpg"]
+    assert load_face_rows(database_url, "photo-extracted-1") == [
+        {
+            "face_id": "face-from-payload",
+            "photo_id": "photo-extracted-1",
+            "bbox_x": 11,
+            "bbox_y": 22,
+            "bbox_w": 33,
+            "bbox_h": 44,
+            "provenance": {"detector": "staged"},
+        }
+    ]
+    faces_count, faces_detected_ts = load_photo_detection_state(
+        database_url, "photo-extracted-1"
+    )
+    assert faces_count == 1
+    assert faces_detected_ts is not None
+    completed_rows = queue_store.list_by_status("completed")
+    assert len(completed_rows) == 1
+    assert completed_rows[0].payload_type == "extracted_photo"
+    assert completed_rows[0].last_error is None
+    assert len(run_rows) == 1
+    assert run_rows[0]["status"] == "completed"
+    assert run_rows[0]["files_seen"] == 1
+    assert run_rows[0]["files_created"] == 1
+    assert run_rows[0]["files_updated"] == 0
+    assert run_rows[0]["error_count"] == 0
+    assert len(file_rows) == 1
+    assert file_rows[0]["path"] == "/library/extracted.jpg"
+    assert file_rows[0]["outcome"] == "completed"
+    assert file_rows[0]["error_detail"] is None
 
 
 def test_process_pending_rows_marks_detection_complete_when_no_faces_found(tmp_path):

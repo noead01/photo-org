@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy.exc import IntegrityError
@@ -11,7 +10,14 @@ from app.db import IngestRunFileOutcome, IngestRunStore
 from app.db.queue import IngestQueueStore, PROCESSING_LEASE_SECONDS
 from app.db.session import create_db_engine
 from app.processing.faces import OpenCvFaceDetector
-from app.processing.ingest import PhotoRecord, store_face_detections, upsert_photo
+from app.processing.ingest_persistence import (
+    PhotoRecord,
+    deserialize_detections,
+    deserialize_photo_record,
+    store_face_detections,
+    upsert_photo,
+)
+from app.services.ingest_extraction_worker import process_candidate_payload
 
 
 @dataclass(frozen=True)
@@ -48,7 +54,7 @@ def process_pending_ingest_queue(
     file_outcomes: list[str] = []
     for row in processable_rows:
         claimed_row = None
-        claimed_path = _payload_path(row.payload_json)
+        claimed_path = _file_outcome_path(row)
         run_created_in_transaction = False
         try:
             with engine.begin() as connection:
@@ -59,8 +65,12 @@ def process_pending_ingest_queue(
                 if claimed_row is None:
                     continue
                 files_seen += 1
-                claimed_path = _payload_path(claimed_row.payload_json)
-                if claimed_row.payload_type != "photo_metadata":
+                claimed_path = _file_outcome_path(claimed_row)
+                if claimed_row.payload_type not in {
+                    "photo_metadata",
+                    "ingest_candidate",
+                    "extracted_photo",
+                }:
                     error_detail = f"Unsupported payload_type: {claimed_row.payload_type}"
                     ingest_run_id, run_created_in_transaction = _ensure_ingest_run(
                         run_store,
@@ -87,7 +97,13 @@ def process_pending_ingest_queue(
                     error_messages.append(error_detail)
                     continue
                 try:
-                    record = payload_to_photo_record(claimed_row.payload_json)
+                    created, completion_warning = _process_claimed_row(
+                        database_url,
+                        queue_store,
+                        connection,
+                        claimed_row,
+                        detector=detector,
+                    )
                 except (KeyError, TypeError, ValueError) as exc:
                     error_detail = str(exc)
                     ingest_run_id, run_created_in_transaction = _ensure_ingest_run(
@@ -114,12 +130,6 @@ def process_pending_ingest_queue(
                     failed += 1
                     error_messages.append(error_detail)
                     continue
-                created = upsert_photo(connection, record)
-                detection_warning = _apply_face_detection(
-                    connection,
-                    record,
-                    detector,
-                )
                 ingest_run_id, run_created_in_transaction = _ensure_ingest_run(
                     run_store,
                     ingest_run_id,
@@ -127,26 +137,26 @@ def process_pending_ingest_queue(
                 )
                 run_store.append_file_outcome(
                     ingest_run_id,
-                    IngestRunFileOutcome(
-                        ingest_queue_id=claimed_row.ingest_queue_id,
-                        path=record.path,
-                        outcome="completed",
-                        error_detail=detection_warning,
-                    ),
-                    connection=connection,
-                )
+                        IngestRunFileOutcome(
+                            ingest_queue_id=claimed_row.ingest_queue_id,
+                            path=_file_outcome_path(claimed_row),
+                            outcome="completed",
+                            error_detail=completion_warning,
+                        ),
+                        connection=connection,
+                    )
                 queue_store.mark_completed(
                     claimed_row.ingest_queue_id,
-                    last_error=detection_warning,
+                    last_error=completion_warning,
                     connection=connection,
                 )
                 file_outcomes.append("completed")
-                if created:
+                if created is True:
                     files_created += 1
-                else:
+                elif created is False:
                     files_updated += 1
-                if detection_warning is not None:
-                    error_messages.append(detection_warning)
+                if completion_warning is not None:
+                    error_messages.append(completion_warning)
             processed += 1
         except IntegrityError as exc:
             if run_created_in_transaction:
@@ -207,31 +217,7 @@ def process_pending_ingest_queue(
 
 
 def payload_to_photo_record(payload: dict) -> PhotoRecord:
-    return PhotoRecord(
-        photo_id=payload["photo_id"],
-        path=payload["path"],
-        sha256=payload["sha256"],
-        filesize=payload["filesize"],
-        ext=payload["ext"],
-        created_ts=datetime.fromisoformat(payload["created_ts"]),
-        modified_ts=datetime.fromisoformat(payload["modified_ts"]),
-        shot_ts=_parse_optional_timestamp(payload.get("shot_ts")),
-        shot_ts_source=payload.get("shot_ts_source"),
-        camera_make=payload.get("camera_make"),
-        camera_model=payload.get("camera_model"),
-        software=payload.get("software"),
-        orientation=payload.get("orientation"),
-        gps_latitude=payload.get("gps_latitude"),
-        gps_longitude=payload.get("gps_longitude"),
-        gps_altitude=payload.get("gps_altitude"),
-        faces_count=payload.get("faces_count", 0),
-    )
-
-
-def _parse_optional_timestamp(value: str | None) -> datetime | None:
-    if value is None:
-        return None
-    return datetime.fromisoformat(value)
+    return deserialize_photo_record(payload)
 
 
 def _payload_path(payload: object) -> str:
@@ -253,12 +239,69 @@ def _ensure_ingest_run(
     return run_store.create_run(connection=connection), True
 
 
+def _process_claimed_row(
+    database_url,
+    queue_store: IngestQueueStore,
+    connection: Connection,
+    claimed_row,
+    *,
+    detector,
+) -> tuple[bool | None, str | None]:
+    if claimed_row.payload_type == "ingest_candidate":
+        extraction = process_candidate_payload(
+            database_url,
+            payload=claimed_row.payload_json,
+            face_detector=detector,
+        )
+        enqueue_result = queue_store.enqueue_in_transaction(
+            payload_type="extracted_photo",
+            payload=extraction.extracted_payload,
+            idempotency_key=_extracted_payload_idempotency_key(extraction.extracted_payload),
+            connection=connection,
+        )
+        if not enqueue_result.created:
+            queue_store.revive_failed_in_transaction(
+                enqueue_result.ingest_queue_id,
+                payload=extraction.extracted_payload,
+                connection=connection,
+            )
+        return None, _payload_warning_detail(extraction.extracted_payload)
+
+    record = payload_to_photo_record(claimed_row.payload_json)
+    created = upsert_photo(connection, record)
+
+    if claimed_row.payload_type == "extracted_photo":
+        store_face_detections(
+            connection,
+            record.photo_id,
+            deserialize_detections(claimed_row.payload_json.get("detections")),
+        )
+        return created, _payload_warning_detail(claimed_row.payload_json)
+
+    detection_warning = _apply_face_detection(
+        connection,
+        record,
+        detector,
+    )
+    return created, detection_warning
+
+
 def _run_status(file_outcomes: list[str]) -> str:
     if file_outcomes and all(outcome == "completed" for outcome in file_outcomes):
         return "completed"
     if file_outcomes and all(outcome == "failed" for outcome in file_outcomes):
         return "failed"
     return "partial"
+
+
+def _file_outcome_path(claimed_row) -> str:
+    payload_type = getattr(claimed_row, "payload_type", None)
+    payload_json = getattr(claimed_row, "payload_json", None)
+    if payload_type == "ingest_candidate" and isinstance(payload_json, dict):
+        canonical_path = payload_json.get("canonical_path")
+        if isinstance(canonical_path, str) and canonical_path:
+            return canonical_path
+    return _payload_path(payload_json)
 
 
 def _error_summary(error_messages: list[str]) -> str | None:
@@ -283,6 +326,20 @@ def _distinct_error_messages(error_messages: list[str]) -> list[str]:
         seen.add(error_message)
         distinct_messages.append(error_message)
     return distinct_messages
+
+
+def _payload_warning_detail(payload: dict) -> str | None:
+    warnings = payload.get("warnings")
+    if not isinstance(warnings, list):
+        return None
+    warning_messages = [warning for warning in warnings if isinstance(warning, str) and warning]
+    if not warning_messages:
+        return None
+    return "\n".join(warning_messages)
+
+
+def _extracted_payload_idempotency_key(payload: dict) -> str:
+    return f"extracted:{payload['photo_id']}"
 
 
 def _apply_face_detection(connection, record: PhotoRecord, detector) -> str | None:
