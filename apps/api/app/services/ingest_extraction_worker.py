@@ -26,6 +26,10 @@ class ExtractionResult:
     analysis_performed: bool
 
 
+class CandidateFileMissingError(ValueError):
+    pass
+
+
 def process_candidate_payload(
     database_url,
     *,
@@ -33,7 +37,12 @@ def process_candidate_payload(
     face_detector=None,
 ) -> ExtractionResult:
     runtime_path = Path(payload["runtime_path"]).expanduser().resolve()
-    sha256 = compute_photo_sha256(runtime_path)
+    try:
+        sha256 = compute_photo_sha256(runtime_path)
+    except OSError as exc:
+        if _is_missing_file_error(exc):
+            raise CandidateFileMissingError(f"candidate file missing: {runtime_path}") from exc
+        raise
     warnings: list[str] = []
 
     engine = create_db_engine(database_url)
@@ -58,11 +67,16 @@ def process_candidate_payload(
             analysis_performed=False,
         )
 
-    record = build_photo_record_from_sha(
-        runtime_path,
-        canonical_path=payload["canonical_path"],
-        sha256=sha256,
-    )
+    try:
+        record = build_photo_record_from_sha(
+            runtime_path,
+            canonical_path=payload["canonical_path"],
+            sha256=sha256,
+        )
+    except OSError as exc:
+        if _is_missing_file_error(exc):
+            raise CandidateFileMissingError(f"candidate file missing: {runtime_path}") from exc
+        raise
 
     thumbnail_jpeg = None
     thumbnail_mime_type = None
@@ -71,6 +85,8 @@ def process_candidate_payload(
     try:
         thumbnail = generate_thumbnail(runtime_path)
     except Exception as exc:
+        if _is_missing_file_error(exc):
+            raise CandidateFileMissingError(f"candidate file missing: {runtime_path}") from exc
         warnings.append(f"thumbnail generation failed: {exc}")
     else:
         thumbnail_jpeg = thumbnail.jpeg_bytes
@@ -82,6 +98,8 @@ def process_candidate_payload(
     try:
         detections = detector.detect(runtime_path)
     except Exception as exc:
+        if _is_missing_file_error(exc):
+            raise CandidateFileMissingError(f"candidate file missing: {runtime_path}") from exc
         warnings.append(f"face detection failed: {exc}")
         detections = []
     extracted_record = PhotoRecord(
@@ -108,7 +126,7 @@ def process_candidate_payload(
     )
 
 
-__all__ = ["ExtractionResult", "process_candidate_payload"]
+__all__ = ["CandidateFileMissingError", "ExtractionResult", "process_candidate_payload"]
 
 
 def _build_reused_photo_record(
@@ -154,3 +172,7 @@ def _parse_optional_datetime(value: str | datetime | None) -> datetime | None:
     if value is None:
         return None
     return _parse_datetime(value)
+
+
+def _is_missing_file_error(exc: BaseException) -> bool:
+    return isinstance(exc, (FileNotFoundError, NotADirectoryError))

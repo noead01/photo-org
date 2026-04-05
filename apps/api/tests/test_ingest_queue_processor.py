@@ -1016,6 +1016,81 @@ def test_process_pending_rows_persists_payload_faces_for_extracted_photo_without
     assert file_rows[0]["error_detail"] is None
 
 
+def test_process_pending_rows_does_not_mark_face_detection_complete_when_payload_has_warning(
+    tmp_path,
+):
+    database_url = f"sqlite:///{tmp_path / 'queue-processor-extracted-photo-face-warning.db'}"
+    upgrade_database(database_url)
+    queue_store = IngestQueueStore(database_url)
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(watched_folders).values(
+                watched_folder_id="wf-1",
+                scan_path="/library/imports",
+                storage_source_id="source-1",
+                relative_path="imports",
+                display_name="Imports",
+                is_enabled=1,
+                availability_state="active",
+                created_ts=datetime(2024, 1, 1, tzinfo=UTC),
+                updated_ts=datetime(2024, 1, 1, tzinfo=UTC),
+            )
+        )
+
+    extracted_payload = serialize_extracted_content_submission(
+        record=ingest_queue_processor.PhotoRecord(
+            photo_id="photo-extracted-warning",
+            path="/library/extracted-warning.jpg",
+            sha256="e" * 64,
+            filesize=123,
+            ext="jpg",
+            created_ts=datetime(2024, 1, 1, tzinfo=UTC),
+            modified_ts=datetime(2024, 1, 2, tzinfo=UTC),
+            shot_ts=None,
+            shot_ts_source=None,
+            camera_make=None,
+            camera_model=None,
+            software=None,
+            orientation=None,
+            gps_latitude=None,
+            gps_longitude=None,
+            gps_altitude=None,
+            thumbnail_jpeg=b"thumb",
+            thumbnail_mime_type="image/jpeg",
+            thumbnail_width=128,
+            thumbnail_height=96,
+            faces_count=0,
+        ),
+        storage_source_id="source-1",
+        watched_folder_id="wf-1",
+        relative_path="extracted-warning.jpg",
+        detections=[],
+        warnings=["face detection failed: detector exploded"],
+    )
+    queue_store.enqueue(
+        payload_type="extracted_photo",
+        payload=extracted_payload,
+        idempotency_key=f"extracted:{extracted_payload['photo_id']}",
+    )
+
+    result = process_pending_ingest_queue(
+        database_url,
+        limit=10,
+        face_detector=RaisingFaceDetector("should not run"),
+    )
+
+    assert result.processed == 1
+    assert result.failed == 0
+    assert result.retryable_errors == 0
+    assert load_face_rows(database_url, "photo-extracted-warning") == []
+    faces_count, faces_detected_ts = load_photo_detection_state(
+        database_url, "photo-extracted-warning"
+    )
+    assert faces_count == 0
+    assert faces_detected_ts is None
+
+
 def test_process_pending_rows_reuses_existing_photo_row_for_duplicate_sha_extracted_payload(
     tmp_path,
 ):
@@ -1156,6 +1231,46 @@ def test_process_pending_rows_marks_detection_complete_when_no_faces_found(tmp_p
     completed_rows = queue_store.list_by_status("completed")
     assert len(completed_rows) == 1
     assert completed_rows[0].last_error is None
+
+
+def test_process_pending_rows_marks_missing_candidate_files_failed(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'queue-processor-ingest-candidate-missing-file.db'}"
+    upgrade_database(database_url)
+    queue_store = IngestQueueStore(database_url)
+
+    missing_path = tmp_path / "missing.jpg"
+    candidate_payload = {
+        "payload_version": 1,
+        "storage_source_id": "source-1",
+        "watched_folder_id": "wf-1",
+        "canonical_path": "/library/missing.jpg",
+        "runtime_path": str(missing_path.resolve()),
+        "relative_path": "missing.jpg",
+        "filesize": 123,
+        "modified_ts": "2024-01-02T00:00:00+00:00",
+        "modified_mtime_ns": 123456789,
+        "idempotency_key": "wf-1:missing.jpg:123:123456789",
+    }
+    queue_id = queue_store.enqueue(
+        payload_type="ingest_candidate",
+        payload=candidate_payload,
+        idempotency_key=candidate_payload["idempotency_key"],
+    )
+
+    result = process_pending_ingest_queue(database_url, limit=10)
+
+    failed_rows = queue_store.list_by_status("failed")
+    file_rows = load_ingest_run_files(database_url)
+    assert result.processed == 0
+    assert result.failed == 1
+    assert result.retryable_errors == 0
+    assert len(failed_rows) == 1
+    assert failed_rows[0].ingest_queue_id == queue_id
+    assert "candidate file missing" in failed_rows[0].last_error.lower()
+    assert len(file_rows) == 1
+    assert file_rows[0]["path"] == candidate_payload["canonical_path"]
+    assert file_rows[0]["outcome"] == "failed"
+    assert "candidate file missing" in file_rows[0]["error_detail"].lower()
 
 
 def test_process_pending_rows_preserves_existing_thumbnail_when_queue_payload_has_no_thumbnail_data(

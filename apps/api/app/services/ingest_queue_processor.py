@@ -21,7 +21,7 @@ from app.processing.ingest_persistence import (
     upsert_source_photo,
 )
 from app.services.file_reconciliation import activate_observed_file
-from app.services.ingest_extraction_worker import process_candidate_payload
+from app.services.ingest_extraction_worker import CandidateFileMissingError, process_candidate_payload
 from app.storage import photo_files
 
 
@@ -109,7 +109,7 @@ def process_pending_ingest_queue(
                         claimed_row,
                         detector=detector,
                     )
-                except (KeyError, TypeError, ValueError) as exc:
+                except (KeyError, TypeError, ValueError, CandidateFileMissingError) as exc:
                     error_detail = str(exc)
                     ingest_run_id, run_created_in_transaction = _ensure_ingest_run(
                         run_store,
@@ -281,11 +281,15 @@ def _process_claimed_row(
             payload=claimed_row.payload_json,
             record=record,
         )
-        store_face_detections(
-            connection,
-            record.photo_id,
-            deserialize_detections(claimed_row.payload_json.get("detections")),
-        )
+        if not _payload_has_warning_prefix(
+            claimed_row.payload_json,
+            "face detection failed:",
+        ):
+            store_face_detections(
+                connection,
+                record.photo_id,
+                deserialize_detections(claimed_row.payload_json.get("detections")),
+            )
         return created, _payload_warning_detail(claimed_row.payload_json)
 
     created = upsert_photo(connection, record)
@@ -347,6 +351,16 @@ def _payload_warning_detail(payload: dict) -> str | None:
     if not warning_messages:
         return None
     return "\n".join(warning_messages)
+
+
+def _payload_has_warning_prefix(payload: dict, prefix: str) -> bool:
+    warnings = payload.get("warnings")
+    if not isinstance(warnings, list):
+        return False
+    return any(
+        isinstance(warning, str) and warning.startswith(prefix)
+        for warning in warnings
+    )
 
 
 def _extracted_payload_idempotency_key(payload: dict) -> str:
