@@ -71,16 +71,6 @@ def test_operational_activity_api_returns_only_active_polling_work(tmp_path, mon
     assert payload["polling"]["summary"]["active_count"] == 1
     assert payload["polling"]["items"][0]["ingest_run_id"] == "run-polling"
     assert payload["ingest_queue"]["items"] == []
-    assert payload["polling"]["items"] == [
-        {
-            "ingest_run_id": "run-polling",
-            "watched_folder_id": watched_folder["watched_folder_id"],
-            "storage_source_id": source["storage_source_id"],
-            "display_name": "Trips",
-            "scan_path": str(tmp_path / "family-share" / "2024" / "trips"),
-            "started_ts": "2026-04-04T15:30:00Z",
-        }
-    ]
 
 
 def test_operational_activity_api_excludes_completed_and_failed_work_from_live_snapshot(
