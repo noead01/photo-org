@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -78,6 +79,74 @@ def build_ingest_submission(
     )
     payload = _serialize_record(record)
     payload["idempotency_key"] = record.photo_id
+    return payload
+
+
+def build_ingest_candidate_submission(
+    path: Path,
+    *,
+    scan_root: Path,
+    canonical_path: str,
+    storage_source_id: str,
+    watched_folder_id: str,
+) -> dict:
+    relative_path = relative_photo_path(scan_root, path)
+    stat = path.stat()
+    modified_ts = _normalize_timestamp(_parse_timestamp(stat_timestamp_to_iso(stat.st_mtime))).isoformat()
+    return {
+        "payload_version": 1,
+        "storage_source_id": storage_source_id,
+        "watched_folder_id": watched_folder_id,
+        "canonical_path": canonical_path,
+        "runtime_path": str(path.resolve()),
+        "relative_path": relative_path,
+        "filesize": stat.st_size,
+        "modified_ts": modified_ts,
+        "modified_mtime_ns": stat.st_mtime_ns,
+        "idempotency_key": f"{watched_folder_id}:{relative_path}:{stat.st_size}:{stat.st_mtime_ns}",
+    }
+
+
+def serialize_extracted_content_submission(
+    *,
+    record: PhotoRecord,
+    storage_source_id: str,
+    watched_folder_id: str,
+    relative_path: str,
+    detections: list[dict],
+    warnings: list[str],
+) -> dict:
+    payload = _serialize_record(record)
+    payload.update(
+        {
+            "payload_version": 1,
+            "storage_source_id": storage_source_id,
+            "watched_folder_id": watched_folder_id,
+            "relative_path": relative_path,
+            "detections": _serialize_detections(detections),
+            "warnings": warnings,
+        }
+    )
+    return payload
+
+
+def serialize_reused_content_submission(
+    *,
+    record: PhotoRecord,
+    candidate_payload: dict,
+    warnings: list[str],
+) -> dict:
+    payload = _serialize_record(record)
+    payload.update(
+        {
+            "payload_version": 1,
+            "storage_source_id": candidate_payload["storage_source_id"],
+            "watched_folder_id": candidate_payload["watched_folder_id"],
+            "relative_path": candidate_payload["relative_path"],
+            "detections": [],
+            "warnings": warnings,
+        }
+    )
     return payload
 
 
@@ -184,8 +253,22 @@ def _serialize_record(record: PhotoRecord) -> dict:
         "gps_latitude": record.gps_latitude,
         "gps_longitude": record.gps_longitude,
         "gps_altitude": record.gps_altitude,
+        "thumbnail_jpeg": _encode_optional_thumbnail(record.thumbnail_jpeg),
+        "thumbnail_mime_type": record.thumbnail_mime_type,
+        "thumbnail_width": record.thumbnail_width,
+        "thumbnail_height": record.thumbnail_height,
         "faces_count": record.faces_count,
     }
+
+
+def _serialize_detections(detections: list[dict]) -> list[dict]:
+    return [
+        {
+            **detection,
+            "bitmap": _encode_optional_bytes(detection.get("bitmap")),
+        }
+        for detection in detections
+    ]
 
 
 def _photo_row_payload(
@@ -269,6 +352,16 @@ def _parse_timestamp(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value)
 
 
+def _encode_optional_bytes(value: bytes | None) -> str | None:
+    if value is None:
+        return None
+    return base64.b64encode(value).decode("ascii")
+
+
+def _encode_optional_thumbnail(value: bytes | None) -> str | None:
+    return _encode_optional_bytes(value)
+
+
 def _format_optional_timestamp(value: datetime | None) -> str | None:
     if value is None:
         return None
@@ -305,8 +398,11 @@ def _update_photo_row(
 
 __all__ = [
     "PhotoRecord",
+    "build_ingest_candidate_submission",
     "build_ingest_submission",
     "build_photo_record",
+    "serialize_extracted_content_submission",
+    "serialize_reused_content_submission",
     "store_face_detections",
     "upsert_photo",
     "upsert_source_photo",
