@@ -7,7 +7,10 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_db
-from app.services.operational_activity import get_operational_activity
+from app.services.operational_activity import (
+    get_operational_activity,
+    get_operational_activity_history,
+)
 
 
 router = APIRouter(prefix="/operations", tags=["operations"])
@@ -96,6 +99,43 @@ class OperationalActivityLiveResponse(BaseModel):
     ingest_queue: QueueLiveSectionResponse
 
 
+class PollingHistoryItemResponse(BaseModel):
+    ingest_run_id: str
+    watched_folder_id: str
+    display_name: str | None = None
+    event_type: str
+    event_ts: datetime
+    status: str
+    error_summary: str | None = None
+
+
+class QueueHistoryItemResponse(BaseModel):
+    ingest_queue_id: str
+    payload_type: str
+    path: str | None = None
+    event_type: str
+    event_ts: datetime
+    status: str
+    last_error: str | None = None
+
+
+class PagedPollingHistorySectionResponse(BaseModel):
+    items: list[PollingHistoryItemResponse]
+    next_cursor: str | None = None
+    has_more: bool
+
+
+class PagedQueueHistorySectionResponse(BaseModel):
+    items: list[QueueHistoryItemResponse]
+    next_cursor: str | None = None
+    has_more: bool
+
+
+class OperationalActivityHistoryResponse(BaseModel):
+    polling: PagedPollingHistorySectionResponse
+    ingest_queue: PagedQueueHistorySectionResponse
+
+
 @router.get(
     "/activity",
     summary="Get live operational activity",
@@ -110,3 +150,25 @@ def get_operational_activity_endpoint(
 ) -> OperationalActivityLiveResponse:
     payload = get_operational_activity(db.connection())
     return OperationalActivityLiveResponse.model_validate(payload)
+
+
+@router.get(
+    "/activity/history",
+    summary="Get operational activity history",
+    response_model=OperationalActivityHistoryResponse,
+)
+def get_operational_activity_history_endpoint(
+    polling_limit: int = 20,
+    polling_cursor: str | None = None,
+    queue_limit: int = 20,
+    queue_cursor: str | None = None,
+    db: Session = Depends(get_db),
+) -> OperationalActivityHistoryResponse:
+    payload = get_operational_activity_history(
+        db.connection(),
+        polling_limit=polling_limit,
+        polling_cursor=polling_cursor,
+        queue_limit=queue_limit,
+        queue_cursor=queue_cursor,
+    )
+    return OperationalActivityHistoryResponse.model_validate(payload)

@@ -261,6 +261,153 @@ def test_operational_activity_api_keeps_unresolved_stalled_queue_work_visible(tm
     assert payload["ingest_queue"]["items"][0]["is_stalled"] is True
 
 
+def test_operational_activity_history_returns_completed_and_failed_polling_entries_newest_first(
+    tmp_path, monkeypatch
+):
+    database_url = f"sqlite:///{tmp_path / 'operational-activity-history-ordering.db'}"
+    _, watched_folder = _seed_source_with_watched_folder(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        database_name="operational-activity-history-ordering.db",
+        database_url=database_url,
+    )
+    now = datetime(2026, 4, 4, 17, 0, tzinfo=UTC)
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(ingest_runs).values(
+                ingest_run_id="run-history-failed",
+                watched_folder_id=watched_folder["watched_folder_id"],
+                status="failed",
+                started_ts=now - timedelta(minutes=10),
+                completed_ts=now - timedelta(minutes=9),
+                files_seen=12,
+                files_created=4,
+                files_updated=0,
+                files_missing=1,
+                error_count=1,
+                error_summary="marker mismatch on alias //nas/family-share",
+            )
+        )
+        connection.execute(
+            insert(ingest_runs).values(
+                ingest_run_id="run-history-completed",
+                watched_folder_id=watched_folder["watched_folder_id"],
+                status="completed",
+                started_ts=now - timedelta(minutes=5),
+                completed_ts=now - timedelta(minutes=4),
+                files_seen=14,
+                files_created=5,
+                files_updated=1,
+                files_missing=0,
+                error_count=0,
+                error_summary=None,
+            )
+        )
+
+    client = TestClient(app)
+
+    response = client.get("/api/v1/operations/activity/history")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["polling"]["items"][0]["event_type"] == "poll_completed"
+    assert payload["polling"]["items"][1]["event_type"] == "poll_failed"
+    assert payload["polling"]["items"][0]["watched_folder_id"] == watched_folder["watched_folder_id"]
+    assert payload["polling"]["has_more"] is False
+
+
+def test_operational_activity_history_keeps_polling_and_queue_pagination_separate(
+    tmp_path, monkeypatch
+):
+    database_url = f"sqlite:///{tmp_path / 'operational-activity-history-pagination.db'}"
+    _, watched_folder = _seed_source_with_watched_folder(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        database_name="operational-activity-history-pagination.db",
+        database_url=database_url,
+    )
+    now = datetime(2026, 4, 4, 18, 0, tzinfo=UTC)
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(ingest_runs),
+            [
+                {
+                    "ingest_run_id": "run-history-1",
+                    "watched_folder_id": watched_folder["watched_folder_id"],
+                    "status": "completed",
+                    "started_ts": now - timedelta(minutes=6),
+                    "completed_ts": now - timedelta(minutes=5),
+                    "files_seen": 10,
+                    "files_created": 4,
+                    "files_updated": 0,
+                    "files_missing": 0,
+                    "error_count": 0,
+                    "error_summary": None,
+                },
+                {
+                    "ingest_run_id": "run-history-2",
+                    "watched_folder_id": watched_folder["watched_folder_id"],
+                    "status": "failed",
+                    "started_ts": now - timedelta(minutes=4),
+                    "completed_ts": now - timedelta(minutes=3),
+                    "files_seen": 9,
+                    "files_created": 3,
+                    "files_updated": 1,
+                    "files_missing": 1,
+                    "error_count": 1,
+                    "error_summary": "transient marker read failure",
+                },
+            ],
+        )
+        connection.execute(
+            insert(ingest_queue),
+            [
+                {
+                    "ingest_queue_id": "queue-history-1",
+                    "payload_type": "photo_metadata",
+                    "payload_json": {"path": "queued/history-1.jpg"},
+                    "idempotency_key": "history-1.jpg",
+                    "status": "completed",
+                    "attempt_count": 1,
+                    "enqueued_ts": now - timedelta(minutes=9),
+                    "last_attempt_ts": now - timedelta(minutes=8),
+                    "processed_ts": now - timedelta(minutes=7),
+                    "last_error": None,
+                },
+                {
+                    "ingest_queue_id": "queue-history-2",
+                    "payload_type": "photo_metadata",
+                    "payload_json": {"path": "queued/history-2.jpg"},
+                    "idempotency_key": "history-2.jpg",
+                    "status": "failed",
+                    "attempt_count": 2,
+                    "enqueued_ts": now - timedelta(minutes=5),
+                    "last_attempt_ts": now - timedelta(minutes=4),
+                    "processed_ts": None,
+                    "last_error": "temporary timeout",
+                },
+            ],
+        )
+
+    client = TestClient(app)
+
+    response = client.get(
+        "/api/v1/operations/activity/history",
+        params={"polling_limit": 1, "queue_limit": 1},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["polling"]["items"]) == 1
+    assert len(payload["ingest_queue"]["items"]) == 1
+    assert payload["polling"]["next_cursor"] is not None
+    assert payload["ingest_queue"]["next_cursor"] is not None
+
+
 def _seed_source_with_watched_folder(*, tmp_path, monkeypatch, database_name: str, database_url: str):
     from app.services.storage_sources import attach_storage_source_alias, create_storage_source
     from app.services.watched_folders import create_watched_folder
