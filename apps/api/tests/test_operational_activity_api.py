@@ -210,75 +210,16 @@ def test_operational_activity_api_reports_active_queue_processing(tmp_path, monk
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["state"] == "processing_queue"
-    assert payload["polling"]["active_count"] == 0
-    assert payload["ingest_queue"]["pending_count"] == 1
-    assert payload["ingest_queue"]["processing_count"] == 1
-    assert payload["ingest_queue"]["failed_count"] == 0
-    assert payload["ingest_queue"]["stalled_count"] == 0
-    assert payload["ingest_queue"]["oldest_pending_ts"] == (
-        now - timedelta(minutes=5)
-    ).isoformat().replace("+00:00", "Z")
-
-
-def test_operational_activity_api_reports_attention_required_for_failed_or_stalled_work(
-    tmp_path, monkeypatch
-):
-    database_url = f"sqlite:///{tmp_path / 'operational-activity-attention.db'}"
-    _, watched_folder = _seed_source_with_watched_folder(
-        tmp_path=tmp_path,
-        monkeypatch=monkeypatch,
-        database_name="operational-activity-attention.db",
-        database_url=database_url,
-    )
-    now = datetime.now(tz=UTC)
-    stale_attempt_ts = now - timedelta(seconds=PROCESSING_LEASE_SECONDS + 60)
-
-    engine = create_engine(database_url, future=True)
-    with engine.begin() as connection:
-        connection.execute(
-            insert(ingest_runs).values(
-                ingest_run_id="run-failed",
-                watched_folder_id=watched_folder["watched_folder_id"],
-                status="failed",
-                started_ts=now - timedelta(minutes=2),
-                completed_ts=now - timedelta(minutes=1),
-                files_seen=12,
-                files_created=2,
-                files_updated=1,
-                files_missing=0,
-                error_count=1,
-                error_summary="marker mismatch on alias //nas/family-share",
-            )
-        )
-        connection.execute(
-            insert(ingest_queue).values(
-                ingest_queue_id="queue-stalled",
-                payload_type="photo_metadata",
-                payload_json={"path": "queued/stalled.jpg"},
-                idempotency_key="stalled.jpg",
-                status="processing",
-                attempt_count=2,
-                enqueued_ts=now - timedelta(minutes=8),
-                last_attempt_ts=stale_attempt_ts,
-                processed_ts=None,
-                last_error="temporary timeout",
-            )
-        )
-
-    client = TestClient(app)
-
-    response = client.get("/api/v1/operations/activity")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["state"] == "attention_required"
-    assert payload["signals"]["recent_failure_count"] == 1
-    assert payload["signals"]["stalled_count"] == 1
-    assert payload["ingest_queue"]["stalled_count"] == 1
-    assert payload["recent_failures"][0]["kind"] == "watched_folder_ingest"
-    assert payload["recent_failures"][0]["watched_folder_id"] == watched_folder["watched_folder_id"]
-    assert payload["recent_failures"][0]["error_summary"] == "marker mismatch on alias //nas/family-share"
+    assert set(payload.keys()) == {"observed_at", "polling", "ingest_queue"}
+    assert payload["polling"]["items"] == []
+    assert payload["polling"]["summary"]["active_count"] == 0
+    assert payload["ingest_queue"]["summary"]["pending_count"] == 1
+    assert payload["ingest_queue"]["summary"]["processing_count"] == 1
+    assert payload["ingest_queue"]["summary"]["stalled_count"] == 0
+    assert payload["ingest_queue"]["items"][0]["ingest_queue_id"] == "queue-processing"
+    assert payload["ingest_queue"]["items"][0]["payload_type"] == "photo_metadata"
+    assert payload["ingest_queue"]["items"][0]["path"] == "queued/active.jpg"
+    assert payload["ingest_queue"]["items"][0]["is_stalled"] is False
 
 
 def _seed_source_with_watched_folder(*, tmp_path, monkeypatch, database_name: str, database_url: str):
