@@ -185,7 +185,9 @@ The current ingest development path uses an API-owned persistence boundary.
 
 Contributors should assume:
 
-- worker-side ingest code queues `photo_metadata` submissions instead of mutating catalog tables directly
+- `poll-storage-sources` performs discovery and candidate scheduling only
+- queued workers hash content and, when needed, run metadata extraction, thumbnail generation, and face detection before persistence
+- duplicate-content files should reuse existing extracted artifacts by SHA instead of re-running full analysis
 - the API service owns processing queued submissions and writing domain tables
 - internal queue processing is triggered through the bounded API endpoint rather than ad hoc direct DB writes
 
@@ -222,7 +224,7 @@ For missing-file reconciliation verification, run `uv run python -m pytest apps/
 That targeted suite exercises a temporary watched-folder fixture and simulated time so contributors can verify `active`, `missing`, `deleted`, and recovery transitions without bringing up the full worker stack.
 
 For the source-aware central polling loop, register a storage source plus watched folder first, then run `uv run python -m app.cli poll-storage-sources --database-url <url>`.
-That command validates the source marker before scanning, surfaces source-aware failures in its exit code and stdout, and reconciles only enabled watched folders attached to registered storage sources.
+That command validates the source marker before scanning, surfaces source-aware failures in its exit code and stdout, reconciles only enabled watched folders attached to registered storage sources, and enqueues candidate work for downstream extraction instead of performing inline media analysis.
 
 ### Automated Version Updates
 
