@@ -12,13 +12,14 @@ from sqlalchemy.engine import Connection
 
 from app.db.config import resolve_missing_file_grace_period_days
 from app.db.ingest_runs import IngestRunStore
+from app.db.queue import IngestQueueStore
 from app.path_contract import build_rooted_photo_path, build_source_aware_photo_path, relative_photo_path
 from app.processing.ingest_common import IngestResult, iter_photo_files
 from app.processing.ingest_persistence import (
     PhotoRecord,
+    build_ingest_candidate_submission,
     build_photo_record,
     upsert_photo,
-    upsert_source_photo,
 )
 from app.services.file_reconciliation import (
     activate_observed_file,
@@ -31,7 +32,7 @@ from app.services.file_reconciliation import (
 )
 from app.services.source_registration import SourceRegistrationError, read_source_marker
 from app.services.thumbnails import generate_thumbnail
-from app.storage import create_db_engine, storage_source_aliases, watched_folders
+from app.storage import create_db_engine, photo_files, storage_source_aliases, watched_folders
 
 @dataclass(frozen=True)
 class RegisteredWatchedFolderTarget:
@@ -50,6 +51,7 @@ class RegisteredStorageSourceTarget:
 @dataclass(frozen=True)
 class WatchedFolderPollOutcome:
     scanned: int
+    enqueued: int
     inserted: int
     updated: int
     error_messages: tuple[str, ...]
@@ -108,6 +110,7 @@ def poll_registered_storage_sources(
     grace_period_days = resolve_missing_file_grace_period_days(missing_file_grace_period_days)
     engine = create_db_engine(database_url)
     run_store = IngestRunStore(database_url)
+    queue_store = IngestQueueStore(database_url)
 
     with engine.begin() as connection:
         targets = _load_registered_storage_source_targets(connection)
@@ -149,6 +152,8 @@ def poll_registered_storage_sources(
             try:
                 _validate_scan_root(scan_root)
                 for chunk_paths in _iter_chunks(iter_photo_files(scan_root), chunk_size=poll_chunk_size):
+                    outcome: WatchedFolderPollOutcome
+                    chunk_touched_photo_ids: set[str]
                     with engine.begin() as connection:
                         outcome, chunk_touched_photo_ids = _process_watched_folder_chunk(
                             connection,
@@ -162,12 +167,9 @@ def poll_registered_storage_sources(
                             reuse_existing_photo_by_sha=True,
                             now=at,
                             observed_relative_paths=observed_relative_paths,
+                            queue_store=queue_store,
+                            storage_source_id=source_target.storage_source_id,
                         )
-                        touched_photo_ids.update(chunk_touched_photo_ids)
-                        result.scanned += outcome.scanned
-                        result.inserted += outcome.inserted
-                        result.updated += outcome.updated
-                        result.errors.extend(outcome.error_messages)
                         _record_ingest_run(
                             run_store,
                             connection=connection,
@@ -178,6 +180,12 @@ def poll_registered_storage_sources(
                             files_updated=outcome.updated,
                             error_messages=outcome.error_messages,
                         )
+                    touched_photo_ids.update(chunk_touched_photo_ids)
+                    result.scanned += outcome.scanned
+                    result.enqueued += outcome.enqueued
+                    result.inserted += outcome.inserted
+                    result.updated += outcome.updated
+                    result.errors.extend(outcome.error_messages)
                 with engine.begin() as connection:
                     _finalize_watched_folder_scan(
                         connection,
@@ -257,8 +265,11 @@ def _process_watched_folder_chunk(
     reuse_existing_photo_by_sha: bool,
     now: datetime,
     observed_relative_paths: set[str],
+    queue_store: IngestQueueStore | None = None,
+    storage_source_id: str | None = None,
 ) -> tuple[WatchedFolderPollOutcome, set[str]]:
     scanned = 0
+    enqueued = 0
     inserted = 0
     updated_count = 0
     error_messages: list[str] = []
@@ -267,6 +278,52 @@ def _process_watched_folder_chunk(
     for photo_path in photo_paths:
         scanned += 1
         relative_path = relative_photo_path(source_root, photo_path)
+        observed_relative_paths.add(relative_path)
+        if reuse_existing_photo_by_sha:
+            assert queue_store is not None
+            assert storage_source_id is not None
+            payload = build_ingest_candidate_submission(
+                photo_path,
+                scan_root=source_root,
+                canonical_path=canonical_path_for_relative_path(relative_path),
+                storage_source_id=storage_source_id,
+                watched_folder_id=watched_folder_id,
+            )
+            enqueue_result = queue_store.enqueue_in_transaction(
+                payload_type="ingest_candidate",
+                payload=payload,
+                idempotency_key=payload["idempotency_key"],
+                connection=connection,
+            )
+            if enqueue_result.created:
+                enqueued += 1
+            existing_file = connection.execute(
+                select(
+                    photo_files.c.photo_id,
+                    photo_files.c.created_ts,
+                ).where(
+                    photo_files.c.watched_folder_id == watched_folder_id,
+                    photo_files.c.relative_path == relative_path,
+                )
+            ).mappings().one_or_none()
+            if existing_file is not None:
+                stat = photo_path.stat()
+                touched_photo_ids.add(
+                    activate_observed_file(
+                        connection,
+                        watched_folder_id=watched_folder_id,
+                        photo_id=existing_file["photo_id"],
+                        relative_path=relative_path,
+                        filename=photo_path.name,
+                        extension=photo_path.suffix.lower().removeprefix(".") or None,
+                        filesize=stat.st_size,
+                        created_ts=existing_file["created_ts"],
+                        modified_ts=datetime.fromtimestamp(stat.st_mtime, tz=now.tzinfo),
+                        now=now,
+                    )
+                )
+            continue
+
         record = build_photo_record(
             photo_path,
             canonical_path=canonical_path_for_relative_path(relative_path),
@@ -285,12 +342,7 @@ def _process_watched_folder_chunk(
                     "thumbnail_height": thumbnail.height,
                 }
             )
-        observed_relative_paths.add(relative_path)
-        if reuse_existing_photo_by_sha:
-            created, photo_id = upsert_source_photo(connection, record)
-        else:
-            created = upsert_photo(connection, record)
-            photo_id = record.photo_id
+        created = upsert_photo(connection, record)
         if created:
             inserted += 1
         else:
@@ -299,7 +351,7 @@ def _process_watched_folder_chunk(
             activate_observed_file(
                 connection,
                 watched_folder_id=watched_folder_id,
-                photo_id=photo_id,
+                photo_id=record.photo_id,
                 relative_path=relative_path,
                 filename=photo_path.name,
                 extension=record.ext,
@@ -313,6 +365,7 @@ def _process_watched_folder_chunk(
     return (
         WatchedFolderPollOutcome(
             scanned=scanned,
+            enqueued=enqueued,
             inserted=inserted,
             updated=updated_count,
             error_messages=tuple(error_messages),
@@ -365,6 +418,7 @@ def _reconcile_watched_folder_root(
         )
         return WatchedFolderPollOutcome(
             scanned=0,
+            enqueued=0,
             inserted=0,
             updated=0,
             error_messages=(),

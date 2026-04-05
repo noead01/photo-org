@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -66,6 +67,12 @@ def _normalize_timestamp(value: datetime | None) -> datetime | None:
     return value
 
 
+def _decode_base64_text(value: str | None) -> bytes | None:
+    if value is None:
+        return None
+    return base64.b64decode(value)
+
+
 def test_build_photo_record_returns_stable_identity_for_same_file_and_path(tmp_path):
     from app.processing.ingest_persistence import build_photo_record
 
@@ -126,6 +133,266 @@ def test_build_ingest_submission_serializes_expected_payload_fields(tmp_path):
     assert payload["gps_longitude"] is None
     assert payload["gps_altitude"] is None
     assert payload["faces_count"] == 0
+
+
+def test_build_ingest_candidate_submission_serializes_discovery_only_fields(tmp_path):
+    from app.processing.ingest_persistence import build_ingest_candidate_submission
+
+    scan_root = tmp_path / "library"
+    scan_root.mkdir()
+    photo_path = scan_root / "sample.jpg"
+    photo_path.write_bytes(b"candidate-bytes")
+
+    payload = build_ingest_candidate_submission(
+        photo_path,
+        scan_root=scan_root,
+        canonical_path="/library/sample.jpg",
+        storage_source_id="source-1",
+        watched_folder_id="wf-1",
+    )
+
+    assert payload["payload_version"] == 1
+    assert payload["storage_source_id"] == "source-1"
+    assert payload["watched_folder_id"] == "wf-1"
+    assert payload["canonical_path"] == "/library/sample.jpg"
+    assert payload["runtime_path"] == str(photo_path.resolve())
+    assert payload["relative_path"] == "sample.jpg"
+    assert payload["modified_mtime_ns"] == photo_path.stat().st_mtime_ns
+    assert payload["idempotency_key"] == (
+        f"wf-1:sample.jpg:{photo_path.stat().st_size}:{photo_path.stat().st_mtime_ns}"
+    )
+    assert payload["filesize"] == photo_path.stat().st_size
+    assert "sha256" not in payload
+    assert "thumbnail_jpeg" not in payload
+    assert "thumbnail_mime_type" not in payload
+    assert "thumbnail_width" not in payload
+    assert "thumbnail_height" not in payload
+    assert "faces_count" not in payload
+    assert "detections" not in payload
+    assert "modified_mtime_ns" in payload
+
+
+def test_serialize_extracted_content_submission_includes_face_and_thumbnail_fields():
+    from app.processing.ingest_persistence import (
+        PhotoRecord,
+        serialize_extracted_content_submission,
+    )
+
+    record = PhotoRecord(
+        photo_id="photo-1",
+        path="/library/sample.jpg",
+        sha256="abc123",
+        filesize=123,
+        ext="jpg",
+        created_ts=datetime(2026, 4, 5, 12, 0, tzinfo=UTC),
+        modified_ts=datetime(2026, 4, 5, 12, 1, tzinfo=UTC),
+        shot_ts=None,
+        shot_ts_source=None,
+        camera_make="Canon",
+        camera_model="EOS",
+        software=None,
+        orientation="1",
+        gps_latitude=None,
+        gps_longitude=None,
+        gps_altitude=None,
+        thumbnail_jpeg=b"thumb",
+        thumbnail_mime_type="image/jpeg",
+        thumbnail_width=128,
+        thumbnail_height=128,
+        faces_count=1,
+    )
+
+    payload = serialize_extracted_content_submission(
+        record=record,
+        storage_source_id="source-1",
+        watched_folder_id="wf-1",
+        relative_path="sample.jpg",
+        detections=[
+            {
+                "face_id": "face-1",
+                "bbox_x": 1,
+                "bbox_y": 2,
+                "bbox_w": 3,
+                "bbox_h": 4,
+                "bitmap": b"face-bytes",
+                "embedding": None,
+                "provenance": {"detector": "opencv"},
+            }
+        ],
+        warnings=["face detection failed for sidecar"],
+    )
+
+    assert payload["payload_version"] == 1
+    assert payload["storage_source_id"] == "source-1"
+    assert payload["watched_folder_id"] == "wf-1"
+    assert payload["relative_path"] == "sample.jpg"
+    assert payload["sha256"] == "abc123"
+    assert payload["faces_count"] == 1
+    assert payload["thumbnail_jpeg"] == "dGh1bWI="
+    assert _decode_base64_text(payload["thumbnail_jpeg"]) == b"thumb"
+    assert payload["thumbnail_mime_type"] == "image/jpeg"
+    assert payload["thumbnail_width"] == 128
+    assert payload["thumbnail_height"] == 128
+    assert payload["detections"][0]["face_id"] == "face-1"
+    assert payload["detections"][0]["bitmap"] == "ZmFjZS1ieXRlcw=="
+    assert _decode_base64_text(payload["detections"][0]["bitmap"]) == b"face-bytes"
+    assert payload["warnings"] == ["face detection failed for sidecar"]
+
+
+def test_serialize_reused_content_submission_includes_json_safe_thumbnail_fields():
+    from app.processing.ingest_persistence import (
+        PhotoRecord,
+        serialize_reused_content_submission,
+    )
+
+    record = PhotoRecord(
+        photo_id="photo-1",
+        path="/library/sample.jpg",
+        sha256="abc123",
+        filesize=123,
+        ext="jpg",
+        created_ts=datetime(2026, 4, 5, 12, 0, tzinfo=UTC),
+        modified_ts=datetime(2026, 4, 5, 12, 1, tzinfo=UTC),
+        shot_ts=None,
+        shot_ts_source=None,
+        camera_make=None,
+        camera_model=None,
+        software=None,
+        orientation=None,
+        gps_latitude=None,
+        gps_longitude=None,
+        gps_altitude=None,
+        thumbnail_jpeg=b"thumb",
+        thumbnail_mime_type="image/jpeg",
+        thumbnail_width=128,
+        thumbnail_height=128,
+        faces_count=1,
+    )
+
+    payload = serialize_reused_content_submission(
+        record=record,
+        candidate_payload={
+            "storage_source_id": "source-1",
+            "watched_folder_id": "wf-1",
+            "relative_path": "sample.jpg",
+        },
+        warnings=["reused existing content"],
+    )
+
+    assert payload["payload_version"] == 1
+    assert payload["storage_source_id"] == "source-1"
+    assert payload["watched_folder_id"] == "wf-1"
+    assert payload["relative_path"] == "sample.jpg"
+    assert payload["thumbnail_jpeg"] == "dGh1bWI="
+    assert _decode_base64_text(payload["thumbnail_jpeg"]) == b"thumb"
+    assert payload["detections"] == []
+    assert payload["warnings"] == ["reused existing content"]
+
+
+def test_lookup_existing_artifacts_by_sha_prefers_complete_duplicate_row(tmp_path):
+    from app.processing.ingest_persistence import lookup_existing_artifacts_by_sha
+
+    class FakeMappingsResult:
+        def __init__(self, rows: list[dict]) -> None:
+            self._rows = rows
+
+        def all(self) -> list[dict]:
+            return list(self._rows)
+
+    class FakeExecuteResult:
+        def __init__(self, rows: list[dict]) -> None:
+            self._rows = rows
+
+        def mappings(self) -> FakeMappingsResult:
+            return FakeMappingsResult(self._rows)
+
+    class FakeConnection:
+        def __init__(self) -> None:
+            self.photo_query_count = 0
+
+        def execute(self, statement):
+            compiled = str(statement)
+            if "FROM photos" in compiled:
+                self.photo_query_count += 1
+                return FakeExecuteResult(
+                    [
+                        {
+                            "photo_id": "incomplete-photo",
+                            "shot_ts": None,
+                            "shot_ts_source": None,
+                            "camera_make": None,
+                            "camera_model": None,
+                            "software": None,
+                            "orientation": None,
+                            "gps_latitude": None,
+                            "gps_longitude": None,
+                            "gps_altitude": None,
+                            "thumbnail_jpeg": None,
+                            "thumbnail_mime_type": None,
+                            "thumbnail_width": None,
+                            "thumbnail_height": None,
+                            "faces_count": 0,
+                            "faces_detected_ts": None,
+                        },
+                        {
+                            "photo_id": "complete-photo",
+                            "shot_ts": None,
+                            "shot_ts_source": None,
+                            "camera_make": "Canon",
+                            "camera_model": "EOS",
+                            "software": None,
+                            "orientation": "1",
+                            "gps_latitude": None,
+                            "gps_longitude": None,
+                            "gps_altitude": None,
+                            "thumbnail_jpeg": b"complete-thumbnail",
+                            "thumbnail_mime_type": "image/jpeg",
+                            "thumbnail_width": 64,
+                            "thumbnail_height": 64,
+                            "faces_count": 1,
+                            "faces_detected_ts": datetime(2026, 4, 5, 12, 30, tzinfo=UTC),
+                        },
+                    ]
+                )
+            if "FROM faces" in compiled:
+                return FakeExecuteResult(
+                    [
+                        {
+                            "face_id": "face-1",
+                            "person_id": None,
+                            "bbox_x": 10,
+                            "bbox_y": 11,
+                            "bbox_w": 12,
+                            "bbox_h": 13,
+                            "bitmap": b"existing-face",
+                            "embedding": None,
+                            "provenance": {"detector": "existing"},
+                        }
+                    ]
+                )
+            raise AssertionError(f"unexpected statement: {compiled}")
+
+    connection = FakeConnection()
+    result = lookup_existing_artifacts_by_sha(connection, "same-sha")
+
+    assert connection.photo_query_count == 1
+    assert result is not None
+    assert result["photo_id"] == "complete-photo"
+    assert result["thumbnail_jpeg"] == b"complete-thumbnail"
+    assert result["faces_count"] == 1
+    assert result["detections"] == [
+        {
+            "face_id": "face-1",
+            "person_id": None,
+            "bbox_x": 10,
+            "bbox_y": 11,
+            "bbox_w": 12,
+            "bbox_h": 13,
+            "bitmap": b"existing-face",
+            "embedding": None,
+            "provenance": {"detector": "existing"},
+        }
+    ]
 
 
 def test_upsert_photo_preserves_existing_thumbnail_when_new_record_lacks_one(tmp_path):

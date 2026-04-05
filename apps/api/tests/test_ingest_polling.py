@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, func, select
 
+from app.db.queue import IngestQueueStore
 from app.migrations import upgrade_database
 from app.services.source_registration import MARKER_FILENAME, write_source_marker
 from app.services.storage_sources import attach_storage_source_alias, create_storage_source
@@ -62,10 +63,22 @@ def test_poll_registered_storage_sources_processes_a_registered_source_end_to_en
     result = poll_registered_storage_sources(database_url=database_url, now=now)
 
     assert result.scanned == 1
-    assert result.inserted == 1
+    assert result.enqueued == 1
+    assert result.inserted == 0
     assert result.updated == 0
     assert result.errors == []
     expected_now = now.replace(tzinfo=None)
+
+    queue_rows = IngestQueueStore(database_url).list_pending()
+    assert len(queue_rows) == 1
+    assert queue_rows[0].payload_type == "ingest_candidate"
+    assert queue_rows[0].payload_json["runtime_path"] == str(
+        (watched / "birthday_park_001.jpg").resolve()
+    )
+    assert queue_rows[0].payload_json["watched_folder_id"] == watched_folder["watched_folder_id"]
+    assert queue_rows[0].payload_json["storage_source_id"] == source["storage_source_id"]
+    assert "sha256" not in queue_rows[0].payload_json
+    assert "thumbnail_jpeg" not in queue_rows[0].payload_json
 
     with engine.connect() as connection:
         source_row = connection.execute(
@@ -94,10 +107,10 @@ def test_poll_registered_storage_sources_processes_a_registered_source_end_to_en
     assert run_row["watched_folder_id"] == watched_folder["watched_folder_id"]
     assert run_row["status"] == "completed"
     assert run_row["files_seen"] == 1
-    assert run_row["files_created"] == 1
+    assert run_row["files_created"] == 0
     assert run_row["files_updated"] == 0
     assert run_row["error_count"] == 0
-    assert photo_count == 1
+    assert photo_count == 0
 
 
 def test_poll_registered_storage_sources_records_one_completed_run_per_chunk(tmp_path):
@@ -154,11 +167,121 @@ def test_poll_registered_storage_sources_records_one_completed_run_per_chunk(tmp
             ).mappings()
         )
 
-    assert [(row["status"], row["files_seen"]) for row in run_rows] == [
-        ("completed", 2),
-        ("completed", 2),
-        ("completed", 1),
+    assert result.enqueued == 5
+    assert result.inserted == 0
+    assert result.updated == 0
+    assert [(row["status"], row["files_seen"], row["files_created"], row["files_updated"]) for row in run_rows] == [
+        ("completed", 2, 0, 0),
+        ("completed", 2, 0, 0),
+        ("completed", 1, 0, 0),
     ]
+
+
+def test_poll_registered_storage_sources_does_not_increment_enqueued_for_idempotent_rescan(tmp_path):
+    from app.processing.ingest_polling import poll_registered_storage_sources
+
+    database_url = f"sqlite:///{tmp_path / 'poll-idempotent-rescan.db'}"
+    upgrade_database(database_url)
+    now = datetime(2026, 4, 4, 12, 2, tzinfo=UTC)
+
+    root = tmp_path / "source-root"
+    watched = root / "imports"
+    watched.mkdir(parents=True)
+    _write_test_image(watched / "photo_000.jpg")
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        source = create_storage_source(
+            connection,
+            display_name="Source",
+            marker_filename=MARKER_FILENAME,
+            marker_version=1,
+            now=now,
+        )
+        attach_storage_source_alias(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            now=now,
+        )
+        create_watched_folder(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            watched_path=watched.as_posix(),
+            display_name="Imports",
+            now=now,
+        )
+        write_source_marker(root, storage_source_id=source["storage_source_id"])
+
+    first = poll_registered_storage_sources(database_url=database_url, now=now)
+    second = poll_registered_storage_sources(database_url=database_url, now=now)
+
+    assert first.enqueued == 1
+    assert second.scanned == 1
+    assert second.enqueued == 0
+    assert len(IngestQueueStore(database_url).list_pending()) == 1
+
+
+def test_poll_registered_storage_sources_rolls_back_candidate_queue_rows_when_chunk_fails(
+    tmp_path, monkeypatch
+):
+    import app.processing.ingest_polling as ingest_polling
+
+    database_url = f"sqlite:///{tmp_path / 'poll-chunk-rollback.db'}"
+    upgrade_database(database_url)
+    now = datetime(2026, 4, 4, 12, 4, tzinfo=UTC)
+
+    root = tmp_path / "source-root"
+    watched = root / "imports"
+    watched.mkdir(parents=True)
+    _write_test_image(watched / "photo_000.jpg")
+    _write_test_image(watched / "photo_001.jpg")
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        source = create_storage_source(
+            connection,
+            display_name="Source",
+            marker_filename=MARKER_FILENAME,
+            marker_version=1,
+            now=now,
+        )
+        attach_storage_source_alias(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            now=now,
+        )
+        watched_folder = create_watched_folder(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            watched_path=watched.as_posix(),
+            display_name="Imports",
+            now=now,
+        )
+        write_source_marker(root, storage_source_id=source["storage_source_id"])
+
+    call_count = 0
+
+    def fail_during_chunk(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise RuntimeError("forced chunk failure")
+
+    monkeypatch.setattr(ingest_polling, "_record_ingest_run", fail_during_chunk)
+
+    result = ingest_polling.poll_registered_storage_sources(
+        database_url=database_url,
+        now=now,
+        poll_chunk_size=2,
+    )
+
+    assert result.errors == [f"watched_folder:{watched_folder['watched_folder_id']}: forced chunk failure"]
+    assert result.enqueued == 0
+    assert IngestQueueStore(database_url).list_pending() == []
 
 
 def test_poll_registered_storage_sources_rejects_invalid_poll_chunk_size_without_marking_source_failed(

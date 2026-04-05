@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+import base64
 import posixpath
 import shutil
 from pathlib import Path
@@ -20,6 +21,7 @@ from app.services.file_reconciliation import (
     reconcile_watched_folder,
     refresh_photo_deleted_timestamps,
 )
+from app.services.ingest_queue_processor import process_pending_ingest_queue
 from app.services.source_registration import MARKER_FILENAME
 from app.services.storage_sources import attach_storage_source_alias, create_storage_source
 from app.services.watched_folders import create_watched_folder
@@ -738,7 +740,8 @@ def test_poll_registered_storage_sources_scans_enabled_registered_watched_folder
     result = poll_registered_storage_sources(database_url=db_url, now=now)
 
     assert result.scanned == 6
-    assert result.inserted == 6
+    assert result.enqueued == 6
+    assert result.inserted == 0
     assert result.updated == 0
     assert result.errors == []
 
@@ -752,14 +755,19 @@ def test_poll_registered_storage_sources_scans_enabled_registered_watched_folder
     assert source["last_failure_reason"] is None
     assert source["last_validated_ts"] == now
 
-    photo = load_photo_row(
-        db_url,
-        _source_aware_photo_path(
-            source_id,
-            "family-events/birthday-park/birthday_park_001.jpg",
-        ),
+    queue_rows = load_pending_queue_rows(db_url)
+    assert len(queue_rows) == 6
+    sample = next(
+        row
+        for row in queue_rows
+        if row.payload_json["relative_path"] == "family-events/birthday-park/birthday_park_001.jpg"
     )
-    assert photo["thumbnail_mime_type"] == "image/jpeg"
+    assert sample.payload_type == "ingest_candidate"
+    assert sample.payload_json["canonical_path"] == _source_aware_photo_path(
+        source_id,
+        "family-events/birthday-park/birthday_park_001.jpg",
+    )
+    assert "thumbnail_jpeg" not in sample.payload_json
 
 
 def test_poll_registered_storage_sources_ignores_legacy_scan_path_for_identity(
@@ -789,18 +797,17 @@ def test_poll_registered_storage_sources_ignores_legacy_scan_path_for_identity(
     result = poll_registered_storage_sources(database_url=db_url, now=now)
 
     assert result.errors == []
-    photo = load_photo_row(
-        db_url,
-        _source_aware_photo_path(
-            source_id,
-            "family-events/birthday-park/birthday_park_001.jpg",
-        ),
+    queue_rows = load_pending_queue_rows(db_url)
+    sample = next(
+        row
+        for row in queue_rows
+        if row.payload_json["relative_path"] == "family-events/birthday-park/birthday_park_001.jpg"
     )
-    assert photo["path"] == _source_aware_photo_path(
+    assert sample.payload_json["canonical_path"] == _source_aware_photo_path(
         source_id,
         "family-events/birthday-park/birthday_park_001.jpg",
     )
-    assert not photo["path"].startswith("/legacy/photos/")
+    assert not sample.payload_json["canonical_path"].startswith("/legacy/photos/")
 
 
 def test_poll_registered_storage_sources_aborts_reconciliation_on_marker_mismatch(
@@ -833,6 +840,7 @@ def test_poll_registered_storage_sources_aborts_reconciliation_on_marker_mismatc
     failed_result = poll_registered_storage_sources(database_url=db_url, now=failed_now)
 
     assert failed_result.scanned == 0
+    assert failed_result.enqueued == 0
     assert failed_result.inserted == 0
     assert failed_result.updated == 0
     assert failed_result.errors == [
@@ -849,13 +857,7 @@ def test_poll_registered_storage_sources_aborts_reconciliation_on_marker_mismatc
     assert watched_folder["last_failure_reason"] == "marker_mismatch"
     assert watched_folder["last_successful_scan_ts"] == healthy_now
 
-    photo_file = load_photo_file_row(
-        db_url,
-        "family-events/birthday-park/birthday_park_006.jpg",
-    )
-    assert photo_file["lifecycle_state"] == "active"
-    assert photo_file["missing_ts"] is None
-    assert photo_file["deleted_ts"] is None
+    assert load_pending_queue_count(db_url) == 6
 
 
 def test_poll_registered_storage_sources_reports_missing_marker_file(
@@ -966,7 +968,7 @@ def test_poll_registered_storage_sources_records_chunked_ingest_runs_for_success
     upgrade_database(db_url)
 
     now = datetime(2026, 3, 28, 22, 45, tzinfo=UTC)
-    _, watched_folder_id = seed_registered_storage_source_with_watched_folder(
+    source_id, watched_folder_id = seed_registered_storage_source_with_watched_folder(
         db_url,
         root_path=staged_corpus_dir,
         watched_path=staged_corpus_dir,
@@ -981,6 +983,7 @@ def test_poll_registered_storage_sources_records_chunked_ingest_runs_for_success
     )
 
     assert result.scanned == 6
+    assert result.enqueued == 6
 
     run_rows = load_ingest_runs(database_url=db_url)
     assert len(run_rows) == 3
@@ -994,7 +997,7 @@ def test_poll_registered_storage_sources_records_chunked_ingest_runs_for_success
         ("completed", 2),
         ("completed", 2),
     ]
-    assert sum(row["files_created"] for row in run_rows) == 6
+    assert sum(row["files_created"] for row in run_rows) == 0
     assert all(row["files_updated"] == 0 for row in run_rows)
     assert all(row["error_count"] == 0 for row in run_rows)
     assert all(row["error_summary"] is None for row in run_rows)
@@ -1011,7 +1014,7 @@ def test_poll_registered_storage_sources_defers_reconciliation_until_after_chunk
     upgrade_database(db_url)
 
     initial_now = datetime(2026, 3, 28, 22, 50, tzinfo=UTC)
-    _, watched_folder_id = seed_registered_storage_source_with_watched_folder(
+    source_id, watched_folder_id = seed_registered_storage_source_with_watched_folder(
         db_url,
         root_path=staged_corpus_dir,
         watched_path=staged_corpus_dir,
@@ -1025,6 +1028,69 @@ def test_poll_registered_storage_sources_defers_reconciliation_until_after_chunk
         poll_chunk_size=10,
     )
     assert first_result.errors == []
+    assert load_pending_queue_count(db_url) == 6
+
+    existing_relative_path = "family-events/birthday-park/birthday_park_006.jpg"
+    existing_asset = staged_corpus_dir / existing_relative_path
+    existing_record = ingest_module.build_photo_record(
+        existing_asset,
+        canonical_path=_source_aware_photo_path(source_id, existing_relative_path),
+    )
+    engine = create_engine(db_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(photos).values(
+                photo_id=existing_record.photo_id,
+                path=existing_record.path,
+                sha256=existing_record.sha256,
+                phash=None,
+                filesize=existing_record.filesize,
+                ext=existing_record.ext,
+                created_ts=existing_record.created_ts,
+                modified_ts=existing_record.modified_ts,
+                shot_ts=existing_record.shot_ts,
+                shot_ts_source=existing_record.shot_ts_source,
+                camera_make=existing_record.camera_make,
+                camera_model=existing_record.camera_model,
+                software=existing_record.software,
+                orientation=existing_record.orientation,
+                gps_latitude=existing_record.gps_latitude,
+                gps_longitude=existing_record.gps_longitude,
+                gps_altitude=existing_record.gps_altitude,
+                thumbnail_jpeg=None,
+                thumbnail_mime_type=None,
+                thumbnail_width=None,
+                thumbnail_height=None,
+                updated_ts=existing_record.modified_ts,
+                deleted_ts=None,
+                faces_count=0,
+                faces_detected_ts=None,
+            )
+        )
+        connection.execute(
+            insert(photo_files).values(
+                photo_file_id=str(
+                    uuid5(
+                        NAMESPACE_URL,
+                        f"photo-file:{watched_folder_id}:{existing_relative_path}",
+                    )
+                ),
+                photo_id=existing_record.photo_id,
+                watched_folder_id=watched_folder_id,
+                relative_path=existing_relative_path,
+                filename=existing_asset.name,
+                extension=existing_record.ext,
+                filesize=existing_record.filesize,
+                created_ts=existing_record.created_ts,
+                modified_ts=existing_record.modified_ts,
+                first_seen_ts=initial_now,
+                last_seen_ts=initial_now,
+                missing_ts=None,
+                deleted_ts=None,
+                lifecycle_state="active",
+                absence_reason=None,
+            )
+        )
 
     checkpoint_states: list[tuple[str, datetime | None, datetime | None]] = []
     original_iter_photo_files = ingest_polling.iter_photo_files
@@ -1036,7 +1102,7 @@ def test_poll_registered_storage_sources_defers_reconciliation_until_after_chunk
             if yielded == 3:
                 later_file = load_photo_file_row(
                     db_url,
-                    "family-events/birthday-park/birthday_park_006.jpg",
+                    existing_relative_path,
                 )
                 checkpoint_states.append(
                     (
@@ -1063,11 +1129,7 @@ def test_poll_registered_storage_sources_defers_reconciliation_until_after_chunk
     assert watched_folder["availability_state"] == "active"
     assert watched_folder["last_failure_reason"] is None
     assert watched_folder["last_successful_scan_ts"] == second_now
-
-    later_file = load_photo_file_row(
-        db_url,
-        "family-events/birthday-park/birthday_park_006.jpg",
-    )
+    later_file = load_photo_file_row(db_url, existing_relative_path)
     assert later_file["lifecycle_state"] == "active"
     assert later_file["missing_ts"] is None
     assert later_file["deleted_ts"] is None
@@ -1147,16 +1209,14 @@ def test_poll_registered_storage_sources_preserves_multiple_locations_for_same_h
 
     assert result.errors == []
     assert result.scanned == 2
-    photo_rows = load_photo_rows(db_url)
-    assert len(photo_rows) == 1
-    file_rows = load_photo_file_rows(db_url, photo_rows[0]["photo_id"])
-    assert len(file_rows) == 2
-    assert {row["watched_folder_id"] for row in file_rows} == {
+    assert result.enqueued == 2
+    queue_rows = load_pending_queue_rows(db_url)
+    assert len(queue_rows) == 2
+    assert {row.payload_json["watched_folder_id"] for row in queue_rows} == {
         watched_folder_a_id,
         watched_folder_b["watched_folder_id"],
     }
-    assert {row["relative_path"] for row in file_rows} == {asset_name}
-    assert {row["lifecycle_state"] for row in file_rows} == {"active"}
+    assert {row.payload_json["relative_path"] for row in queue_rows} == {asset_name}
 
 
 def test_poll_registered_storage_sources_reassesses_existing_locations_for_same_hash(
@@ -1281,13 +1341,142 @@ def test_poll_registered_storage_sources_reassesses_existing_locations_for_same_
     )
 
     assert result.errors == []
+    assert result.enqueued == 1
     file_rows = load_photo_file_rows(db_url, record.photo_id)
     assert len(file_rows) == 2
     rows_by_folder = {row["watched_folder_id"]: row for row in file_rows}
     assert rows_by_folder[watched_folder_a_id]["lifecycle_state"] == "deleted"
     assert rows_by_folder[watched_folder_b["watched_folder_id"]]["lifecycle_state"] == "active"
     photo = load_photo_row_by_id(db_url, record.photo_id)
-    assert photo["path"] == _source_aware_photo_path(source_id, f"exports/{asset_name}")
+    assert photo["path"] == _source_aware_photo_path(source_id, f"imports/{asset_name}")
+    queue_rows = load_pending_queue_rows(db_url)
+    assert len(queue_rows) == 1
+    assert queue_rows[0].payload_json["canonical_path"] == _source_aware_photo_path(
+        source_id,
+        f"exports/{asset_name}",
+    )
+
+
+def test_duplicate_sha_candidate_reuses_complete_artifacts_even_when_an_incomplete_row_exists_first(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    source_root = tmp_path / "library"
+    watched_path = source_root / "imports"
+    watched_path.mkdir(parents=True)
+    asset_name = "birthday_park_001.jpg"
+    source_asset = SEED_CORPUS_DIR / "family-events" / "birthday-park" / asset_name
+    original_path = watched_path / "original.jpg"
+    duplicate_path = watched_path / "dup.jpg"
+    shutil.copy2(source_asset, original_path)
+
+    db_url = f"sqlite:///{tmp_path / 'duplicate-sha-reuse.db'}"
+    upgrade_database(db_url)
+
+    now = datetime(2026, 3, 29, 14, 0, tzinfo=UTC)
+    source_id, _watched_folder_id = seed_registered_storage_source_with_watched_folder(
+        db_url,
+        root_path=source_root,
+        watched_path=watched_path,
+        display_name="Library Imports",
+        now=now,
+    )
+    original_canonical_path = _source_aware_photo_path(source_id, "imports/original.jpg")
+    duplicate_canonical_path = _source_aware_photo_path(source_id, "imports/dup.jpg")
+
+    class StaticFaceDetector:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def detect(self, path: Path) -> list[dict]:
+            self.calls += 1
+            return [
+                {
+                    "face_id": "face-1",
+                    "bbox_x": 10,
+                    "bbox_y": 11,
+                    "bbox_w": 12,
+                    "bbox_h": 13,
+                    "bitmap": b"existing-face",
+                    "embedding": None,
+                    "provenance": {"detector": "existing"},
+                    "person_id": None,
+                }
+            ]
+
+    detector = StaticFaceDetector()
+
+    result = poll_registered_storage_sources(database_url=db_url, now=now)
+    assert result.scanned == 1
+    assert result.enqueued == 1
+
+    first_pass = process_pending_ingest_queue(
+        db_url,
+        limit=10,
+        face_detector=detector,
+    )
+    second_pass = process_pending_ingest_queue(
+        db_url,
+        limit=10,
+        face_detector=detector,
+    )
+
+    assert detector.calls == 1
+    assert first_pass.processed == 1
+    assert second_pass.processed == 1
+
+    original_photo = load_photo_row(db_url, original_canonical_path)
+    assert original_photo["thumbnail_mime_type"] == "image/jpeg"
+    assert original_photo["faces_count"] == 1
+    original_file = load_photo_file_row(db_url, "original.jpg")
+    assert original_file["photo_id"] == original_photo["photo_id"]
+    assert original_file["watched_folder_id"] == _watched_folder_id
+    assert original_file["lifecycle_state"] == "active"
+
+    shutil.copy2(source_asset, duplicate_path)
+    result = poll_registered_storage_sources(database_url=db_url, now=now + timedelta(minutes=1))
+    assert result.scanned == 2
+    assert result.enqueued == 1
+
+    class RaisingFaceDetector:
+        def detect(self, path: Path) -> list[dict]:
+            raise AssertionError("face detector should not run for reusable duplicate content")
+
+    reuse_pass = process_pending_ingest_queue(
+        db_url,
+        limit=10,
+        face_detector=RaisingFaceDetector(),
+    )
+    persist_reuse_pass = process_pending_ingest_queue(
+        db_url,
+        limit=10,
+        face_detector=RaisingFaceDetector(),
+    )
+
+    assert reuse_pass.processed == 1
+    assert persist_reuse_pass.processed == 1
+    pending_rows = load_pending_queue_rows(db_url)
+    assert pending_rows == []
+
+    engine = create_engine(db_url, future=True)
+    with engine.connect() as connection:
+        same_sha_count = connection.execute(
+            select(func.count())
+            .select_from(photos)
+            .where(photos.c.sha256 == original_photo["sha256"])
+        ).scalar_one()
+    assert same_sha_count == 1
+
+    updated_photo = load_photo_row_by_id(db_url, original_photo["photo_id"])
+    assert updated_photo["path"] == duplicate_canonical_path
+
+    duplicate_file = load_photo_file_row(db_url, "dup.jpg")
+    assert duplicate_file["photo_id"] == original_photo["photo_id"]
+    assert duplicate_file["watched_folder_id"] == _watched_folder_id
+    assert duplicate_file["lifecycle_state"] == "active"
+
+    file_rows = load_photo_file_rows(db_url, original_photo["photo_id"])
+    assert [row["relative_path"] for row in file_rows] == ["dup.jpg", "original.jpg"]
 
 
 def test_poll_registered_storage_sources_preserves_existing_face_detection_timestamp(
