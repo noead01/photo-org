@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_db
@@ -13,90 +13,100 @@ from app.services.operational_activity import get_operational_activity
 router = APIRouter(prefix="/operations", tags=["operations"])
 
 
-class ActiveWatchedFolderResponse(BaseModel):
+class PollingLiveItemResponse(BaseModel):
     model_config = ConfigDict(
-        json_schema_extra={
-            "description": "Watched folder currently associated with an in-progress polling run."
-        }
+        json_schema_extra={"description": "A currently active watched-folder polling run."}
     )
 
+    ingest_run_id: str
     watched_folder_id: str
     storage_source_id: str
     display_name: str | None = None
     scan_path: str
-    started_ts: datetime | None = None
+    started_ts: datetime
+    files_seen: int | None = None
+    estimated_files_total: int | None = None
+    percent_complete: float | None = None
 
 
-class PollingActivityResponse(BaseModel):
+class PollingLiveSummaryResponse(BaseModel):
     model_config = ConfigDict(
-        json_schema_extra={"description": "Current watched-folder polling activity."}
+        json_schema_extra={"description": "Summary of active polling work."}
     )
 
-    active_count: int = Field(description="Number of watched folders with an active polling run.")
-    active_watched_folders: list[ActiveWatchedFolderResponse]
+    active_count: int
+    files_seen: int | None = None
+    estimated_files_total: int | None = None
+    percent_complete: float | None = None
 
 
-class IngestQueueActivityResponse(BaseModel):
+class PollingLiveSectionResponse(BaseModel):
     model_config = ConfigDict(
-        json_schema_extra={"description": "Current queue backlog and processing summary."}
+        json_schema_extra={"description": "Currently active polling work."}
+    )
+
+    items: list[PollingLiveItemResponse]
+    summary: PollingLiveSummaryResponse
+
+
+class QueueLiveItemResponse(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"description": "A currently active ingest queue item."}
+    )
+
+    ingest_queue_id: str
+    payload_type: str
+    path: str | None = None
+    last_attempt_ts: datetime | None = None
+    is_stalled: bool
+    processed_count: int | None = None
+    estimated_total: int | None = None
+    percent_complete: float | None = None
+
+
+class QueueLiveSummaryResponse(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"description": "Summary of active ingest queue work."}
     )
 
     pending_count: int
     processing_count: int
-    failed_count: int
     stalled_count: int
-    lease_timeout_seconds: int
-    oldest_pending_ts: datetime | None = None
+    processed_count: int | None = None
+    estimated_total: int | None = None
+    percent_complete: float | None = None
 
 
-class ActivitySignalsResponse(BaseModel):
+class QueueLiveSectionResponse(BaseModel):
     model_config = ConfigDict(
-        json_schema_extra={"description": "Operator-facing warning signals derived from current state."}
+        json_schema_extra={"description": "Currently active ingest queue work."}
     )
 
-    recent_failure_count: int
-    stalled_count: int
+    items: list[QueueLiveItemResponse]
+    summary: QueueLiveSummaryResponse
 
 
-class RecentFailureResponse(BaseModel):
+class OperationalActivityLiveResponse(BaseModel):
     model_config = ConfigDict(
-        json_schema_extra={"description": "Recent ingest failure surfaced for operator troubleshooting."}
+        json_schema_extra={"description": "Live operational activity snapshot for active work."}
     )
 
-    kind: str
-    watched_folder_id: str
-    display_name: str | None = None
-    status: str
-    error_summary: str | None = None
-    completed_ts: datetime | None = None
-
-
-class OperationalActivityResponse(BaseModel):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "description": "Read-only operational summary for polling and ingest queue activity."
-        }
-    )
-
-    state: str = Field(description="High-level operator state: idle, polling, processing_queue, or attention_required.")
     observed_at: datetime
-    polling: PollingActivityResponse
-    ingest_queue: IngestQueueActivityResponse
-    signals: ActivitySignalsResponse
-    recent_failures: list[RecentFailureResponse]
+    polling: PollingLiveSectionResponse
+    ingest_queue: QueueLiveSectionResponse
 
 
 @router.get(
     "/activity",
-    summary="Get operational activity",
+    summary="Get live operational activity",
     description=(
-        "Return a read-only summary of current polling activity, queue backlog, and recent failure signals "
-        "so operators can tell whether the system is idle, busy, or needs attention."
+        "Return a read-only snapshot of currently active polling and ingest queue work "
+        "for repeated operator polling."
     ),
-    response_model=OperationalActivityResponse,
+    response_model=OperationalActivityLiveResponse,
 )
 def get_operational_activity_endpoint(
     db: Session = Depends(get_db),
-) -> OperationalActivityResponse:
+) -> OperationalActivityLiveResponse:
     payload = get_operational_activity(db.connection())
-    return OperationalActivityResponse.model_validate(payload)
+    return OperationalActivityLiveResponse.model_validate(payload)

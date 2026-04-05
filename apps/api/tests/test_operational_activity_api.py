@@ -12,7 +12,7 @@ from app.migrations import upgrade_database
 from app.storage import ingest_queue, ingest_runs
 
 
-def test_operational_activity_api_reports_idle_when_no_current_work(tmp_path, monkeypatch):
+def test_operational_activity_api_returns_empty_sections_when_no_current_work(tmp_path, monkeypatch):
     database_url = f"sqlite:///{tmp_path / 'operational-activity-idle.db'}"
     upgrade_database(database_url)
     monkeypatch.setenv("DATABASE_URL", database_url)
@@ -24,16 +24,17 @@ def test_operational_activity_api_reports_idle_when_no_current_work(tmp_path, mo
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["state"] == "idle"
-    assert payload["polling"]["active_count"] == 0
-    assert payload["ingest_queue"]["pending_count"] == 0
-    assert payload["ingest_queue"]["processing_count"] == 0
-    assert payload["signals"]["recent_failure_count"] == 0
-    assert payload["signals"]["stalled_count"] == 0
-    assert payload["recent_failures"] == []
+    assert set(payload.keys()) == {"observed_at", "polling", "ingest_queue"}
+    assert payload["polling"]["items"] == []
+    assert payload["polling"]["summary"]["active_count"] == 0
+    assert payload["ingest_queue"]["items"] == []
+    assert payload["ingest_queue"]["summary"]["processing_count"] == 0
+    assert "state" not in payload
+    assert "signals" not in payload
+    assert "recent_failures" not in payload
 
 
-def test_operational_activity_api_reports_active_polling(tmp_path, monkeypatch):
+def test_operational_activity_api_returns_only_active_polling_work(tmp_path, monkeypatch):
     database_url = f"sqlite:///{tmp_path / 'operational-activity-polling.db'}"
     source, watched_folder = _seed_source_with_watched_folder(
         tmp_path=tmp_path,
@@ -67,10 +68,12 @@ def test_operational_activity_api_reports_active_polling(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["state"] == "polling"
-    assert payload["polling"]["active_count"] == 1
-    assert payload["polling"]["active_watched_folders"] == [
+    assert payload["polling"]["summary"]["active_count"] == 1
+    assert payload["polling"]["items"][0]["ingest_run_id"] == "run-polling"
+    assert payload["ingest_queue"]["items"] == []
+    assert payload["polling"]["items"] == [
         {
+            "ingest_run_id": "run-polling",
             "watched_folder_id": watched_folder["watched_folder_id"],
             "storage_source_id": source["storage_source_id"],
             "display_name": "Trips",
@@ -78,7 +81,89 @@ def test_operational_activity_api_reports_active_polling(tmp_path, monkeypatch):
             "started_ts": "2026-04-04T15:30:00Z",
         }
     ]
-    assert payload["ingest_queue"]["processing_count"] == 0
+
+
+def test_operational_activity_api_excludes_completed_and_failed_work_from_live_snapshot(
+    tmp_path, monkeypatch
+):
+    database_url = f"sqlite:///{tmp_path / 'operational-activity-history-only.db'}"
+    _, watched_folder = _seed_source_with_watched_folder(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        database_name="operational-activity-history-only.db",
+        database_url=database_url,
+    )
+    now = datetime.now(tz=UTC)
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(ingest_runs).values(
+                ingest_run_id="run-completed",
+                watched_folder_id=watched_folder["watched_folder_id"],
+                status="completed",
+                started_ts=now - timedelta(minutes=3),
+                completed_ts=now - timedelta(minutes=2),
+                files_seen=12,
+                files_created=4,
+                files_updated=1,
+                files_missing=0,
+                error_count=0,
+                error_summary=None,
+            )
+        )
+        connection.execute(
+            insert(ingest_runs).values(
+                ingest_run_id="run-failed",
+                watched_folder_id=watched_folder["watched_folder_id"],
+                status="failed",
+                started_ts=now - timedelta(minutes=2),
+                completed_ts=now - timedelta(minutes=1),
+                files_seen=8,
+                files_created=2,
+                files_updated=0,
+                files_missing=1,
+                error_count=1,
+                error_summary="marker mismatch on alias //nas/family-share",
+            )
+        )
+        connection.execute(
+            insert(ingest_queue).values(
+                ingest_queue_id="queue-completed",
+                payload_type="photo_metadata",
+                payload_json={"path": "queued/completed.jpg"},
+                idempotency_key="completed.jpg",
+                status="completed",
+                attempt_count=1,
+                enqueued_ts=now - timedelta(minutes=10),
+                last_attempt_ts=now - timedelta(minutes=5),
+                processed_ts=now - timedelta(minutes=4),
+                last_error=None,
+            )
+        )
+        connection.execute(
+            insert(ingest_queue).values(
+                ingest_queue_id="queue-failed",
+                payload_type="photo_metadata",
+                payload_json={"path": "queued/failed.jpg"},
+                idempotency_key="failed.jpg",
+                status="failed",
+                attempt_count=2,
+                enqueued_ts=now - timedelta(minutes=9),
+                last_attempt_ts=now - timedelta(minutes=3),
+                processed_ts=None,
+                last_error="temporary timeout",
+            )
+        )
+
+    client = TestClient(app)
+
+    response = client.get("/api/v1/operations/activity")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["polling"]["items"] == []
+    assert payload["ingest_queue"]["items"] == []
 
 
 def test_operational_activity_api_reports_active_queue_processing(tmp_path, monkeypatch):
