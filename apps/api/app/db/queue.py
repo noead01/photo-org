@@ -157,6 +157,19 @@ class IngestQueueStore:
         )
         return bool(result.rowcount)
 
+    def get_row_in_transaction(
+        self,
+        ingest_queue_id: str,
+        *,
+        connection: Connection,
+    ) -> QueueRow | None:
+        row = connection.execute(
+            select(ingest_queue).where(ingest_queue.c.ingest_queue_id == ingest_queue_id)
+        ).mappings().one_or_none()
+        if row is None:
+            return None
+        return QueueRow(**row)
+
     def list_pending(self) -> list[QueueRow]:
         return self.list_by_status("pending")
 

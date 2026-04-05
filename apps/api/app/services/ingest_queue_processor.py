@@ -32,6 +32,10 @@ class ProcessQueueResult:
     retryable_errors: int = 0
 
 
+class ExtractedPayloadStillProcessingError(RuntimeError):
+    pass
+
+
 def process_pending_ingest_queue(
     database_url: str | Path | None = None,
     *,
@@ -265,11 +269,23 @@ def _process_claimed_row(
             connection=connection,
         )
         if not enqueue_result.created:
-            queue_store.refresh_nonprocessing_in_transaction(
+            refreshed = queue_store.refresh_nonprocessing_in_transaction(
                 enqueue_result.ingest_queue_id,
                 payload=extraction.extracted_payload,
                 connection=connection,
             )
+            if not refreshed:
+                collided_row = queue_store.get_row_in_transaction(
+                    enqueue_result.ingest_queue_id,
+                    connection=connection,
+                )
+                if collided_row is not None and collided_row.status == "processing":
+                    raise ExtractedPayloadStillProcessingError(
+                        "extracted payload row is currently processing; retry candidate later"
+                    )
+                raise RuntimeError(
+                    "failed to refresh collided extracted payload row"
+                )
         return None, _payload_warning_detail(extraction.extracted_payload)
 
     record = payload_to_photo_record(claimed_row.payload_json)

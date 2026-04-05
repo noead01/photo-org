@@ -932,6 +932,109 @@ def test_process_pending_rows_refreshes_pending_extracted_photo_row_when_payload
     assert pending_rows[0].last_error is None
 
 
+def test_process_pending_rows_retries_candidate_when_collided_extracted_row_is_processing(
+    tmp_path, monkeypatch
+):
+    database_url = f"sqlite:///{tmp_path / 'queue-processor-ingest-candidate-refresh-processing.db'}"
+    upgrade_database(database_url)
+    queue_store = IngestQueueStore(database_url)
+
+    candidate_payload = {
+        "payload_version": 1,
+        "storage_source_id": "source-1",
+        "watched_folder_id": "wf-1",
+        "canonical_path": "/library/candidate-refresh-processing.jpg",
+        "runtime_path": str((tmp_path / "candidate-refresh-processing.jpg").resolve()),
+        "relative_path": "candidate-refresh-processing.jpg",
+        "filesize": 123,
+        "modified_ts": "2024-01-02T00:00:00+00:00",
+        "modified_mtime_ns": 123456789,
+        "idempotency_key": "wf-1:candidate-refresh-processing.jpg:123:123456789",
+    }
+    candidate_queue_id = queue_store.enqueue(
+        payload_type="ingest_candidate",
+        payload=candidate_payload,
+        idempotency_key=candidate_payload["idempotency_key"],
+    )
+
+    stale_extracted_payload = build_payload(
+        photo_id="shared-photo-id",
+        path="/library/stale-processing.jpg",
+        payload_version=1,
+        storage_source_id="source-1",
+        watched_folder_id="wf-1",
+        relative_path="candidate-refresh-processing.jpg",
+    )
+    extracted_queue_id = queue_store.enqueue(
+        payload_type="extracted_photo",
+        payload=stale_extracted_payload,
+        idempotency_key="extracted:shared-photo-id",
+    )
+    base_time = datetime(2024, 1, 1, tzinfo=UTC)
+    set_queue_row_enqueued_ts(database_url, candidate_queue_id, enqueued_ts=base_time)
+    set_queue_row_enqueued_ts(
+        database_url,
+        extracted_queue_id,
+        enqueued_ts=base_time + timedelta(seconds=1),
+    )
+    mark_queue_row_processing(
+        database_url,
+        extracted_queue_id,
+        last_attempt_ts=datetime.now(tz=UTC),
+    )
+
+    refreshed_payload = build_payload(
+        photo_id="shared-photo-id",
+        path="/library/candidate-refresh-processing.jpg",
+        thumbnail_jpeg="dGh1bWI=",
+        thumbnail_mime_type="image/jpeg",
+        thumbnail_width=128,
+        thumbnail_height=128,
+        detections=[],
+        warnings=[],
+        payload_version=1,
+        storage_source_id="source-1",
+        watched_folder_id="wf-1",
+        relative_path="candidate-refresh-processing.jpg",
+    )
+
+    def fake_process_candidate_payload(database_url_arg, *, payload, face_detector=None):
+        assert database_url_arg == database_url
+        assert payload == candidate_payload
+        return ExtractionResult(
+            extracted_payload=refreshed_payload,
+            reused_existing_artifacts=False,
+            analysis_performed=True,
+        )
+
+    monkeypatch.setattr(
+        ingest_queue_processor,
+        "process_candidate_payload",
+        fake_process_candidate_payload,
+        raising=False,
+    )
+
+    result = process_pending_ingest_queue(database_url, limit=1)
+
+    processing_rows = queue_store.list_by_status("processing")
+    completed_rows = queue_store.list_by_status("completed")
+    pending_rows = queue_store.list_by_status("pending")
+
+    assert result.processed == 0
+    assert result.failed == 0
+    assert result.retryable_errors == 1
+    assert completed_rows == []
+    assert pending_rows == []
+    assert {row.ingest_queue_id for row in processing_rows} == {
+        candidate_queue_id,
+        extracted_queue_id,
+    }
+    candidate_row = next(row for row in processing_rows if row.ingest_queue_id == candidate_queue_id)
+    extracted_row = next(row for row in processing_rows if row.ingest_queue_id == extracted_queue_id)
+    assert candidate_row.last_error == "extracted payload row is currently processing; retry candidate later"
+    assert extracted_row.payload_json == stale_extracted_payload
+
+
 def test_process_pending_rows_records_failed_and_retryable_file_outcomes(tmp_path, monkeypatch):
     database_url = f"sqlite:///{tmp_path / 'queue-processor-ingest-run-errors.db'}"
     upgrade_database(database_url)
