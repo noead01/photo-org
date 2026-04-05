@@ -14,5 +14,6 @@ packages/*/.venv/
 .env.*
 .envrc
 .local/
+.codex
 apps/api/.generated/
 *.egg-info/
