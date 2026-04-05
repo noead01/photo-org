@@ -212,6 +212,43 @@ def test_operational_activity_api_reports_active_queue_processing(tmp_path, monk
     assert payload["ingest_queue"]["items"][0]["is_stalled"] is False
 
 
+def test_operational_activity_api_keeps_unresolved_stalled_queue_work_visible(tmp_path, monkeypatch):
+    database_url = f"sqlite:///{tmp_path / 'operational-activity-stalled.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    now = datetime.now(tz=UTC)
+    stale_attempt_ts = now - timedelta(seconds=PROCESSING_LEASE_SECONDS + 60)
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(ingest_queue).values(
+                ingest_queue_id="queue-stalled",
+                payload_type="photo_metadata",
+                payload_json={"path": "queued/stalled.jpg"},
+                idempotency_key="stalled.jpg",
+                status="processing",
+                attempt_count=2,
+                enqueued_ts=now - timedelta(minutes=8),
+                last_attempt_ts=stale_attempt_ts,
+                processed_ts=None,
+                last_error="temporary timeout",
+            )
+        )
+
+    client = TestClient(app)
+
+    response = client.get("/api/v1/operations/activity")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["polling"]["items"] == []
+    assert payload["ingest_queue"]["summary"]["stalled_count"] == 1
+    assert payload["ingest_queue"]["items"][0]["ingest_queue_id"] == "queue-stalled"
+    assert payload["ingest_queue"]["items"][0]["is_stalled"] is True
+
+
 def _seed_source_with_watched_folder(*, tmp_path, monkeypatch, database_name: str, database_url: str):
     from app.services.storage_sources import attach_storage_source_alias, create_storage_source
     from app.services.watched_folders import create_watched_folder
