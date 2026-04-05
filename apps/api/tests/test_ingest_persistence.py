@@ -289,6 +289,112 @@ def test_serialize_reused_content_submission_includes_json_safe_thumbnail_fields
     assert payload["warnings"] == ["reused existing content"]
 
 
+def test_lookup_existing_artifacts_by_sha_prefers_complete_duplicate_row(tmp_path):
+    from app.processing.ingest_persistence import lookup_existing_artifacts_by_sha
+
+    class FakeMappingsResult:
+        def __init__(self, rows: list[dict]) -> None:
+            self._rows = rows
+
+        def all(self) -> list[dict]:
+            return list(self._rows)
+
+    class FakeExecuteResult:
+        def __init__(self, rows: list[dict]) -> None:
+            self._rows = rows
+
+        def mappings(self) -> FakeMappingsResult:
+            return FakeMappingsResult(self._rows)
+
+    class FakeConnection:
+        def __init__(self) -> None:
+            self.photo_query_count = 0
+
+        def execute(self, statement):
+            compiled = str(statement)
+            if "FROM photos" in compiled:
+                self.photo_query_count += 1
+                return FakeExecuteResult(
+                    [
+                        {
+                            "photo_id": "incomplete-photo",
+                            "shot_ts": None,
+                            "shot_ts_source": None,
+                            "camera_make": None,
+                            "camera_model": None,
+                            "software": None,
+                            "orientation": None,
+                            "gps_latitude": None,
+                            "gps_longitude": None,
+                            "gps_altitude": None,
+                            "thumbnail_jpeg": None,
+                            "thumbnail_mime_type": None,
+                            "thumbnail_width": None,
+                            "thumbnail_height": None,
+                            "faces_count": 0,
+                            "faces_detected_ts": None,
+                        },
+                        {
+                            "photo_id": "complete-photo",
+                            "shot_ts": None,
+                            "shot_ts_source": None,
+                            "camera_make": "Canon",
+                            "camera_model": "EOS",
+                            "software": None,
+                            "orientation": "1",
+                            "gps_latitude": None,
+                            "gps_longitude": None,
+                            "gps_altitude": None,
+                            "thumbnail_jpeg": b"complete-thumbnail",
+                            "thumbnail_mime_type": "image/jpeg",
+                            "thumbnail_width": 64,
+                            "thumbnail_height": 64,
+                            "faces_count": 1,
+                            "faces_detected_ts": datetime(2026, 4, 5, 12, 30, tzinfo=UTC),
+                        },
+                    ]
+                )
+            if "FROM faces" in compiled:
+                return FakeExecuteResult(
+                    [
+                        {
+                            "face_id": "face-1",
+                            "person_id": None,
+                            "bbox_x": 10,
+                            "bbox_y": 11,
+                            "bbox_w": 12,
+                            "bbox_h": 13,
+                            "bitmap": b"existing-face",
+                            "embedding": None,
+                            "provenance": {"detector": "existing"},
+                        }
+                    ]
+                )
+            raise AssertionError(f"unexpected statement: {compiled}")
+
+    connection = FakeConnection()
+    result = lookup_existing_artifacts_by_sha(connection, "same-sha")
+
+    assert connection.photo_query_count == 1
+    assert result is not None
+    assert result["photo_id"] == "complete-photo"
+    assert result["thumbnail_jpeg"] == b"complete-thumbnail"
+    assert result["faces_count"] == 1
+    assert result["detections"] == [
+        {
+            "face_id": "face-1",
+            "person_id": None,
+            "bbox_x": 10,
+            "bbox_y": 11,
+            "bbox_w": 12,
+            "bbox_h": 13,
+            "bitmap": b"existing-face",
+            "embedding": None,
+            "provenance": {"detector": "existing"},
+        }
+    ]
+
+
 def test_upsert_photo_preserves_existing_thumbnail_when_new_record_lacks_one(tmp_path):
     from app.processing.ingest_persistence import PhotoRecord, upsert_photo
 

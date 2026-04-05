@@ -199,7 +199,7 @@ def lookup_existing_artifacts_by_sha(
         ).where(photos.c.sha256 == sha256)
     ).mappings().all()
 
-    for row in rows:
+    for row in sorted(rows, key=_sha_reuse_sort_key):
         reusable = _build_reusable_artifacts_payload(connection, row)
         if reusable is not None:
             return reusable
@@ -482,6 +482,39 @@ def _build_reusable_artifacts_payload(
         "faces_detected_ts": row["faces_detected_ts"],
         "detections": [dict(detection) for detection in detections],
     }
+
+
+def _sha_reuse_sort_key(row: dict[str, object | None]) -> tuple[int, int, str]:
+    thumbnail_complete = all(
+        row[column] is not None
+        for column in (
+            "thumbnail_jpeg",
+            "thumbnail_mime_type",
+            "thumbnail_width",
+            "thumbnail_height",
+        )
+    )
+    faces_complete = row["faces_detected_ts"] is not None
+    metadata_score = sum(
+        1
+        for column in (
+            "shot_ts",
+            "shot_ts_source",
+            "camera_make",
+            "camera_model",
+            "software",
+            "orientation",
+            "gps_latitude",
+            "gps_longitude",
+            "gps_altitude",
+        )
+        if row[column] is not None
+    )
+    return (
+        0 if thumbnail_complete and faces_complete else 1,
+        -metadata_score,
+        str(row["photo_id"]),
+    )
 
 
 def _sha256_file(path: Path) -> str:

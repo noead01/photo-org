@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+import base64
 import posixpath
 import shutil
 from pathlib import Path
@@ -20,6 +21,7 @@ from app.services.file_reconciliation import (
     reconcile_watched_folder,
     refresh_photo_deleted_timestamps,
 )
+from app.services.ingest_queue_processor import process_pending_ingest_queue
 from app.services.source_registration import MARKER_FILENAME
 from app.services.storage_sources import attach_storage_source_alias, create_storage_source
 from app.services.watched_folders import create_watched_folder
@@ -1353,6 +1355,118 @@ def test_poll_registered_storage_sources_reassesses_existing_locations_for_same_
         source_id,
         f"exports/{asset_name}",
     )
+
+
+def test_duplicate_sha_candidate_reuses_complete_artifacts_even_when_an_incomplete_row_exists_first(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    source_root = tmp_path / "library"
+    watched_path = source_root / "imports"
+    watched_path.mkdir(parents=True)
+    asset_name = "birthday_park_001.jpg"
+    source_asset = SEED_CORPUS_DIR / "family-events" / "birthday-park" / asset_name
+    original_path = watched_path / "original.jpg"
+    duplicate_path = watched_path / "dup.jpg"
+    shutil.copy2(source_asset, original_path)
+
+    db_url = f"sqlite:///{tmp_path / 'duplicate-sha-reuse.db'}"
+    upgrade_database(db_url)
+
+    now = datetime(2026, 3, 29, 14, 0, tzinfo=UTC)
+    source_id, _watched_folder_id = seed_registered_storage_source_with_watched_folder(
+        db_url,
+        root_path=source_root,
+        watched_path=watched_path,
+        display_name="Library Imports",
+        now=now,
+    )
+    original_canonical_path = _source_aware_photo_path(source_id, "imports/original.jpg")
+    duplicate_canonical_path = _source_aware_photo_path(source_id, "imports/dup.jpg")
+
+    class StaticFaceDetector:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def detect(self, path: Path) -> list[dict]:
+            self.calls += 1
+            return [
+                {
+                    "face_id": "face-1",
+                    "bbox_x": 10,
+                    "bbox_y": 11,
+                    "bbox_w": 12,
+                    "bbox_h": 13,
+                    "bitmap": b"existing-face",
+                    "embedding": None,
+                    "provenance": {"detector": "existing"},
+                    "person_id": None,
+                }
+            ]
+
+    detector = StaticFaceDetector()
+
+    result = poll_registered_storage_sources(database_url=db_url, now=now)
+    assert result.scanned == 1
+    assert result.enqueued == 1
+
+    first_pass = process_pending_ingest_queue(
+        db_url,
+        limit=10,
+        face_detector=detector,
+    )
+    second_pass = process_pending_ingest_queue(
+        db_url,
+        limit=10,
+        face_detector=detector,
+    )
+
+    assert detector.calls == 1
+    assert first_pass.processed == 1
+    assert second_pass.processed == 1
+
+    original_photo = load_photo_row(db_url, original_canonical_path)
+    assert original_photo["thumbnail_mime_type"] == "image/jpeg"
+    assert original_photo["faces_count"] == 1
+
+    shutil.copy2(source_asset, duplicate_path)
+    result = poll_registered_storage_sources(database_url=db_url, now=now + timedelta(minutes=1))
+    assert result.scanned == 2
+    assert result.enqueued == 1
+
+    class RaisingFaceDetector:
+        def detect(self, path: Path) -> list[dict]:
+            raise AssertionError("face detector should not run for reusable duplicate content")
+
+    reuse_pass = process_pending_ingest_queue(
+        db_url,
+        limit=10,
+        face_detector=RaisingFaceDetector(),
+    )
+
+    assert reuse_pass.processed == 1
+    pending_rows = load_pending_queue_rows(db_url)
+    reused_payload = next(
+        row.payload_json
+        for row in pending_rows
+        if row.payload_type == "extracted_photo" and row.payload_json["relative_path"] == "dup.jpg"
+    )
+    assert reused_payload["path"] == duplicate_canonical_path
+    assert base64.b64decode(reused_payload["thumbnail_jpeg"]) == original_photo["thumbnail_jpeg"]
+    assert reused_payload["faces_count"] == 1
+    assert reused_payload["detections"] == [
+        {
+            "face_id": "face-1",
+            "bbox_x": 10,
+            "bbox_y": 11,
+            "bbox_w": 12,
+            "bbox_h": 13,
+            "bitmap": "ZXhpc3RpbmctZmFjZQ==",
+            "embedding": None,
+            "provenance": {"detector": "existing"},
+            "person_id": None,
+        }
+    ]
 
 
 def test_poll_registered_storage_sources_preserves_existing_face_detection_timestamp(
