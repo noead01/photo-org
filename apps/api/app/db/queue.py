@@ -5,6 +5,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy import select, update
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
@@ -27,6 +29,12 @@ class QueueRow:
     last_attempt_ts: datetime | None
     processed_ts: datetime | None
     last_error: str | None
+
+
+@dataclass(frozen=True)
+class EnqueueResult:
+    ingest_queue_id: str
+    created: bool
 
 
 class IngestQueueStore:
@@ -60,6 +68,54 @@ class IngestQueueStore:
                 if existing_id is None:
                     raise exc
                 return existing_id
+
+    def enqueue_in_transaction(
+        self,
+        *,
+        payload_type: str,
+        payload: dict,
+        idempotency_key: str,
+        connection: Connection,
+    ) -> EnqueueResult:
+        queue_id = str(uuid4())
+        values = {
+            "ingest_queue_id": queue_id,
+            "payload_type": payload_type,
+            "payload_json": payload,
+            "idempotency_key": idempotency_key,
+        }
+        dialect_name = connection.dialect.name
+
+        if dialect_name == "sqlite":
+            inserted_id = connection.execute(
+                sqlite_insert(ingest_queue)
+                .values(**values)
+                .on_conflict_do_nothing(index_elements=[ingest_queue.c.idempotency_key])
+                .returning(ingest_queue.c.ingest_queue_id)
+            ).scalar_one_or_none()
+        elif dialect_name == "postgresql":
+            inserted_id = connection.execute(
+                postgresql_insert(ingest_queue)
+                .values(**values)
+                .on_conflict_do_nothing(index_elements=[ingest_queue.c.idempotency_key])
+                .returning(ingest_queue.c.ingest_queue_id)
+            ).scalar_one_or_none()
+        else:
+            inserted_id = _enqueue_with_integrity_fallback(connection=connection, values=values)
+
+        if inserted_id is not None:
+            return EnqueueResult(ingest_queue_id=inserted_id, created=True)
+
+        existing_id = connection.execute(
+            select(ingest_queue.c.ingest_queue_id).where(
+                ingest_queue.c.idempotency_key == idempotency_key
+            )
+        ).scalar_one_or_none()
+        if existing_id is None:
+            raise RuntimeError(
+                f"queue row lookup failed for idempotency key {idempotency_key}"
+            )
+        return EnqueueResult(ingest_queue_id=existing_id, created=False)
 
     def list_pending(self) -> list[QueueRow]:
         return self.list_by_status("pending")
@@ -218,6 +274,24 @@ def _is_duplicate_idempotency_key_error(exc: IntegrityError) -> bool:
         "unique constraint failed" in message
         or "duplicate key value violates unique constraint" in message
     )
+
+
+def _enqueue_with_integrity_fallback(
+    *,
+    connection: Connection,
+    values: dict[str, object],
+) -> str | None:
+    nested = connection.begin_nested()
+    try:
+        connection.execute(ingest_queue.insert().values(**values))
+    except IntegrityError as exc:
+        nested.rollback()
+        if not _is_duplicate_idempotency_key_error(exc):
+            raise exc
+        return None
+
+    nested.commit()
+    return str(values["ingest_queue_id"])
 
 
 def _processing_lease_cutoff(now: datetime | None = None) -> datetime:
