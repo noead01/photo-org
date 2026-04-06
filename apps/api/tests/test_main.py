@@ -77,6 +77,7 @@ class TestHealthEndpoint:
             "responses"
         ]["400"]["description"] == "Watched folder validation failed"
         assert "/api/v1/operations/activity" in schema["paths"]
+        assert "/api/v1/operations/activity/history" in schema["paths"]
         assert any(tag["name"] == "operations" for tag in schema["tags"])
         watched_folder_mutation_responses = schema["paths"][
             "/api/v1/storage-sources/{storage_source_id}/watched-folders/{watched_folder_id}"
@@ -90,7 +91,14 @@ class TestHealthEndpoint:
         assert schema["paths"]["/api/v1/internal/ingest-queue/process"]["post"]["responses"]["403"][
             "description"
         ] == "Worker role required"
-        assert schema["paths"]["/api/v1/operations/activity"]["get"]["summary"] == "Get operational activity"
+        assert (
+            schema["paths"]["/api/v1/operations/activity"]["get"]["summary"]
+            == "Get live operational activity"
+        )
+        assert (
+            schema["paths"]["/api/v1/operations/activity/history"]["get"]["summary"]
+            == "Get operational activity history"
+        )
         assert (
             schema["components"]["schemas"]["RegisterStorageSourceRequest"]["properties"]["root_path"][
                 "description"
