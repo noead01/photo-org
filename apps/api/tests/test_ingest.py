@@ -1,5 +1,4 @@
 from datetime import UTC, datetime, timedelta
-import base64
 import posixpath
 import shutil
 from pathlib import Path
