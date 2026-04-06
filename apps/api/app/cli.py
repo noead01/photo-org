@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
+from sqlalchemy import func, select
+
+from app.db.session import create_db_engine
 from app.dev.seed_corpus import load_seed_corpus_into_database, validate_seed_corpus
 from app.migrations import upgrade_database
 from app.processing.ingest import poll_registered_storage_sources
-from app.storage import resolve_database_url
+from app.services.ingest_queue_processor import process_pending_ingest_queue
+from app.storage import photos, resolve_database_url
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -54,6 +59,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _count_photos(database_url: str | Path | None = None) -> int:
+    engine = create_db_engine(database_url)
+    with engine.connect() as connection:
+        return connection.scalar(select(func.count()).select_from(photos)) or 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -64,15 +75,26 @@ def main(argv: list[str] | None = None) -> int:
         print("migration=head")
         return 0
     if args.command == "poll-storage-sources":
+        initial_photo_count = _count_photos(args.database_url)
         result = poll_registered_storage_sources(database_url=args.database_url)
+        queue_failures = 0
+        queue_retryable_errors = 0
+        while True:
+            queue_result = process_pending_ingest_queue(database_url=args.database_url)
+            queue_failures += queue_result.failed
+            queue_retryable_errors += queue_result.retryable_errors
+            if queue_result.processed == 0:
+                break
+        inserted = max(0, _count_photos(args.database_url) - initial_photo_count)
+        error_count = len(result.errors) + queue_failures + queue_retryable_errors
         print(f"database_url={resolve_database_url(args.database_url)}")
         print(f"scanned={result.scanned}")
-        print(f"inserted={result.inserted}")
+        print(f"inserted={inserted}")
         print(f"updated={result.updated}")
-        print(f"errors={len(result.errors)}")
+        print(f"errors={error_count}")
         for error in result.errors:
             print(error)
-        return 1 if result.errors else 0
+        return 1 if error_count else 0
     if args.command == "seed-corpus":
         if args.seed_corpus_command == "validate":
             report = validate_seed_corpus()
