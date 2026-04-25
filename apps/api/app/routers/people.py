@@ -4,11 +4,17 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_db
-from app.services.people import create_person, get_person, list_people
+from app.services.people import (
+    PersonNotFoundError,
+    create_person,
+    get_person,
+    list_people,
+    update_person,
+)
 
 
 router = APIRouter(prefix="/people", tags=["people"])
@@ -21,10 +27,34 @@ DisplayName = Annotated[
 
 
 class CreatePersonRequest(BaseModel):
+    """Request payload to create a person identity."""
+
+    model_config = ConfigDict(
+        json_schema_extra={"description": "Create a person by display name."}
+    )
+
+    display_name: DisplayName
+
+
+class UpdatePersonRequest(BaseModel):
+    """Request payload to rename an existing person identity."""
+
+    model_config = ConfigDict(
+        json_schema_extra={"description": "Rename a person by display name."}
+    )
+
     display_name: DisplayName
 
 
 class PersonResponse(BaseModel):
+    """Person identity returned by people API operations."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "description": "Canonical person record with audit timestamps."
+        }
+    )
+
     person_id: str
     display_name: str
     created_ts: datetime
@@ -80,4 +110,33 @@ def get_person_endpoint(
     person = get_person(db.connection(), person_id)
     if person is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
+    return PersonResponse.model_validate(person)
+
+
+@router.patch(
+    "/{person_id}",
+    summary="Update person",
+    description="Rename one person identity by ID.",
+    response_model=PersonResponse,
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "description": "Person not found",
+        }
+    },
+)
+def update_person_endpoint(
+    person_id: str,
+    body: UpdatePersonRequest,
+    db: Session = Depends(get_db),
+) -> PersonResponse:
+    try:
+        person = update_person(
+            db.connection(),
+            person_id=person_id,
+            display_name=body.display_name,
+            now=datetime.now(tz=UTC),
+        )
+    except PersonNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    db.commit()
     return PersonResponse.model_validate(person)

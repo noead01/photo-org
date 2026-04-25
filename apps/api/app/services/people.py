@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import insert, select
+from sqlalchemy import insert, select, update
 from sqlalchemy.engine import Connection
 
 from app.storage import people
@@ -52,6 +52,35 @@ def get_person(connection: Connection, person_id: str) -> dict[str, object] | No
     if row is None:
         return None
     return _person_from_row(row)
+
+
+def update_person(
+    connection: Connection,
+    *,
+    person_id: str,
+    display_name: str,
+    now: datetime,
+) -> dict[str, object]:
+    existing = (
+        connection.execute(select(people).where(people.c.person_id == person_id))
+        .mappings()
+        .first()
+    )
+    if existing is None:
+        raise PersonNotFoundError("Person not found")
+
+    normalized_display_name = _normalize_display_name(display_name)
+    connection.execute(
+        update(people)
+        .where(people.c.person_id == person_id)
+        .values(display_name=normalized_display_name, updated_ts=now)
+    )
+    return {
+        "person_id": existing["person_id"],
+        "display_name": normalized_display_name,
+        "created_ts": existing["created_ts"],
+        "updated_ts": now,
+    }
 
 
 def _person_from_row(row: Any) -> dict[str, object]:
