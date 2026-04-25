@@ -4,10 +4,13 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, insert, select, update
+from sqlalchemy.sql.dml import Delete
 
 from app.dependencies import _get_session_factory
 from app.main import app
 from app.migrations import upgrade_database
+from app.routers import people as people_router
+from app.services import people as people_service
 from app.storage import face_labels, faces, people, photos
 
 
@@ -40,6 +43,31 @@ def _insert_photo(connection, *, photo_id: str) -> None:
             updated_ts=now,
         )
     )
+
+
+class _ResultWithRowcountZero:
+    rowcount = 0
+
+
+class _DeleteRowcountZeroConnection:
+    def __init__(self, connection) -> None:
+        self._connection = connection
+        self._did_inject = False
+
+    def execute(self, statement, *args, **kwargs):
+        if (
+            not self._did_inject
+            and isinstance(statement, Delete)
+            and statement.table.name == people.name
+        ):
+            # Simulate a concurrent delete that happens just before this DELETE executes.
+            self._did_inject = True
+            self._connection.execute(statement, *args, **kwargs)
+            return _ResultWithRowcountZero()
+        return self._connection.execute(statement, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
 
 
 def test_people_create_api_trims_display_name_and_returns_created_record(tmp_path, monkeypatch):
@@ -269,6 +297,41 @@ def test_people_delete_api_returns_404_for_missing_person(tmp_path, monkeypatch)
     assert response.json()["detail"] == "Person not found"
 
 
+def test_people_delete_api_returns_404_when_atomic_delete_loses_race(tmp_path, monkeypatch):
+    database_url = _database_url(tmp_path, "people-delete-race-not-found.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    now = datetime(2026, 4, 24, 12, 0, tzinfo=UTC)
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(people).values(
+                person_id="person-1",
+                display_name="Jane Doe",
+                created_ts=now,
+                updated_ts=now,
+            )
+        )
+
+    def _delete_person_with_rowcount_zero(connection, person_id: str) -> None:
+        wrapped_connection = _DeleteRowcountZeroConnection(connection)
+        people_service.delete_person(wrapped_connection, person_id)
+
+    monkeypatch.setattr(
+        people_router,
+        "delete_person",
+        _delete_person_with_rowcount_zero,
+    )
+
+    client = TestClient(app)
+    response = client.delete("/api/v1/people/person-1")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Person not found"
+
+
 def test_people_delete_api_returns_409_when_person_is_referenced_by_face(tmp_path, monkeypatch):
     database_url = _database_url(tmp_path, "people-delete-face-reference.db")
     upgrade_database(database_url)
@@ -300,6 +363,11 @@ def test_people_delete_api_returns_409_when_person_is_referenced_by_face(tmp_pat
 
     assert response.status_code == 409
     assert response.json()["detail"] == "Person is referenced by face or label data"
+    with engine.connect() as connection:
+        persisted_person_id = connection.execute(
+            select(people.c.person_id).where(people.c.person_id == "person-1")
+        ).scalar_one_or_none()
+    assert persisted_person_id == "person-1"
 
 
 def test_people_delete_api_returns_409_when_person_is_referenced_by_face_label(
@@ -342,6 +410,11 @@ def test_people_delete_api_returns_409_when_person_is_referenced_by_face_label(
 
     assert response.status_code == 409
     assert response.json()["detail"] == "Person is referenced by face or label data"
+    with engine.connect() as connection:
+        persisted_person_id = connection.execute(
+            select(people.c.person_id).where(people.c.person_id == "person-1")
+        ).scalar_one_or_none()
+    assert persisted_person_id == "person-1"
 
 
 def test_openapi_schema_includes_people_tag_and_paths(tmp_path, monkeypatch):

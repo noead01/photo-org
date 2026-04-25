@@ -80,28 +80,23 @@ def update_person(
     return person
 
 
-def _person_has_references(connection: Connection, person_id: str) -> bool:
-    face_reference = connection.execute(
-        select(faces.c.face_id).where(faces.c.person_id == person_id).limit(1)
-    ).first()
-    if face_reference is not None:
-        return True
-
-    face_label_reference = connection.execute(
-        select(face_labels.c.face_label_id)
-        .where(face_labels.c.person_id == person_id)
-        .limit(1)
-    ).first()
-    return face_label_reference is not None
-
-
 def delete_person(connection: Connection, person_id: str) -> None:
+    delete_result = connection.execute(
+        delete(people).where(
+            people.c.person_id == person_id,
+            ~select(faces.c.face_id).where(faces.c.person_id == person_id).exists(),
+            ~select(face_labels.c.face_label_id)
+            .where(face_labels.c.person_id == person_id)
+            .exists(),
+        )
+    )
+    if delete_result.rowcount == 1:
+        return
+
     person = get_person(connection, person_id)
     if person is None:
         raise PersonNotFoundError("Person not found")
-    if _person_has_references(connection, person_id):
-        raise PersonInUseError("Person is referenced by face or label data")
-    connection.execute(delete(people).where(people.c.person_id == person_id))
+    raise PersonInUseError("Person is referenced by face or label data")
 
 
 def _normalize_utc_datetime(value: datetime) -> datetime:
