@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from app.routers.face_assignments import router as face_assignments_router
 from app.routers.ingest_queue import router as ingest_queue_router
 from app.routers.operations import router as operations_router
 from app.routers.people import router as people_router
@@ -25,6 +26,10 @@ app = FastAPI(
             "description": "Create and manage people identities used by face-labeling workflows.",
         },
         {
+            "name": "face-labeling",
+            "description": "Assign detected faces to people identities.",
+        },
+        {
             "name": "search",
             "description": "Search photos using text, filters, and similarity signals.",
         },
@@ -46,6 +51,7 @@ app = FastAPI(
 
 app.include_router(ingest_queue_router, prefix="/api/v1")
 app.include_router(operations_router, prefix="/api/v1")
+app.include_router(face_assignments_router, prefix="/api/v1")
 app.include_router(people_router, prefix="/api/v1")
 app.include_router(photos_router, prefix="/api/v1")
 app.include_router(storage_sources_router, prefix="/api/v1")

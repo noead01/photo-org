@@ -69,6 +69,7 @@ def test_photo_detail_api_returns_projected_metadata_and_related_fields(tmp_path
     assert payload["people"] == ["person-1"]
     assert payload["faces"] == [
         {
+            "face_id": "face-1",
             "person_id": "person-1",
             "bbox_x": 10,
             "bbox_y": 20,

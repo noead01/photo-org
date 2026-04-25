@@ -14,6 +14,7 @@ class PhotoDetailFace(BaseModel):
         json_schema_extra={"description": "A single detected face and its bounding box."}
     )
 
+    face_id: str = Field(description="Stable face identifier.")
     person_id: str | None = Field(default=None, description="Recognized person identifier.")
     bbox_x: int | None = Field(default=None, description="Bounding-box x coordinate.")
     bbox_y: int | None = Field(default=None, description="Bounding-box y coordinate.")
