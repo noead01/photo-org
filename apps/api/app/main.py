@@ -2,6 +2,7 @@ from fastapi import FastAPI
 
 from app.routers.ingest_queue import router as ingest_queue_router
 from app.routers.operations import router as operations_router
+from app.routers.people import router as people_router
 from app.routers.photos import router as photos_router
 from app.routers.storage_sources import router as storage_sources_router
 from app.openapi_docs import openapi_yaml_response
@@ -18,6 +19,10 @@ app = FastAPI(
         {
             "name": "photos",
             "description": "Browse and inspect photo records and metadata.",
+        },
+        {
+            "name": "people",
+            "description": "Create and manage people identities used by face-labeling workflows.",
         },
         {
             "name": "search",
@@ -41,6 +46,7 @@ app = FastAPI(
 
 app.include_router(ingest_queue_router, prefix="/api/v1")
 app.include_router(operations_router, prefix="/api/v1")
+app.include_router(people_router, prefix="/api/v1")
 app.include_router(photos_router, prefix="/api/v1")
 app.include_router(storage_sources_router, prefix="/api/v1")
 
