@@ -3,12 +3,12 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, insert, update
+from sqlalchemy import create_engine, insert, select, update
 
 from app.dependencies import _get_session_factory
 from app.main import app
 from app.migrations import upgrade_database
-from app.storage import people
+from app.storage import face_labels, faces, people, photos
 
 
 def _client(tmp_path, monkeypatch, filename: str) -> TestClient:
@@ -28,6 +28,18 @@ def _parse_api_timestamp(value: str) -> datetime:
     assert parsed.tzinfo is not None
     assert parsed.utcoffset() == timedelta(0)
     return parsed
+
+
+def _insert_photo(connection, *, photo_id: str) -> None:
+    now = datetime(2026, 4, 24, 12, 0, tzinfo=UTC)
+    connection.execute(
+        insert(photos).values(
+            photo_id=photo_id,
+            sha256=f"sha256-{photo_id}",
+            created_ts=now,
+            updated_ts=now,
+        )
+    )
 
 
 def test_people_create_api_trims_display_name_and_returns_created_record(tmp_path, monkeypatch):
@@ -215,6 +227,121 @@ def test_people_update_api_returns_404_for_missing_person(tmp_path, monkeypatch)
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Person not found"
+
+
+def test_people_delete_api_removes_unreferenced_person(tmp_path, monkeypatch):
+    database_url = _database_url(tmp_path, "people-delete.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    now = datetime(2026, 4, 24, 12, 0, tzinfo=UTC)
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(people).values(
+                person_id="person-1",
+                display_name="Jane Doe",
+                created_ts=now,
+                updated_ts=now,
+            )
+        )
+
+    client = TestClient(app)
+    response = client.delete("/api/v1/people/person-1")
+
+    assert response.status_code == 204
+    assert response.content == b""
+
+    with engine.connect() as connection:
+        persisted_person_id = connection.execute(
+            select(people.c.person_id).where(people.c.person_id == "person-1")
+        ).scalar_one_or_none()
+    assert persisted_person_id is None
+
+
+def test_people_delete_api_returns_404_for_missing_person(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch, "people-delete-missing.db")
+
+    response = client.delete("/api/v1/people/missing-person")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Person not found"
+
+
+def test_people_delete_api_returns_409_when_person_is_referenced_by_face(tmp_path, monkeypatch):
+    database_url = _database_url(tmp_path, "people-delete-face-reference.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    now = datetime(2026, 4, 24, 12, 0, tzinfo=UTC)
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(people).values(
+                person_id="person-1",
+                display_name="Jane Doe",
+                created_ts=now,
+                updated_ts=now,
+            )
+        )
+        _insert_photo(connection, photo_id="photo-1")
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id="person-1",
+            )
+        )
+
+    client = TestClient(app)
+    response = client.delete("/api/v1/people/person-1")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Person is referenced by face or label data"
+
+
+def test_people_delete_api_returns_409_when_person_is_referenced_by_face_label(
+    tmp_path, monkeypatch
+):
+    database_url = _database_url(tmp_path, "people-delete-face-label-reference.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    now = datetime(2026, 4, 24, 12, 0, tzinfo=UTC)
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(people).values(
+                person_id="person-1",
+                display_name="Jane Doe",
+                created_ts=now,
+                updated_ts=now,
+            )
+        )
+        _insert_photo(connection, photo_id="photo-1")
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+            )
+        )
+        connection.execute(
+            insert(face_labels).values(
+                face_label_id="face-label-1",
+                face_id="face-1",
+                person_id="person-1",
+                label_source="manual",
+            )
+        )
+
+    client = TestClient(app)
+    response = client.delete("/api/v1/people/person-1")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Person is referenced by face or label data"
 
 
 def test_openapi_schema_includes_people_tag_and_paths(tmp_path, monkeypatch):

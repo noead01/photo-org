@@ -3,14 +3,16 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_db
 from app.services.people import (
+    PersonInUseError,
     PersonNotFoundError,
     create_person,
+    delete_person,
     get_person,
     list_people,
     update_person,
@@ -140,3 +142,31 @@ def update_person_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     db.commit()
     return PersonResponse.model_validate(person)
+
+
+@router.delete(
+    "/{person_id}",
+    summary="Delete person",
+    description="Delete one person identity by ID when it has no face references.",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "description": "Person not found",
+        },
+        status.HTTP_409_CONFLICT: {
+            "description": "Person is referenced by face or label data",
+        },
+    },
+)
+def delete_person_endpoint(
+    person_id: str,
+    db: Session = Depends(get_db),
+) -> Response:
+    try:
+        delete_person(db.connection(), person_id)
+    except PersonNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PersonInUseError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
