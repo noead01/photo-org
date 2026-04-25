@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, insert, update
@@ -21,6 +21,13 @@ def _client(tmp_path, monkeypatch, filename: str) -> TestClient:
 
 def _database_url(tmp_path, filename: str) -> str:
     return f"sqlite:///{tmp_path / filename}"
+
+
+def _parse_api_timestamp(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    assert parsed.tzinfo is not None
+    assert parsed.utcoffset() == timedelta(0)
+    return parsed
 
 
 def test_people_create_api_trims_display_name_and_returns_created_record(tmp_path, monkeypatch):
@@ -96,11 +103,15 @@ def test_people_list_api_orders_by_display_name_then_person_id(tmp_path, monkeyp
     response = client.get("/api/v1/people")
 
     assert response.status_code == 200
-    assert [item["person_id"] for item in response.json()] == [
+    payload = response.json()
+    assert [item["person_id"] for item in payload] == [
         "person-a",
         "person-b",
         "person-c",
     ]
+    for item in payload:
+        _parse_api_timestamp(item["created_ts"])
+        _parse_api_timestamp(item["updated_ts"])
 
 
 def test_people_get_api_returns_existing_person(tmp_path, monkeypatch):
@@ -125,8 +136,11 @@ def test_people_get_api_returns_existing_person(tmp_path, monkeypatch):
     response = client.get("/api/v1/people/person-1")
 
     assert response.status_code == 200
-    assert response.json()["person_id"] == "person-1"
-    assert response.json()["display_name"] == "Jane Doe"
+    payload = response.json()
+    assert payload["person_id"] == "person-1"
+    assert payload["display_name"] == "Jane Doe"
+    assert _parse_api_timestamp(payload["created_ts"]) == now
+    assert _parse_api_timestamp(payload["updated_ts"]) == now
 
 
 def test_people_get_api_returns_404_for_missing_person(tmp_path, monkeypatch):
@@ -171,10 +185,18 @@ def test_people_update_api_renames_person_and_refreshes_updated_timestamp(tmp_pa
     payload = response.json()
     assert payload["person_id"] == "person-1"
     assert payload["display_name"] == "Jane Smith"
-    created_ts = datetime.fromisoformat(payload["created_ts"]).replace(tzinfo=None)
-    updated_ts = datetime.fromisoformat(payload["updated_ts"]).replace(tzinfo=None)
-    assert created_ts == original_ts.replace(tzinfo=None)
-    assert updated_ts > original_ts.replace(tzinfo=None)
+    created_ts = _parse_api_timestamp(payload["created_ts"])
+    updated_ts = _parse_api_timestamp(payload["updated_ts"])
+    assert created_ts == original_ts
+    assert updated_ts > original_ts
+
+    get_response = client.get("/api/v1/people/person-1")
+    assert get_response.status_code == 200
+    persisted_payload = get_response.json()
+    assert persisted_payload["person_id"] == payload["person_id"]
+    assert persisted_payload["display_name"] == payload["display_name"]
+    assert _parse_api_timestamp(persisted_payload["created_ts"]) == created_ts
+    assert _parse_api_timestamp(persisted_payload["updated_ts"]) == updated_ts
 
 
 def test_people_update_api_rejects_blank_display_name(tmp_path, monkeypatch):
