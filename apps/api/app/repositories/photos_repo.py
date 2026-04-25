@@ -406,6 +406,7 @@ class PhotosRepository:
         if include_face_regions:
             face_columns.extend(
                 [
+                    self.faces.c.face_id,
                     self.faces.c.bbox_x,
                     self.faces.c.bbox_y,
                     self.faces.c.bbox_w,
@@ -416,6 +417,7 @@ class PhotosRepository:
         for r in self.db.execute(
             select(*face_columns)
             .where(self.faces.c.photo_id.in_(pids))
+            .order_by(self.faces.c.photo_id, self.faces.c.face_id)
         ).all():
             if r.person_id:
                 ppl_map[r.photo_id].append(r.person_id)
@@ -423,6 +425,7 @@ class PhotosRepository:
             if include_face_regions:
                 face_item.update(
                     {
+                        "face_id": r.face_id,
                         "bbox_x": r.bbox_x,
                         "bbox_y": r.bbox_y,
                         "bbox_w": r.bbox_w,
