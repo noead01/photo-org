@@ -1,11 +1,20 @@
 from uuid import uuid4
 
+import pytest
 import yaml
 from sqlalchemy import func, insert, select
 
 from app.dependencies import FACE_VALIDATION_ROLE_HEADER
 from app.db.session import create_db_engine
-from app.storage import faces, photos
+from app.storage import face_labels, faces, photos
+from photoorg_db_schema import EMBEDDING_DIMENSION
+
+
+def _embedding(first: float, second: float) -> list[float]:
+    values = [0.0] * EMBEDDING_DIMENSION
+    values[0] = first
+    values[1] = second
+    return values
 
 
 def test_deployment_photo_listing_matches_seed_corpus(
@@ -199,6 +208,85 @@ def test_deployment_face_labeling_assignment_and_correction_surface(
         "photo_id": photo_id,
         "previous_person_id": person_one_id,
         "person_id": person_two_id,
+    }
+
+
+def test_deployment_face_candidate_lookup_persists_prediction_metadata(
+    seed_corpus_database_url,
+    deployment_api_client,
+):
+    person_response = deployment_api_client.post(
+        "/api/v1/people",
+        json={"display_name": f"E2E Candidate {uuid4().hex[:8]}"},
+    )
+    assert person_response.status_code == 201
+    person_id = person_response.json()["person_id"]
+
+    engine = create_db_engine(seed_corpus_database_url)
+    with engine.begin() as connection:
+        photo_id = connection.execute(
+            select(photos.c.photo_id)
+            .where(photos.c.deleted_ts.is_(None))
+            .order_by(photos.c.photo_id)
+            .limit(1)
+        ).scalar_one()
+        source_face_id = str(uuid4())
+        candidate_face_id = str(uuid4())
+        connection.execute(
+            insert(faces),
+            [
+                {
+                    "face_id": source_face_id,
+                    "photo_id": photo_id,
+                    "person_id": None,
+                    "embedding": _embedding(1.0, 0.0),
+                },
+                {
+                    "face_id": candidate_face_id,
+                    "photo_id": photo_id,
+                    "person_id": person_id,
+                    "embedding": _embedding(0.99, 0.01),
+                },
+            ],
+        )
+
+    response = deployment_api_client.get(f"/api/v1/faces/{source_face_id}/candidates")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["suggestion_policy"]["decision"] == "auto_apply"
+    top_candidate = payload["candidates"][0]
+    thresholds = payload["suggestion_policy"]
+
+    with engine.connect() as connection:
+        persisted_face = connection.execute(
+            select(faces.c.person_id).where(faces.c.face_id == source_face_id)
+        ).scalar_one()
+        persisted_label = connection.execute(
+            select(
+                face_labels.c.face_id,
+                face_labels.c.person_id,
+                face_labels.c.label_source,
+                face_labels.c.model_version,
+                face_labels.c.provenance,
+            ).where(face_labels.c.face_id == source_face_id)
+        ).mappings().one()
+
+    assert persisted_face == person_id
+    assert persisted_label["face_id"] == source_face_id
+    assert persisted_label["person_id"] == person_id
+    assert persisted_label["label_source"] == "machine_applied"
+    assert persisted_label["model_version"]
+    assert persisted_label["provenance"] == {
+        "workflow": "recognition-suggestions",
+        "surface": "api",
+        "action": "auto_apply",
+        "matched_face_id": candidate_face_id,
+        "review_threshold": pytest.approx(thresholds["review_threshold"], abs=1e-6),
+        "auto_accept_threshold": pytest.approx(thresholds["auto_accept_threshold"], abs=1e-6),
+        "prediction_source": "nearest-neighbor",
+        "distance_metric": "cosine",
+        "candidate_distance": pytest.approx(top_candidate["distance"], abs=1e-6),
+        "candidate_confidence": pytest.approx(top_candidate["confidence"], abs=1e-6),
     }
 
 

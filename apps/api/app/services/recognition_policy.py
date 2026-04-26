@@ -9,6 +9,11 @@ DEFAULT_AUTO_ACCEPT_THRESHOLD = 0.9
 
 REVIEW_THRESHOLD_ENV = "PHOTO_ORG_RECOGNITION_REVIEW_THRESHOLD"
 AUTO_ACCEPT_THRESHOLD_ENV = "PHOTO_ORG_RECOGNITION_AUTO_ACCEPT_THRESHOLD"
+MODEL_VERSION_ENV = "PHOTO_ORG_RECOGNITION_MODEL_VERSION"
+
+DEFAULT_MODEL_VERSION = "nearest-neighbor-cosine-v1"
+PREDICTION_SOURCE_NEAREST_NEIGHBOR = "nearest-neighbor"
+DISTANCE_METRIC_COSINE = "cosine"
 
 SUGGESTION_DECISION_AUTO_APPLY = "auto_apply"
 SUGGESTION_DECISION_REVIEW_NEEDED = "review_needed"
@@ -38,6 +43,22 @@ def resolve_suggestion_thresholds(
     return {
         "review_threshold": review_threshold,
         "auto_accept_threshold": auto_accept_threshold,
+    }
+
+
+def resolve_prediction_metadata(
+    *,
+    model_version: str | None = None,
+) -> dict[str, str]:
+    if model_version is None:
+        model_version = os.getenv(MODEL_VERSION_ENV, DEFAULT_MODEL_VERSION)
+    normalized_model_version = model_version.strip()
+    if not normalized_model_version:
+        raise ValueError("recognition model version must be non-empty")
+    return {
+        "model_version": normalized_model_version,
+        "prediction_source": PREDICTION_SOURCE_NEAREST_NEIGHBOR,
+        "distance_metric": DISTANCE_METRIC_COSINE,
     }
 
 
