@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sqlalchemy.orm import Session
 
-from app.dependencies import get_db
+from app.dependencies import get_db, require_face_validation_role
 from app.services.face_assignment import (
     FaceAlreadyAssignedError,
     FaceAlreadyAssignedToPersonError,
@@ -71,6 +71,7 @@ class FaceCorrectionResponse(BaseModel):
     response_model=FaceAssignmentResponse,
     status_code=status.HTTP_201_CREATED,
     responses={
+        status.HTTP_403_FORBIDDEN: {"description": "Face validation role required"},
         status.HTTP_404_NOT_FOUND: {"description": "Face or person not found"},
         status.HTTP_409_CONFLICT: {"description": "Face already assigned"},
     },
@@ -79,6 +80,7 @@ def assign_face_to_person_endpoint(
     face_id: str,
     body: AssignFaceRequest,
     db: Session = Depends(get_db),
+    _: str = Depends(require_face_validation_role),
 ) -> FaceAssignmentResponse:
     try:
         assignment = assign_face_to_person(
@@ -103,6 +105,7 @@ def assign_face_to_person_endpoint(
     description="Reassign an already-labeled face to a different person identity.",
     response_model=FaceCorrectionResponse,
     responses={
+        status.HTTP_403_FORBIDDEN: {"description": "Face validation role required"},
         status.HTTP_404_NOT_FOUND: {"description": "Face or person not found"},
         status.HTTP_409_CONFLICT: {
             "description": "Face is unassigned or already assigned to the requested person"
@@ -113,6 +116,7 @@ def correct_face_assignment_endpoint(
     face_id: str,
     body: AssignFaceRequest,
     db: Session = Depends(get_db),
+    _: str = Depends(require_face_validation_role),
 ) -> FaceCorrectionResponse:
     try:
         correction = reassign_face_to_person(
