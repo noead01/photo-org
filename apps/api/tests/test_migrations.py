@@ -1,13 +1,16 @@
 import importlib.util
 import shutil
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
-from sqlalchemy import create_engine, func, inspect, select
+import pytest
+from sqlalchemy import create_engine, func, inspect, insert, select
+from sqlalchemy.exc import IntegrityError
 
 from app.db.queue import IngestQueueStore
 from app.processing.ingest import ingest_directory
-from app.storage import photos
+from app.storage import face_labels, faces, people, photos
 
 
 def _resolve_seed_corpus_dir(start: Path | None = None) -> Path:
@@ -42,6 +45,64 @@ def test_upgrade_database_creates_schema(tmp_path):
         tables = set(inspect(connection).get_table_names())
 
     assert {"photos", "faces", "photo_tags", "people", "face_labels"} <= tables
+
+
+def test_upgrade_database_enforces_face_label_source_constraint(tmp_path):
+    from app.migrations import upgrade_database
+
+    database_url = f"sqlite:///{tmp_path / 'label-source-constraint.db'}"
+    upgrade_database(database_url)
+
+    engine = create_engine(database_url, future=True)
+    with engine.connect() as connection:
+        inspector = inspect(connection)
+        check_constraints = inspector.get_check_constraints("face_labels")
+
+    assert any(
+        constraint["name"] == "ck_face_labels_label_source" for constraint in check_constraints
+    )
+
+    with engine.begin() as connection:
+        now = datetime(2026, 4, 26, 12, 0, tzinfo=UTC)
+        connection.execute(
+            insert(people).values(
+                person_id="person-1",
+                display_name="Jane Doe",
+            )
+        )
+        connection.execute(
+            insert(photos).values(
+                photo_id="photo-1",
+                sha256="sha256-photo-1",
+                created_ts=now,
+                updated_ts=now,
+            )
+        )
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+            )
+        )
+        connection.execute(
+            insert(face_labels).values(
+                face_label_id="face-label-1",
+                face_id="face-1",
+                person_id="person-1",
+                label_source="human_confirmed",
+            )
+        )
+
+    with engine.begin() as connection:
+        with pytest.raises(IntegrityError):
+            connection.execute(
+                insert(face_labels).values(
+                    face_label_id="face-label-2",
+                    face_id="face-1",
+                    person_id="person-1",
+                    label_source="manual",
+                )
+            )
 
 
 def test_upgrade_database_creates_ingest_queue_table(tmp_path):

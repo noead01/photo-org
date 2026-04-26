@@ -1,5 +1,7 @@
 from .schema import (
     EMBEDDING_DIMENSION,
+    FACE_LABEL_SOURCE_HUMAN_CONFIRMED,
+    FACE_LABEL_SOURCE_MACHINE_APPLIED,
     embedding_column_type,
     face_labels,
     faces,
@@ -19,6 +21,8 @@ from .schema import (
 
 __all__ = [
     "EMBEDDING_DIMENSION",
+    "FACE_LABEL_SOURCE_HUMAN_CONFIRMED",
+    "FACE_LABEL_SOURCE_MACHINE_APPLIED",
     "configure_embedding_column",
     "embedding_column_type",
     "face_labels",

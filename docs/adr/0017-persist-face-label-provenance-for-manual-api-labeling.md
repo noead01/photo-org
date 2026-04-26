@@ -20,7 +20,7 @@ Event persistence rules:
 
 - continue using `faces.person_id` as the current resolved label
 - append one `face_labels` row after each successful write
-- set `label_source = "manual"` for these API actions
+- set `label_source = "human_confirmed"` for these API actions
 - set `confidence` and `model_version` to `NULL` for manual writes
 - persist `provenance` JSON with operation metadata (`workflow`, `surface`, `action`)
 - include `previous_person_id` in correction provenance

@@ -5,6 +5,8 @@ from uuid import uuid4
 from sqlalchemy import insert, select, update
 from sqlalchemy.engine import Connection
 
+from photoorg_db_schema import FACE_LABEL_SOURCE_HUMAN_CONFIRMED
+
 from app.storage import face_labels, faces, people
 
 
@@ -26,9 +28,6 @@ class FaceNotAssignedError(RuntimeError):
 
 class FaceAlreadyAssignedToPersonError(RuntimeError):
     pass
-
-
-_MANUAL_LABEL_SOURCE = "manual"
 
 
 def assign_face_to_person(
@@ -175,7 +174,7 @@ def _persist_face_label_event(
             face_label_id=str(uuid4()),
             face_id=face_id,
             person_id=person_id,
-            label_source=_MANUAL_LABEL_SOURCE,
+            label_source=FACE_LABEL_SOURCE_HUMAN_CONFIRMED,
             confidence=None,
             model_version=None,
             provenance=provenance,

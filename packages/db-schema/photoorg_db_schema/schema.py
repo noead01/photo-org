@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import (
+    CheckConstraint,
     JSON,
     TIMESTAMP,
     Column,
@@ -22,6 +23,8 @@ from sqlalchemy.engine import Connection, Engine
 
 
 EMBEDDING_DIMENSION = 128
+FACE_LABEL_SOURCE_HUMAN_CONFIRMED = "human_confirmed"
+FACE_LABEL_SOURCE_MACHINE_APPLIED = "machine_applied"
 
 
 try:
@@ -190,6 +193,10 @@ face_labels = Table(
     Column("provenance", JSON()),
     Column("created_ts", TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
     Column("updated_ts", TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+    CheckConstraint(
+        "label_source IN ('human_confirmed', 'machine_applied')",
+        name="ck_face_labels_label_source",
+    ),
 )
 
 ingest_runs = Table(

@@ -202,6 +202,10 @@ def upgrade() -> None:
         sa.Column("provenance", sa.JSON(), nullable=True),
         sa.Column("created_ts", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
         sa.Column("updated_ts", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.CheckConstraint(
+            "label_source IN ('human_confirmed', 'machine_applied')",
+            name="ck_face_labels_label_source",
+        ),
     )
     op.create_index("idx_face_labels_face_id", "face_labels", ["face_id"], unique=False)
     op.create_index("idx_face_labels_person_id", "face_labels", ["person_id"], unique=False)
