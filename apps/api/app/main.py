@@ -27,7 +27,7 @@ app = FastAPI(
         },
         {
             "name": "face-labeling",
-            "description": "Assign detected faces to people identities.",
+            "description": "Assign and correct detected face-to-person associations.",
         },
         {
             "name": "search",
