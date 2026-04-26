@@ -117,7 +117,7 @@ Typical usage is expected to be:
 - admin users register sources through `POST /api/v1/storage-sources`, then add, remove, or disable watched folders under those sources
 - the system ingests new photos in the background
 - users search for photos by person, date, and location
-- suggestion workflows can fetch nearest labeled candidates with `GET /api/v1/faces/{face_id}/candidates`, which applies the configured threshold policy and returns `auto_apply`, `review_needed`, or `no_suggestion`
+- suggestion workflows can fetch nearest labeled candidates with `GET /api/v1/faces/{face_id}/candidates`; when policy resolves to `auto_apply` and the source face is still unlabeled, the API auto-assigns the top candidate, records a `machine_applied` label event, and returns `auto_applied_assignment` in the response
 - authorized users confirm or correct face associations
 - users monitor ingestion status and recent issues from the UI
 
