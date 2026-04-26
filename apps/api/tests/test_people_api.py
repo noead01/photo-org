@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, insert, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.dml import Delete
 
 from app.dependencies import _get_session_factory
@@ -64,6 +65,29 @@ class _DeleteRowcountZeroConnection:
             self._did_inject = True
             self._connection.execute(statement, *args, **kwargs)
             return _ResultWithRowcountZero()
+        return self._connection.execute(statement, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
+
+
+class _DeleteForeignKeyViolationConnection:
+    def __init__(self, connection) -> None:
+        self._connection = connection
+        self._did_inject = False
+
+    def execute(self, statement, *args, **kwargs):
+        if (
+            not self._did_inject
+            and isinstance(statement, Delete)
+            and statement.table.name == people.name
+        ):
+            self._did_inject = True
+            raise IntegrityError(
+                str(statement),
+                {},
+                Exception("FOREIGN KEY constraint failed"),
+            )
         return self._connection.execute(statement, *args, **kwargs)
 
     def __getattr__(self, name):
@@ -357,6 +381,46 @@ def test_people_delete_api_returns_409_when_person_is_referenced_by_face(tmp_pat
                 person_id="person-1",
             )
         )
+
+    client = TestClient(app)
+    response = client.delete("/api/v1/people/person-1")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Person is referenced by face or label data"
+    with engine.connect() as connection:
+        persisted_person_id = connection.execute(
+            select(people.c.person_id).where(people.c.person_id == "person-1")
+        ).scalar_one_or_none()
+    assert persisted_person_id == "person-1"
+
+
+def test_people_delete_api_returns_409_when_delete_loses_fk_race(tmp_path, monkeypatch):
+    database_url = _database_url(tmp_path, "people-delete-fk-race.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    now = datetime(2026, 4, 24, 12, 0, tzinfo=UTC)
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(people).values(
+                person_id="person-1",
+                display_name="Jane Doe",
+                created_ts=now,
+                updated_ts=now,
+            )
+        )
+
+    def _delete_person_with_fk_violation(connection, person_id: str) -> None:
+        wrapped_connection = _DeleteForeignKeyViolationConnection(connection)
+        people_service.delete_person(wrapped_connection, person_id)
+
+    monkeypatch.setattr(
+        people_router,
+        "delete_person",
+        _delete_person_with_fk_violation,
+    )
 
     client = TestClient(app)
     response = client.delete("/api/v1/people/person-1")

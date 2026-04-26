@@ -105,6 +105,47 @@ def test_upgrade_database_enforces_face_label_source_constraint(tmp_path):
             )
 
 
+def test_upgrade_database_enforces_faces_person_fk_constraint(tmp_path):
+    from app.migrations import upgrade_database
+
+    database_url = f"sqlite:///{tmp_path / 'faces-person-fk.db'}"
+    upgrade_database(database_url)
+
+    engine = create_engine(database_url, future=True)
+    with engine.connect() as connection:
+        inspector = inspect(connection)
+        foreign_keys = inspector.get_foreign_keys("faces")
+
+    assert any(
+        foreign_key["constrained_columns"] == ["person_id"]
+        and foreign_key["referred_table"] == "people"
+        and foreign_key["referred_columns"] == ["person_id"]
+        and foreign_key["options"] == {"ondelete": "RESTRICT"}
+        for foreign_key in foreign_keys
+    )
+
+    with engine.begin() as connection:
+        connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+        now = datetime(2026, 4, 26, 12, 0, tzinfo=UTC)
+        connection.execute(
+            insert(photos).values(
+                photo_id="photo-1",
+                sha256="sha256-photo-1",
+                created_ts=now,
+                updated_ts=now,
+            )
+        )
+
+        with pytest.raises(IntegrityError):
+            connection.execute(
+                insert(faces).values(
+                    face_id="face-1",
+                    photo_id="photo-1",
+                    person_id="missing-person",
+                )
+            )
+
+
 def test_upgrade_database_creates_ingest_queue_table(tmp_path):
     from app.migrations import upgrade_database
 

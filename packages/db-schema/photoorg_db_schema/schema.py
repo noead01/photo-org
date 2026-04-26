@@ -152,7 +152,7 @@ faces = Table(
     metadata,
     Column("face_id", String(36), primary_key=True),
     Column("photo_id", String(36), ForeignKey("photos.photo_id", ondelete="CASCADE"), nullable=False),
-    Column("person_id", String(36)),
+    Column("person_id", String(36), ForeignKey("people.person_id", ondelete="RESTRICT")),
     Column("bbox_x", Integer),
     Column("bbox_y", Integer),
     Column("bbox_w", Integer),
