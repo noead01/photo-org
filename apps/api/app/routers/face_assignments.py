@@ -13,6 +13,7 @@ from app.services.face_assignment import (
     FaceNotAssignedError,
     FaceNotFoundError,
     PersonNotFoundError,
+    auto_apply_face_suggestion,
     assign_face_to_person,
     reassign_face_to_person,
 )
@@ -21,6 +22,7 @@ from app.services.face_candidates import (
     FaceNotFoundError as FaceCandidateNotFoundError,
     lookup_nearest_neighbor_candidates,
 )
+from app.services.recognition_policy import SUGGESTION_DECISION_AUTO_APPLY
 
 
 router = APIRouter(prefix="/faces", tags=["face-labeling"])
@@ -83,6 +85,15 @@ class FaceCandidateResponse(BaseModel):
     confidence: float
 
 
+class AutoAppliedFaceAssignmentResponse(BaseModel):
+    """Auto-applied assignment details for high-confidence suggestions."""
+
+    face_id: str
+    photo_id: str
+    person_id: str
+    confidence: float
+
+
 class FaceSuggestionPolicyResponse(BaseModel):
     """Threshold policy decision for the source face suggestion flow."""
 
@@ -104,6 +115,7 @@ class FaceCandidateLookupResponse(BaseModel):
     face_id: str
     candidates: list[FaceCandidateResponse]
     suggestion_policy: FaceSuggestionPolicyResponse
+    auto_applied_assignment: AutoAppliedFaceAssignmentResponse | None = None
 
 
 @router.post(
@@ -206,5 +218,26 @@ def lookup_face_candidates_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except FaceEmbeddingNotAvailableError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    suggestion_policy = result["suggestion_policy"]
+    candidates = result["candidates"]
+    if (
+        suggestion_policy["decision"] == SUGGESTION_DECISION_AUTO_APPLY
+        and isinstance(candidates, list)
+        and candidates
+    ):
+        top_candidate = candidates[0]
+        auto_applied_assignment = auto_apply_face_suggestion(
+            db.connection(),
+            face_id=face_id,
+            person_id=str(top_candidate["person_id"]),
+            confidence=float(top_candidate["confidence"]),
+            matched_face_id=str(top_candidate["matched_face_id"]),
+            review_threshold=float(suggestion_policy["review_threshold"]),
+            auto_accept_threshold=float(suggestion_policy["auto_accept_threshold"]),
+        )
+        if auto_applied_assignment is not None:
+            result["auto_applied_assignment"] = auto_applied_assignment
+            db.commit()
 
     return FaceCandidateLookupResponse.model_validate(result)
