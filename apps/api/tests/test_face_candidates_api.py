@@ -58,6 +58,7 @@ def test_face_candidates_api_returns_ranked_person_candidates_with_per_person_be
 ):
     monkeypatch.setenv("PHOTO_ORG_RECOGNITION_REVIEW_THRESHOLD", "0.75")
     monkeypatch.setenv("PHOTO_ORG_RECOGNITION_AUTO_ACCEPT_THRESHOLD", "0.95")
+    monkeypatch.setenv("PHOTO_ORG_RECOGNITION_MODEL_VERSION", "recognition-cosine-v1")
     client = _client(tmp_path, monkeypatch, "face-candidates-ranked.db")
 
     engine = create_engine(f"sqlite:///{tmp_path / 'face-candidates-ranked.db'}", future=True)
@@ -162,7 +163,7 @@ def test_face_candidates_api_returns_ranked_person_candidates_with_per_person_be
     assert persisted_label["person_id"] == "person-1"
     assert persisted_label["label_source"] == "machine_applied"
     assert persisted_label["confidence"] == pytest.approx(0.999949, abs=1e-4)
-    assert persisted_label["model_version"] is None
+    assert persisted_label["model_version"] == "recognition-cosine-v1"
     assert persisted_label["provenance"] == {
         "workflow": "recognition-suggestions",
         "surface": "api",
@@ -170,6 +171,10 @@ def test_face_candidates_api_returns_ranked_person_candidates_with_per_person_be
         "matched_face_id": "candidate-1-best",
         "review_threshold": 0.75,
         "auto_accept_threshold": 0.95,
+        "prediction_source": "nearest-neighbor",
+        "distance_metric": "cosine",
+        "candidate_distance": pytest.approx(0.000051, abs=1e-4),
+        "candidate_confidence": pytest.approx(0.999949, abs=1e-4),
     }
 
 
@@ -179,6 +184,7 @@ def test_face_candidates_api_returns_review_needed_state_for_medium_confidence_m
 ):
     monkeypatch.setenv("PHOTO_ORG_RECOGNITION_REVIEW_THRESHOLD", "0.75")
     monkeypatch.setenv("PHOTO_ORG_RECOGNITION_AUTO_ACCEPT_THRESHOLD", "0.95")
+    monkeypatch.setenv("PHOTO_ORG_RECOGNITION_MODEL_VERSION", "recognition-cosine-v1")
     client = _client(tmp_path, monkeypatch, "face-candidates-review-needed.db")
 
     engine = create_engine(f"sqlite:///{tmp_path / 'face-candidates-review-needed.db'}", future=True)
@@ -244,7 +250,7 @@ def test_face_candidates_api_returns_review_needed_state_for_medium_confidence_m
     assert persisted_label["person_id"] == "person-1"
     assert persisted_label["label_source"] == "machine_suggested"
     assert persisted_label["confidence"] == pytest.approx(0.8, abs=1e-6)
-    assert persisted_label["model_version"] is None
+    assert persisted_label["model_version"] == "recognition-cosine-v1"
     assert persisted_label["provenance"] == {
         "workflow": "recognition-suggestions",
         "surface": "api",
@@ -252,6 +258,10 @@ def test_face_candidates_api_returns_review_needed_state_for_medium_confidence_m
         "matched_face_id": "candidate-1",
         "review_threshold": 0.75,
         "auto_accept_threshold": 0.95,
+        "prediction_source": "nearest-neighbor",
+        "distance_metric": "cosine",
+        "candidate_distance": pytest.approx(0.2, abs=1e-6),
+        "candidate_confidence": pytest.approx(0.8, abs=1e-6),
     }
 
 

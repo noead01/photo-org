@@ -12,6 +12,7 @@ from photoorg_db_schema import (
     FACE_LABEL_SOURCE_MACHINE_SUGGESTED,
 )
 
+from app.services.recognition_policy import resolve_prediction_metadata
 from app.storage import face_labels, faces, people
 
 
@@ -138,6 +139,7 @@ def auto_apply_face_suggestion(
     face_id: str,
     person_id: str,
     confidence: float,
+    distance: float,
     matched_face_id: str,
     review_threshold: float,
     auto_accept_threshold: float,
@@ -171,6 +173,7 @@ def auto_apply_face_suggestion(
         face_id=face_id,
         person_id=person_id,
         confidence=confidence,
+        distance=distance,
         matched_face_id=matched_face_id,
         review_threshold=review_threshold,
         auto_accept_threshold=auto_accept_threshold,
@@ -187,6 +190,7 @@ def record_review_needed_face_suggestion(
     face_id: str,
     person_id: str,
     confidence: float,
+    distance: float,
     matched_face_id: str,
     review_threshold: float,
     auto_accept_threshold: float,
@@ -204,6 +208,7 @@ def record_review_needed_face_suggestion(
         face_id=face_id,
         person_id=person_id,
         confidence=confidence,
+        distance=distance,
         matched_face_id=matched_face_id,
         review_threshold=review_threshold,
         auto_accept_threshold=auto_accept_threshold,
@@ -301,10 +306,12 @@ def _persist_machine_applied_face_label_event(
     face_id: str,
     person_id: str,
     confidence: float,
+    distance: float,
     matched_face_id: str,
     review_threshold: float,
     auto_accept_threshold: float,
 ) -> None:
+    prediction_metadata = resolve_prediction_metadata()
     connection.execute(
         insert(face_labels).values(
             face_label_id=str(uuid4()),
@@ -312,7 +319,7 @@ def _persist_machine_applied_face_label_event(
             person_id=person_id,
             label_source=FACE_LABEL_SOURCE_MACHINE_APPLIED,
             confidence=float(confidence),
-            model_version=None,
+            model_version=prediction_metadata["model_version"],
             provenance={
                 "workflow": "recognition-suggestions",
                 "surface": "api",
@@ -320,6 +327,10 @@ def _persist_machine_applied_face_label_event(
                 "matched_face_id": matched_face_id,
                 "review_threshold": float(review_threshold),
                 "auto_accept_threshold": float(auto_accept_threshold),
+                "prediction_source": prediction_metadata["prediction_source"],
+                "distance_metric": prediction_metadata["distance_metric"],
+                "candidate_distance": float(distance),
+                "candidate_confidence": float(confidence),
             },
         )
     )
@@ -331,10 +342,12 @@ def _upsert_machine_suggested_face_label_state(
     face_id: str,
     person_id: str,
     confidence: float,
+    distance: float,
     matched_face_id: str,
     review_threshold: float,
     auto_accept_threshold: float,
 ) -> None:
+    prediction_metadata = resolve_prediction_metadata()
     existing_rows = (
         connection.execute(
             select(
@@ -359,6 +372,10 @@ def _upsert_machine_suggested_face_label_state(
         "matched_face_id": matched_face_id,
         "review_threshold": float(review_threshold),
         "auto_accept_threshold": float(auto_accept_threshold),
+        "prediction_source": prediction_metadata["prediction_source"],
+        "distance_metric": prediction_metadata["distance_metric"],
+        "candidate_distance": float(distance),
+        "candidate_confidence": float(confidence),
     }
     if matched_existing_row is not None:
         matched_face_label_id = str(matched_existing_row["face_label_id"])
@@ -367,7 +384,7 @@ def _upsert_machine_suggested_face_label_state(
             .where(face_labels.c.face_label_id == matched_face_label_id)
             .values(
                 confidence=float(confidence),
-                model_version=None,
+                model_version=prediction_metadata["model_version"],
                 provenance=provenance,
                 updated_ts=func.current_timestamp(),
             )
@@ -397,7 +414,7 @@ def _upsert_machine_suggested_face_label_state(
             person_id=person_id,
             label_source=FACE_LABEL_SOURCE_MACHINE_SUGGESTED,
             confidence=float(confidence),
-            model_version=None,
+            model_version=prediction_metadata["model_version"],
             provenance=provenance,
         )
     )

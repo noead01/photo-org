@@ -117,9 +117,15 @@ Typical usage is expected to be:
 - admin users register sources through `POST /api/v1/storage-sources`, then add, remove, or disable watched folders under those sources
 - the system ingests new photos in the background
 - users search for photos by person, date, and location
-- suggestion workflows can fetch nearest labeled candidates with `GET /api/v1/faces/{face_id}/candidates`; when policy resolves to `auto_apply` and the source face is still unlabeled, the API auto-assigns the top candidate, records a `machine_applied` label event, and returns `auto_applied_assignment`; when policy resolves to `review_needed`, the API records a `machine_suggested` label event and returns `review_needed_suggestion` for human confirmation
+- suggestion workflows can fetch nearest labeled candidates with `GET /api/v1/faces/{face_id}/candidates`; when policy resolves to `auto_apply` and the source face is still unlabeled, the API auto-assigns the top candidate, records a `machine_applied` label event (including `model_version` plus prediction provenance), and returns `auto_applied_assignment`; when policy resolves to `review_needed`, the API records a `machine_suggested` label event with the same metadata and returns `review_needed_suggestion` for human confirmation
 - authorized users confirm or correct face associations
 - users monitor ingestion status and recent issues from the UI
+
+Recognition suggestion behavior is configurable through environment variables:
+
+- `PHOTO_ORG_RECOGNITION_REVIEW_THRESHOLD` (default `0.7`)
+- `PHOTO_ORG_RECOGNITION_AUTO_ACCEPT_THRESHOLD` (default `0.9`)
+- `PHOTO_ORG_RECOGNITION_MODEL_VERSION` (default `nearest-neighbor-cosine-v1`)
 
 For operator troubleshooting during long imports or background processing, the API exposes two operational endpoints:
 
