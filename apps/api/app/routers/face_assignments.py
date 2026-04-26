@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,11 @@ from app.services.face_assignment import (
     PersonNotFoundError,
     assign_face_to_person,
     reassign_face_to_person,
+)
+from app.services.face_candidates import (
+    FaceEmbeddingNotAvailableError,
+    FaceNotFoundError as FaceCandidateNotFoundError,
+    lookup_nearest_neighbor_candidates,
 )
 
 
@@ -62,6 +67,32 @@ class FaceCorrectionResponse(BaseModel):
     photo_id: str
     previous_person_id: str
     person_id: str
+
+
+class FaceCandidateResponse(BaseModel):
+    """Nearest-neighbor candidate details for one person identity."""
+
+    model_config = ConfigDict(
+        json_schema_extra={"description": "One candidate identity ranked for a source face."}
+    )
+
+    person_id: str
+    display_name: str
+    matched_face_id: str
+    distance: float
+
+
+class FaceCandidateLookupResponse(BaseModel):
+    """Nearest-neighbor candidate lookup result for one source face."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "description": "Top person candidates computed from nearest face-embedding neighbors."
+        }
+    )
+
+    face_id: str
+    candidates: list[FaceCandidateResponse]
 
 
 @router.post(
@@ -137,3 +168,32 @@ def correct_face_assignment_endpoint(
 
     db.commit()
     return FaceCorrectionResponse.model_validate(correction)
+
+
+@router.get(
+    "/{face_id}/candidates",
+    summary="Lookup nearest person candidates",
+    description="Return nearest labeled people candidates for the requested face embedding.",
+    response_model=FaceCandidateLookupResponse,
+    responses={
+        status.HTTP_404_NOT_FOUND: {"description": "Face not found"},
+        status.HTTP_409_CONFLICT: {"description": "Face embedding not available"},
+    },
+)
+def lookup_face_candidates_endpoint(
+    face_id: str,
+    limit: Annotated[int, Query(ge=1, le=50)] = 5,
+    db: Session = Depends(get_db),
+) -> FaceCandidateLookupResponse:
+    try:
+        result = lookup_nearest_neighbor_candidates(
+            db.connection(),
+            face_id=face_id,
+            limit=limit,
+        )
+    except FaceCandidateNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except FaceEmbeddingNotAvailableError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    return FaceCandidateLookupResponse.model_validate(result)
