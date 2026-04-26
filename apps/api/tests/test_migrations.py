@@ -92,6 +92,14 @@ def test_upgrade_database_enforces_face_label_source_constraint(tmp_path):
                 label_source="human_confirmed",
             )
         )
+        connection.execute(
+            insert(face_labels).values(
+                face_label_id="face-label-1b",
+                face_id="face-1",
+                person_id="person-1",
+                label_source="machine_suggested",
+            )
+        )
 
     with engine.begin() as connection:
         with pytest.raises(IntegrityError):

@@ -173,6 +173,88 @@ def test_face_candidates_api_returns_ranked_person_candidates_with_per_person_be
     }
 
 
+def test_face_candidates_api_returns_review_needed_state_for_medium_confidence_matches(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("PHOTO_ORG_RECOGNITION_REVIEW_THRESHOLD", "0.75")
+    monkeypatch.setenv("PHOTO_ORG_RECOGNITION_AUTO_ACCEPT_THRESHOLD", "0.95")
+    client = _client(tmp_path, monkeypatch, "face-candidates-review-needed.db")
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'face-candidates-review-needed.db'}", future=True)
+    with engine.begin() as connection:
+        _insert_photo(connection, photo_id="photo-1")
+        _insert_photo(connection, photo_id="photo-2")
+        _insert_person(connection, person_id="person-1", display_name="Alex")
+        connection.execute(
+            insert(faces),
+            [
+                {
+                    "face_id": "source-face",
+                    "photo_id": "photo-1",
+                    "person_id": None,
+                    "embedding": _embedding(1.0, 0.0),
+                },
+                {
+                    "face_id": "candidate-1",
+                    "photo_id": "photo-2",
+                    "person_id": "person-1",
+                    "embedding": _embedding(0.8, 0.6),
+                },
+            ],
+        )
+
+    response = client.get("/api/v1/faces/source-face/candidates")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["face_id"] == "source-face"
+    assert payload["suggestion_policy"] == {
+        "decision": "review_needed",
+        "review_threshold": 0.75,
+        "auto_accept_threshold": 0.95,
+        "top_candidate_confidence": pytest.approx(0.8, abs=1e-6),
+    }
+    assert payload["review_needed_suggestion"] == {
+        "face_id": "source-face",
+        "photo_id": "photo-1",
+        "person_id": "person-1",
+        "confidence": pytest.approx(0.8, abs=1e-6),
+        "matched_face_id": "candidate-1",
+    }
+    assert payload.get("auto_applied_assignment") is None
+
+    with engine.connect() as connection:
+        persisted_person_id = connection.execute(
+            select(faces.c.person_id).where(faces.c.face_id == "source-face")
+        ).scalar_one_or_none()
+        persisted_label = connection.execute(
+            select(
+                face_labels.c.face_id,
+                face_labels.c.person_id,
+                face_labels.c.label_source,
+                face_labels.c.confidence,
+                face_labels.c.model_version,
+                face_labels.c.provenance,
+            ).where(face_labels.c.face_id == "source-face")
+        ).mappings().one()
+
+    assert persisted_person_id is None
+    assert persisted_label["face_id"] == "source-face"
+    assert persisted_label["person_id"] == "person-1"
+    assert persisted_label["label_source"] == "machine_suggested"
+    assert persisted_label["confidence"] == pytest.approx(0.8, abs=1e-6)
+    assert persisted_label["model_version"] is None
+    assert persisted_label["provenance"] == {
+        "workflow": "recognition-suggestions",
+        "surface": "api",
+        "action": "review_needed",
+        "matched_face_id": "candidate-1",
+        "review_threshold": 0.75,
+        "auto_accept_threshold": 0.95,
+    }
+
+
 def test_face_candidates_api_returns_no_suggestion_when_best_confidence_is_below_review_threshold(
     tmp_path,
     monkeypatch,

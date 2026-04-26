@@ -205,7 +205,7 @@ def upgrade() -> None:
         sa.Column("created_ts", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
         sa.Column("updated_ts", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
         sa.CheckConstraint(
-            "label_source IN ('human_confirmed', 'machine_applied')",
+            "label_source IN ('human_confirmed', 'machine_applied', 'machine_suggested')",
             name="ck_face_labels_label_source",
         ),
     )
