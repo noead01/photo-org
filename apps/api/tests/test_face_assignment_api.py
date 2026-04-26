@@ -84,7 +84,7 @@ def test_face_assignment_api_assigns_unlabeled_face_to_existing_person(tmp_path,
     assert persisted_person_id == "person-1"
 
 
-def test_face_assignment_api_does_not_create_face_label_records_in_issue_42_slice(
+def test_face_assignment_api_persists_manual_face_label_provenance(
     tmp_path, monkeypatch
 ):
     database_url = _database_url(tmp_path, "face-assign-no-face-label-write.db")
@@ -112,8 +112,27 @@ def test_face_assignment_api_does_not_create_face_label_records_in_issue_42_slic
 
     assert response.status_code == 201
     with engine.connect() as connection:
-        face_label_count = connection.execute(select(face_labels.c.face_label_id)).all()
-    assert face_label_count == []
+        face_label_rows = connection.execute(
+            select(
+                face_labels.c.face_id,
+                face_labels.c.person_id,
+                face_labels.c.label_source,
+                face_labels.c.confidence,
+                face_labels.c.model_version,
+                face_labels.c.provenance,
+            )
+        ).mappings().all()
+    assert len(face_label_rows) == 1
+    assert face_label_rows[0]["face_id"] == "face-1"
+    assert face_label_rows[0]["person_id"] == "person-1"
+    assert face_label_rows[0]["label_source"] == "manual"
+    assert face_label_rows[0]["confidence"] is None
+    assert face_label_rows[0]["model_version"] is None
+    assert face_label_rows[0]["provenance"] == {
+        "workflow": "face-labeling",
+        "surface": "api",
+        "action": "assignment",
+    }
 
 
 def test_face_assignment_api_returns_404_for_missing_face(tmp_path, monkeypatch):
@@ -333,9 +352,7 @@ def test_face_correction_api_reassigns_assigned_face_to_different_person(tmp_pat
     assert persisted_person_id == "person-2"
 
 
-def test_face_correction_api_does_not_create_face_label_records_in_issue_43_slice(
-    tmp_path, monkeypatch
-):
+def test_face_correction_api_persists_manual_face_label_provenance(tmp_path, monkeypatch):
     database_url = _database_url(tmp_path, "face-correct-no-face-label-write.db")
     upgrade_database(database_url)
     monkeypatch.setenv("DATABASE_URL", database_url)
@@ -362,8 +379,28 @@ def test_face_correction_api_does_not_create_face_label_records_in_issue_43_slic
 
     assert response.status_code == 200
     with engine.connect() as connection:
-        face_label_count = connection.execute(select(face_labels.c.face_label_id)).all()
-    assert face_label_count == []
+        face_label_rows = connection.execute(
+            select(
+                face_labels.c.face_id,
+                face_labels.c.person_id,
+                face_labels.c.label_source,
+                face_labels.c.confidence,
+                face_labels.c.model_version,
+                face_labels.c.provenance,
+            )
+        ).mappings().all()
+    assert len(face_label_rows) == 1
+    assert face_label_rows[0]["face_id"] == "face-1"
+    assert face_label_rows[0]["person_id"] == "person-2"
+    assert face_label_rows[0]["label_source"] == "manual"
+    assert face_label_rows[0]["confidence"] is None
+    assert face_label_rows[0]["model_version"] is None
+    assert face_label_rows[0]["provenance"] == {
+        "workflow": "face-labeling",
+        "surface": "api",
+        "action": "correction",
+        "previous_person_id": "person-1",
+    }
 
 
 def test_face_correction_api_returns_404_for_missing_face(tmp_path, monkeypatch):
