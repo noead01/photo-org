@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, insert, select
 
 from app.migrations import upgrade_database
 from app.storage import faces, photos
+from photoorg_db_schema import EMBEDDING_DIMENSION
 
 pytest.importorskip("PIL")
 from PIL import Image
@@ -71,6 +72,10 @@ def _decode_base64_text(value: str | None) -> bytes | None:
     if value is None:
         return None
     return base64.b64decode(value)
+
+
+def _embedding_vector() -> list[float]:
+    return [round(index / EMBEDDING_DIMENSION, 6) for index in range(EMBEDDING_DIMENSION)]
 
 
 def test_build_photo_record_returns_stable_identity_for_same_file_and_path(tmp_path):
@@ -591,7 +596,7 @@ def test_store_face_detections_replaces_existing_faces_and_updates_photo_counts(
                     "bbox_w": 3,
                     "bbox_h": 4,
                     "bitmap": b"bitmap",
-                    "embedding": [0.1, 0.2],
+                    "embedding": _embedding_vector(),
                     "provenance": {"detector": "test"},
                 }
             ],
@@ -607,6 +612,51 @@ def test_store_face_detections_replaces_existing_faces_and_updates_photo_counts(
 
     assert len(face_rows) == 1
     assert face_rows[0]["face_id"] == "face-1"
+    assert face_rows[0]["embedding"] == _embedding_vector()
     assert face_rows[0]["provenance"] == {"detector": "test"}
     assert photo_row["faces_count"] == 1
     assert photo_row["faces_detected_ts"] is not None
+
+
+def test_store_face_detections_rejects_embeddings_with_wrong_dimension(tmp_path):
+    from app.processing.ingest_persistence import store_face_detections
+
+    database_url = f"sqlite:///{tmp_path / 'store-faces-invalid-embedding.db'}"
+    upgrade_database(database_url)
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 3, 28, 22, 0, tzinfo=UTC)
+
+    with engine.begin() as connection:
+        connection.execute(
+            insert(photos).values(
+                _photo_row_values(
+                    photo_id="photo-1",
+                    path="/library/photo.jpg",
+                    sha256="e" * 64,
+                    now=now,
+                    thumbnail_jpeg=None,
+                    thumbnail_mime_type=None,
+                    thumbnail_width=None,
+                    thumbnail_height=None,
+                    faces_count=0,
+                    faces_detected_ts=None,
+                )
+            )
+        )
+        with pytest.raises(ValueError, match=f"{EMBEDDING_DIMENSION}"):
+            store_face_detections(
+                connection,
+                "photo-1",
+                [
+                    {
+                        "face_id": "face-1",
+                        "bbox_x": 1,
+                        "bbox_y": 2,
+                        "bbox_w": 3,
+                        "bbox_h": 4,
+                        "bitmap": b"bitmap",
+                        "embedding": [0.1, 0.2],
+                        "provenance": {"detector": "test"},
+                    }
+                ],
+            )

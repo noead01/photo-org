@@ -13,6 +13,7 @@ from sqlalchemy.engine import Connection
 from app.path_contract import build_rooted_photo_path, relative_photo_path
 from app.processing.metadata import extract_image_metadata, stat_timestamp_to_iso
 from app.storage import faces, photos
+from photoorg_db_schema import EMBEDDING_DIMENSION
 
 
 @dataclass(frozen=True)
@@ -323,6 +324,7 @@ def deserialize_detections(payload: list[dict] | None) -> list[dict]:
         {
             **detection,
             "bitmap": _decode_optional_bytes(detection.get("bitmap")),
+            "embedding": _normalize_embedding(detection.get("embedding")),
         }
         for detection in (payload or [])
     ]
@@ -359,6 +361,7 @@ def _serialize_detections(detections: list[dict]) -> list[dict]:
         {
             **detection,
             "bitmap": _encode_optional_bytes(detection.get("bitmap")),
+            "embedding": _normalize_embedding(detection.get("embedding")),
         }
         for detection in detections
     ]
@@ -426,7 +429,7 @@ def _face_row(photo_id: str, detection: dict) -> dict[str, object]:
         "bbox_w": detection.get("bbox_w"),
         "bbox_h": detection.get("bbox_h"),
         "bitmap": detection.get("bitmap"),
-        "embedding": detection.get("embedding"),
+        "embedding": _normalize_embedding(detection.get("embedding")),
         "provenance": detection.get("provenance", {}),
     }
 
@@ -545,6 +548,24 @@ def _decode_optional_bytes(value: str | None) -> bytes | None:
     if value is None:
         return None
     return base64.b64decode(value)
+
+
+def _normalize_embedding(value: object) -> list[float] | None:
+    if value is None:
+        return None
+
+    if hasattr(value, "tolist"):
+        value = value.tolist()
+
+    if not isinstance(value, list | tuple):
+        raise ValueError("face embedding must be a list-like sequence of floats")
+
+    embedding = [float(component) for component in value]
+    if len(embedding) != EMBEDDING_DIMENSION:
+        raise ValueError(
+            f"face embedding dimension must be {EMBEDDING_DIMENSION}, got {len(embedding)}"
+        )
+    return embedding
 
 
 def _format_optional_timestamp(value: datetime | None) -> str | None:

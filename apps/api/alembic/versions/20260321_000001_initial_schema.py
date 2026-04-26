@@ -22,6 +22,8 @@ def upgrade() -> None:
     is_postgresql = bind.dialect.name == "postgresql"
 
     embedding_type = Vector(EMBEDDING_DIMENSION) if is_postgresql and Vector is not None else sa.JSON()
+    if is_postgresql:
+        op.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
 
     op.create_table(
         "photos",
@@ -159,10 +161,18 @@ def upgrade() -> None:
     op.create_index("idx_photo_files_photo_id", "photo_files", ["photo_id"], unique=False)
 
     op.create_table(
+        "people",
+        sa.Column("person_id", sa.String(36), primary_key=True),
+        sa.Column("display_name", sa.String(), nullable=False),
+        sa.Column("created_ts", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column("updated_ts", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+    )
+
+    op.create_table(
         "faces",
         sa.Column("face_id", sa.String(36), primary_key=True),
         sa.Column("photo_id", sa.String(36), sa.ForeignKey("photos.photo_id", ondelete="CASCADE"), nullable=False),
-        sa.Column("person_id", sa.String(36), nullable=True),
+        sa.Column("person_id", sa.String(36), sa.ForeignKey("people.person_id", ondelete="RESTRICT"), nullable=True),
         sa.Column("bbox_x", sa.Integer(), nullable=True),
         sa.Column("bbox_y", sa.Integer(), nullable=True),
         sa.Column("bbox_w", sa.Integer(), nullable=True),
@@ -175,14 +185,6 @@ def upgrade() -> None:
         sa.Column("created_ts", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
     )
     op.create_index("idx_faces_photo_id", "faces", ["photo_id"], unique=False)
-
-    op.create_table(
-        "people",
-        sa.Column("person_id", sa.String(36), primary_key=True),
-        sa.Column("display_name", sa.String(), nullable=False),
-        sa.Column("created_ts", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
-        sa.Column("updated_ts", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
-    )
 
     op.create_table(
         "photo_tags",
@@ -300,9 +302,9 @@ def downgrade() -> None:
     op.drop_table("face_labels")
     op.drop_index("idx_photo_tags_photo_id", table_name="photo_tags")
     op.drop_table("photo_tags")
-    op.drop_table("people")
     op.drop_index("idx_faces_photo_id", table_name="faces")
     op.drop_table("faces")
+    op.drop_table("people")
     op.drop_index("idx_photo_files_photo_id", table_name="photo_files")
     op.drop_table("photo_files")
     op.drop_table("watched_folders")
