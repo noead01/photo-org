@@ -11,7 +11,7 @@ from sqlalchemy import select, update
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 
-from app.db.session import create_session_factory
+from app.db.session import create_session_factory, dispose_session_factory
 from photoorg_db_schema import ingest_queue
 
 PROCESSING_LEASE_SECONDS = 300
@@ -40,6 +40,15 @@ class EnqueueResult:
 class IngestQueueStore:
     def __init__(self, database_url: str | Path | None = None) -> None:
         self._session_factory = create_session_factory(database_url)
+
+    def close(self) -> None:
+        dispose_session_factory(self._session_factory)
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def enqueue(self, *, payload_type: str, payload: dict, idempotency_key: str) -> str:
         queue_id = str(uuid4())

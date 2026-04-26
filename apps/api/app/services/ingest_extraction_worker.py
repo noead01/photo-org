@@ -46,8 +46,11 @@ def process_candidate_payload(
     warnings: list[str] = []
 
     engine = create_db_engine(database_url)
-    with engine.begin() as connection:
-        existing_artifacts = lookup_existing_artifacts_by_sha(connection, sha256)
+    try:
+        with engine.begin() as connection:
+            existing_artifacts = lookup_existing_artifacts_by_sha(connection, sha256)
+    finally:
+        engine.dispose()
 
     if existing_artifacts is not None:
         try:

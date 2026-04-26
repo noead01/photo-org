@@ -71,28 +71,31 @@ def reconcile_directory(
     grace_period_days = resolve_missing_file_grace_period_days(missing_file_grace_period_days)
 
     engine = create_db_engine(database_url)
-    with engine.begin() as connection:
-        watched_folder_id = ensure_watched_folder_exists(
-            connection,
-            scan_path=source_root.as_posix(),
-            now=at,
-        )
-        outcome = _reconcile_watched_folder_root(
-            connection,
-            watched_folder_id=watched_folder_id,
-            source_root=source_root,
-            canonical_path_for_relative_path=lambda relative_path: build_rooted_photo_path(
-                source_root,
-                relative_path,
-            ),
-            reuse_existing_photo_by_sha=False,
-            now=at,
-            missing_file_grace_period_days=grace_period_days,
-        )
-        result.scanned += outcome.scanned
-        result.inserted += outcome.inserted
-        result.updated += outcome.updated
-        result.errors.extend(outcome.error_messages)
+    try:
+        with engine.begin() as connection:
+            watched_folder_id = ensure_watched_folder_exists(
+                connection,
+                scan_path=source_root.as_posix(),
+                now=at,
+            )
+            outcome = _reconcile_watched_folder_root(
+                connection,
+                watched_folder_id=watched_folder_id,
+                source_root=source_root,
+                canonical_path_for_relative_path=lambda relative_path: build_rooted_photo_path(
+                    source_root,
+                    relative_path,
+                ),
+                reuse_existing_photo_by_sha=False,
+                now=at,
+                missing_file_grace_period_days=grace_period_days,
+            )
+            result.scanned += outcome.scanned
+            result.inserted += outcome.inserted
+            result.updated += outcome.updated
+            result.errors.extend(outcome.error_messages)
+    finally:
+        engine.dispose()
 
     return result
 
@@ -111,117 +114,121 @@ def poll_registered_storage_sources(
     engine = create_db_engine(database_url)
     run_store = IngestRunStore(database_url)
     queue_store = IngestQueueStore(database_url)
+    try:
+        with engine.begin() as connection:
+            targets = _load_registered_storage_source_targets(connection)
 
-    with engine.begin() as connection:
-        targets = _load_registered_storage_source_targets(connection)
-
-    for source_target in targets:
-        reason, detail, alias_root = _validate_registered_source_target(
-            storage_source_id=source_target.storage_source_id,
-            alias_paths=source_target.alias_paths,
-        )
-        if reason is not None:
-            with engine.begin() as connection:
-                for target in source_target.watched_folders:
-                    record_watched_folder_scan_failure(
-                        connection,
-                        watched_folder_id=target.watched_folder_id,
-                        reason=reason,
-                        now=at,
-                    )
-                    _record_ingest_run(
-                        run_store,
-                        connection=connection,
-                        watched_folder_id=target.watched_folder_id,
-                        status="failed",
-                        files_seen=0,
-                        files_created=0,
-                        files_updated=0,
-                        error_messages=(detail,),
-                    )
-            result.errors.append(f"storage_source:{source_target.storage_source_id}: {detail}")
-            continue
-
-        for target in source_target.watched_folders:
-            scan_root = _resolve_registered_scan_root(
-                alias_root=alias_root,
-                relative_path=target.relative_path,
+        for source_target in targets:
+            reason, detail, alias_root = _validate_registered_source_target(
+                storage_source_id=source_target.storage_source_id,
+                alias_paths=source_target.alias_paths,
             )
-            observed_relative_paths: set[str] = set()
-            touched_photo_ids: set[str] = set()
-            try:
-                _validate_scan_root(scan_root)
-                for chunk_paths in _iter_chunks(iter_photo_files(scan_root), chunk_size=poll_chunk_size):
-                    outcome: WatchedFolderPollOutcome
-                    chunk_touched_photo_ids: set[str]
-                    with engine.begin() as connection:
-                        outcome, chunk_touched_photo_ids = _process_watched_folder_chunk(
+            if reason is not None:
+                with engine.begin() as connection:
+                    for target in source_target.watched_folders:
+                        record_watched_folder_scan_failure(
                             connection,
                             watched_folder_id=target.watched_folder_id,
-                            source_root=scan_root,
-                            photo_paths=chunk_paths,
-                            canonical_path_for_relative_path=_registered_source_path_builder(
-                                storage_source_id=source_target.storage_source_id,
-                                watched_folder_relative_path=target.relative_path,
-                            ),
-                            reuse_existing_photo_by_sha=True,
+                            reason=reason,
                             now=at,
-                            observed_relative_paths=observed_relative_paths,
-                            queue_store=queue_store,
-                            storage_source_id=source_target.storage_source_id,
                         )
                         _record_ingest_run(
                             run_store,
                             connection=connection,
                             watched_folder_id=target.watched_folder_id,
-                            status=outcome.status,
-                            files_seen=outcome.scanned,
-                            files_created=outcome.inserted,
-                            files_updated=outcome.updated,
-                            error_messages=outcome.error_messages,
+                            status="failed",
+                            files_seen=0,
+                            files_created=0,
+                            files_updated=0,
+                            error_messages=(detail,),
                         )
-                    touched_photo_ids.update(chunk_touched_photo_ids)
-                    result.scanned += outcome.scanned
-                    result.enqueued += outcome.enqueued
-                    result.inserted += outcome.inserted
-                    result.updated += outcome.updated
-                    result.errors.extend(outcome.error_messages)
-                with engine.begin() as connection:
-                    _finalize_watched_folder_scan(
-                        connection,
-                        watched_folder_id=target.watched_folder_id,
-                        observed_relative_paths=observed_relative_paths,
-                        touched_photo_ids=touched_photo_ids,
-                        now=at,
-                        missing_file_grace_period_days=grace_period_days,
-                    )
-                    record_watched_folder_scan_success(
-                        connection,
-                        watched_folder_id=target.watched_folder_id,
-                        now=at,
-                    )
-            except Exception as exc:
-                with engine.begin() as connection:
-                    record_watched_folder_scan_failure(
-                        connection,
-                        watched_folder_id=target.watched_folder_id,
-                        reason=_classify_root_scan_failure(exc) if isinstance(exc, OSError) else "io_error",
-                        now=at,
-                    )
-                    _record_ingest_run(
-                        run_store,
-                        connection=connection,
-                        watched_folder_id=target.watched_folder_id,
-                        status="failed",
-                        files_seen=0,
-                        files_created=0,
-                        files_updated=0,
-                        error_messages=(str(exc),),
-                    )
-                result.errors.append(f"watched_folder:{target.watched_folder_id}: {exc}")
+                result.errors.append(f"storage_source:{source_target.storage_source_id}: {detail}")
                 continue
 
-    return result
+            for target in source_target.watched_folders:
+                scan_root = _resolve_registered_scan_root(
+                    alias_root=alias_root,
+                    relative_path=target.relative_path,
+                )
+                observed_relative_paths: set[str] = set()
+                touched_photo_ids: set[str] = set()
+                try:
+                    _validate_scan_root(scan_root)
+                    for chunk_paths in _iter_chunks(iter_photo_files(scan_root), chunk_size=poll_chunk_size):
+                        outcome: WatchedFolderPollOutcome
+                        chunk_touched_photo_ids: set[str]
+                        with engine.begin() as connection:
+                            outcome, chunk_touched_photo_ids = _process_watched_folder_chunk(
+                                connection,
+                                watched_folder_id=target.watched_folder_id,
+                                source_root=scan_root,
+                                photo_paths=chunk_paths,
+                                canonical_path_for_relative_path=_registered_source_path_builder(
+                                    storage_source_id=source_target.storage_source_id,
+                                    watched_folder_relative_path=target.relative_path,
+                                ),
+                                reuse_existing_photo_by_sha=True,
+                                now=at,
+                                observed_relative_paths=observed_relative_paths,
+                                queue_store=queue_store,
+                                storage_source_id=source_target.storage_source_id,
+                            )
+                            _record_ingest_run(
+                                run_store,
+                                connection=connection,
+                                watched_folder_id=target.watched_folder_id,
+                                status=outcome.status,
+                                files_seen=outcome.scanned,
+                                files_created=outcome.inserted,
+                                files_updated=outcome.updated,
+                                error_messages=outcome.error_messages,
+                            )
+                        touched_photo_ids.update(chunk_touched_photo_ids)
+                        result.scanned += outcome.scanned
+                        result.enqueued += outcome.enqueued
+                        result.inserted += outcome.inserted
+                        result.updated += outcome.updated
+                        result.errors.extend(outcome.error_messages)
+                    with engine.begin() as connection:
+                        _finalize_watched_folder_scan(
+                            connection,
+                            watched_folder_id=target.watched_folder_id,
+                            observed_relative_paths=observed_relative_paths,
+                            touched_photo_ids=touched_photo_ids,
+                            now=at,
+                            missing_file_grace_period_days=grace_period_days,
+                        )
+                        record_watched_folder_scan_success(
+                            connection,
+                            watched_folder_id=target.watched_folder_id,
+                            now=at,
+                        )
+                except Exception as exc:
+                    with engine.begin() as connection:
+                        record_watched_folder_scan_failure(
+                            connection,
+                            watched_folder_id=target.watched_folder_id,
+                            reason=_classify_root_scan_failure(exc) if isinstance(exc, OSError) else "io_error",
+                            now=at,
+                        )
+                        _record_ingest_run(
+                            run_store,
+                            connection=connection,
+                            watched_folder_id=target.watched_folder_id,
+                            status="failed",
+                            files_seen=0,
+                            files_created=0,
+                            files_updated=0,
+                            error_messages=(str(exc),),
+                        )
+                    result.errors.append(f"watched_folder:{target.watched_folder_id}: {exc}")
+                    continue
+
+        return result
+    finally:
+        queue_store.close()
+        run_store.close()
+        engine.dispose()
 
 
 def _validate_scan_root(root: Path) -> None:

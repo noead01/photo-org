@@ -61,8 +61,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _count_photos(database_url: str | Path | None = None) -> int:
     engine = create_db_engine(database_url)
-    with engine.connect() as connection:
-        return connection.scalar(select(func.count()).select_from(photos)) or 0
+    try:
+        with engine.connect() as connection:
+            return connection.scalar(select(func.count()).select_from(photos)) or 0
+    finally:
+        engine.dispose()
 
 
 def main(argv: list[str] | None = None) -> int:

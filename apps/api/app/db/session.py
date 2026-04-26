@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import weakref
 from pathlib import Path
 
 from sqlalchemy import create_engine
@@ -14,6 +15,7 @@ def create_db_engine(database_url: str | Path | None = None) -> Engine:
     url = resolve_database_url(database_url)
     connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
     engine = create_engine(url, future=True, connect_args=connect_args)
+    weakref.finalize(engine, engine.dispose)
     configure_embedding_column(engine)
     return engine
 
@@ -21,3 +23,9 @@ def create_db_engine(database_url: str | Path | None = None) -> Engine:
 def create_session_factory(database_url: str | Path | None = None) -> sessionmaker:
     engine = create_db_engine(database_url)
     return sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+
+
+def dispose_session_factory(factory: sessionmaker) -> None:
+    bind = factory.kw.get("bind")
+    if isinstance(bind, Engine):
+        bind.dispose()
