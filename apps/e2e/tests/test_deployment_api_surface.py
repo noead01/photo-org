@@ -1,6 +1,9 @@
-import yaml
-from sqlalchemy import func, select
+from uuid import uuid4
 
+import yaml
+from sqlalchemy import func, insert, select
+
+from app.dependencies import FACE_VALIDATION_ROLE_HEADER
 from app.db.session import create_db_engine
 from app.storage import faces, photos
 
@@ -85,6 +88,118 @@ def test_deployment_openapi_json_and_yaml_match(deployment_api_client):
     assert json_payload["info"]["title"] == "Photo Organizer API"
     assert "/api/v1/photos" in json_payload["paths"]
     assert "/api/v1/photos/{photo_id}" in json_payload["paths"]
+    assert "/api/v1/people" in json_payload["paths"]
+    assert "/api/v1/people/{person_id}" in json_payload["paths"]
+    assert "/api/v1/faces/{face_id}/assignments" in json_payload["paths"]
+    assert "/api/v1/faces/{face_id}/corrections" in json_payload["paths"]
+
+
+def test_deployment_people_crud_surface(deployment_api_client):
+    name_token = uuid4().hex[:8]
+    create_response = deployment_api_client.post(
+        "/api/v1/people",
+        json={"display_name": f"  E2E Person {name_token}  "},
+    )
+
+    assert create_response.status_code == 201
+    created_payload = create_response.json()
+    person_id = created_payload["person_id"]
+    assert created_payload["display_name"] == f"E2E Person {name_token}"
+    assert created_payload["created_ts"]
+    assert created_payload["updated_ts"]
+
+    get_response = deployment_api_client.get(f"/api/v1/people/{person_id}")
+    assert get_response.status_code == 200
+    assert get_response.json()["person_id"] == person_id
+
+    renamed_display_name = f"Renamed E2E Person {name_token}"
+    update_response = deployment_api_client.patch(
+        f"/api/v1/people/{person_id}",
+        json={"display_name": f"  {renamed_display_name}  "},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["display_name"] == renamed_display_name
+
+    list_response = deployment_api_client.get("/api/v1/people")
+    assert list_response.status_code == 200
+    assert any(
+        person["person_id"] == person_id and person["display_name"] == renamed_display_name
+        for person in list_response.json()
+    )
+
+    delete_response = deployment_api_client.delete(f"/api/v1/people/{person_id}")
+    assert delete_response.status_code == 204
+
+    missing_response = deployment_api_client.get(f"/api/v1/people/{person_id}")
+    assert missing_response.status_code == 404
+    assert missing_response.json()["detail"] == "Person not found"
+
+
+def test_deployment_face_labeling_assignment_and_correction_surface(
+    seed_corpus_database_url,
+    deployment_api_client,
+):
+    engine = create_db_engine(seed_corpus_database_url)
+    with engine.begin() as connection:
+        photo_id = connection.execute(
+            select(photos.c.photo_id)
+            .where(photos.c.deleted_ts.is_(None))
+            .order_by(photos.c.photo_id)
+            .limit(1)
+        ).scalar_one()
+        face_id = str(uuid4())
+        connection.execute(
+            insert(faces).values(
+                face_id=face_id,
+                photo_id=photo_id,
+                person_id=None,
+            )
+        )
+
+    person_one_response = deployment_api_client.post(
+        "/api/v1/people",
+        json={"display_name": f"E2E Assignee One {uuid4().hex[:8]}"},
+    )
+    person_two_response = deployment_api_client.post(
+        "/api/v1/people",
+        json={"display_name": f"E2E Assignee Two {uuid4().hex[:8]}"},
+    )
+    assert person_one_response.status_code == 201
+    assert person_two_response.status_code == 201
+    person_one_id = person_one_response.json()["person_id"]
+    person_two_id = person_two_response.json()["person_id"]
+
+    unauthorized_response = deployment_api_client.post(
+        f"/api/v1/faces/{face_id}/assignments",
+        json={"person_id": person_one_id},
+    )
+    assert unauthorized_response.status_code == 403
+    assert unauthorized_response.json()["detail"] == "Face validation role required"
+
+    assignment_response = deployment_api_client.post(
+        f"/api/v1/faces/{face_id}/assignments",
+        headers={FACE_VALIDATION_ROLE_HEADER: "contributor"},
+        json={"person_id": person_one_id},
+    )
+    assert assignment_response.status_code == 201
+    assert assignment_response.json() == {
+        "face_id": face_id,
+        "photo_id": photo_id,
+        "person_id": person_one_id,
+    }
+
+    correction_response = deployment_api_client.post(
+        f"/api/v1/faces/{face_id}/corrections",
+        headers={FACE_VALIDATION_ROLE_HEADER: "contributor"},
+        json={"person_id": person_two_id},
+    )
+    assert correction_response.status_code == 200
+    assert correction_response.json() == {
+        "face_id": face_id,
+        "photo_id": photo_id,
+        "previous_person_id": person_one_id,
+        "person_id": person_two_id,
+    }
 
 
 def test_deployment_docs_surface_is_served(deployment_api_client):
