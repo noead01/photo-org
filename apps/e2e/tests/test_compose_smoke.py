@@ -192,6 +192,13 @@ def test_makefile_compose_e2e_smoke_reanchors_nested_make_calls_to_repo_root():
     assert '$(MAKE) --no-print-directory compose-down-volumes' in makefile
 
 
+def test_makefile_compose_e2e_smoke_unsets_photo_library_overrides():
+    makefile = Path("Makefile").read_text(encoding="utf-8")
+
+    assert "-u PHOTO_ORG_PHOTO_LIBRARY_HOST_PATH" in makefile
+    assert "-u PHOTO_ORG_PHOTO_LIBRARY_CONTAINER_PATH" in makefile
+
+
 def test_makefile_uses_namespaced_environment_contract():
     makefile = Path("Makefile").read_text(encoding="utf-8")
 
