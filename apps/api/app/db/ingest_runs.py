@@ -8,7 +8,7 @@ from uuid import uuid4
 from sqlalchemy import update
 from sqlalchemy.engine import Connection
 
-from app.db.session import create_session_factory
+from app.db.session import create_session_factory, dispose_session_factory
 from photoorg_db_schema import ingest_run_files, ingest_runs
 
 
@@ -23,6 +23,15 @@ class IngestRunFileOutcome:
 class IngestRunStore:
     def __init__(self, database_url: str | Path | None = None) -> None:
         self._session_factory = create_session_factory(database_url)
+
+    def close(self) -> None:
+        dispose_session_factory(self._session_factory)
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def create_run(
         self,

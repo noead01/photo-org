@@ -47,6 +47,7 @@ def process_pending_ingest_queue(
     result = ProcessQueueResult()
 
     if not processable_rows:
+        queue_store.close()
         return result
 
     engine = create_db_engine(database_url)
@@ -61,26 +62,86 @@ def process_pending_ingest_queue(
     files_updated = 0
     error_messages: list[str] = []
     file_outcomes: list[str] = []
-    for row in processable_rows:
-        claimed_row = None
-        claimed_path = _file_outcome_path(row)
-        run_created_in_transaction = False
-        try:
-            with engine.begin() as connection:
-                claimed_row = queue_store.begin_processing_attempt(
-                    row.ingest_queue_id,
-                    connection=connection,
-                )
-                if claimed_row is None:
-                    continue
-                files_seen += 1
-                claimed_path = _file_outcome_path(claimed_row)
-                if claimed_row.payload_type not in {
-                    "photo_metadata",
-                    "ingest_candidate",
-                    "extracted_photo",
-                }:
-                    error_detail = f"Unsupported payload_type: {claimed_row.payload_type}"
+
+    try:
+        for row in processable_rows:
+            claimed_row = None
+            claimed_path = _file_outcome_path(row)
+            run_created_in_transaction = False
+            try:
+                with engine.begin() as connection:
+                    claimed_row = queue_store.begin_processing_attempt(
+                        row.ingest_queue_id,
+                        connection=connection,
+                    )
+                    if claimed_row is None:
+                        continue
+                    files_seen += 1
+                    claimed_path = _file_outcome_path(claimed_row)
+                    if claimed_row.payload_type not in {
+                        "photo_metadata",
+                        "ingest_candidate",
+                        "extracted_photo",
+                    }:
+                        error_detail = f"Unsupported payload_type: {claimed_row.payload_type}"
+                        ingest_run_id, run_created_in_transaction = _ensure_ingest_run(
+                            run_store,
+                            ingest_run_id,
+                            connection=connection,
+                        )
+                        run_store.append_file_outcome(
+                            ingest_run_id,
+                            IngestRunFileOutcome(
+                                ingest_queue_id=claimed_row.ingest_queue_id,
+                                path=claimed_path,
+                                outcome="failed",
+                                error_detail=error_detail,
+                            ),
+                            connection=connection,
+                        )
+                        queue_store.mark_failed(
+                            claimed_row.ingest_queue_id,
+                            error_detail,
+                            connection=connection,
+                        )
+                        file_outcomes.append("failed")
+                        failed += 1
+                        error_messages.append(error_detail)
+                        continue
+                    try:
+                        created, completion_warning = _process_claimed_row(
+                            database_url,
+                            queue_store,
+                            connection,
+                            claimed_row,
+                            detector=detector,
+                        )
+                    except (KeyError, TypeError, ValueError, CandidateFileMissingError) as exc:
+                        error_detail = str(exc)
+                        ingest_run_id, run_created_in_transaction = _ensure_ingest_run(
+                            run_store,
+                            ingest_run_id,
+                            connection=connection,
+                        )
+                        run_store.append_file_outcome(
+                            ingest_run_id,
+                            IngestRunFileOutcome(
+                                ingest_queue_id=claimed_row.ingest_queue_id,
+                                path=claimed_path,
+                                outcome="failed",
+                                error_detail=error_detail,
+                            ),
+                            connection=connection,
+                        )
+                        queue_store.mark_failed(
+                            claimed_row.ingest_queue_id,
+                            error_detail,
+                            connection=connection,
+                        )
+                        file_outcomes.append("failed")
+                        failed += 1
+                        error_messages.append(error_detail)
+                        continue
                     ingest_run_id, run_created_in_transaction = _ensure_ingest_run(
                         run_store,
                         ingest_run_id,
@@ -88,64 +149,6 @@ def process_pending_ingest_queue(
                     )
                     run_store.append_file_outcome(
                         ingest_run_id,
-                        IngestRunFileOutcome(
-                            ingest_queue_id=claimed_row.ingest_queue_id,
-                            path=claimed_path,
-                            outcome="failed",
-                            error_detail=error_detail,
-                        ),
-                        connection=connection,
-                    )
-                    queue_store.mark_failed(
-                        claimed_row.ingest_queue_id,
-                        error_detail,
-                        connection=connection,
-                    )
-                    file_outcomes.append("failed")
-                    failed += 1
-                    error_messages.append(error_detail)
-                    continue
-                try:
-                    created, completion_warning = _process_claimed_row(
-                        database_url,
-                        queue_store,
-                        connection,
-                        claimed_row,
-                        detector=detector,
-                    )
-                except (KeyError, TypeError, ValueError, CandidateFileMissingError) as exc:
-                    error_detail = str(exc)
-                    ingest_run_id, run_created_in_transaction = _ensure_ingest_run(
-                        run_store,
-                        ingest_run_id,
-                        connection=connection,
-                    )
-                    run_store.append_file_outcome(
-                        ingest_run_id,
-                        IngestRunFileOutcome(
-                            ingest_queue_id=claimed_row.ingest_queue_id,
-                            path=claimed_path,
-                            outcome="failed",
-                            error_detail=error_detail,
-                        ),
-                        connection=connection,
-                    )
-                    queue_store.mark_failed(
-                        claimed_row.ingest_queue_id,
-                        error_detail,
-                        connection=connection,
-                    )
-                    file_outcomes.append("failed")
-                    failed += 1
-                    error_messages.append(error_detail)
-                    continue
-                ingest_run_id, run_created_in_transaction = _ensure_ingest_run(
-                    run_store,
-                    ingest_run_id,
-                    connection=connection,
-                )
-                run_store.append_file_outcome(
-                    ingest_run_id,
                         IngestRunFileOutcome(
                             ingest_queue_id=claimed_row.ingest_queue_id,
                             path=_file_outcome_path(claimed_row),
@@ -154,75 +157,79 @@ def process_pending_ingest_queue(
                         ),
                         connection=connection,
                     )
-                queue_store.mark_completed(
-                    claimed_row.ingest_queue_id,
-                    last_error=completion_warning,
-                    connection=connection,
+                    queue_store.mark_completed(
+                        claimed_row.ingest_queue_id,
+                        last_error=completion_warning,
+                        connection=connection,
+                    )
+                    file_outcomes.append("completed")
+                    if created is True:
+                        files_created += 1
+                    elif created is False:
+                        files_updated += 1
+                    if completion_warning is not None:
+                        error_messages.append(completion_warning)
+                processed += 1
+            except IntegrityError as exc:
+                if run_created_in_transaction:
+                    ingest_run_id = None
+                error_detail = str(exc)
+                queue_store.record_permanent_failure(row.ingest_queue_id, error_detail)
+                ingest_run_id, _ = _ensure_ingest_run(run_store, ingest_run_id)
+                run_store.append_file_outcome(
+                    ingest_run_id,
+                    IngestRunFileOutcome(
+                        ingest_queue_id=row.ingest_queue_id,
+                        path=claimed_path,
+                        outcome="failed",
+                        error_detail=error_detail,
+                    ),
                 )
-                file_outcomes.append("completed")
-                if created is True:
-                    files_created += 1
-                elif created is False:
-                    files_updated += 1
-                if completion_warning is not None:
-                    error_messages.append(completion_warning)
-            processed += 1
-        except IntegrityError as exc:
-            if run_created_in_transaction:
-                ingest_run_id = None
-            error_detail = str(exc)
-            queue_store.record_permanent_failure(row.ingest_queue_id, error_detail)
-            ingest_run_id, _ = _ensure_ingest_run(run_store, ingest_run_id)
-            run_store.append_file_outcome(
-                ingest_run_id,
-                IngestRunFileOutcome(
-                    ingest_queue_id=row.ingest_queue_id,
-                    path=claimed_path,
-                    outcome="failed",
-                    error_detail=error_detail,
-                ),
-            )
-            file_outcomes.append("failed")
-            failed += 1
-            error_messages.append(error_detail)
-        except Exception as exc:
-            if run_created_in_transaction:
-                ingest_run_id = None
-            error_detail = str(exc)
-            queue_store.record_retryable_failure(row.ingest_queue_id, error_detail)
-            ingest_run_id, _ = _ensure_ingest_run(run_store, ingest_run_id)
-            run_store.append_file_outcome(
-                ingest_run_id,
-                IngestRunFileOutcome(
-                    ingest_queue_id=row.ingest_queue_id,
-                    path=claimed_path,
-                    outcome="retryable_error",
-                    error_detail=error_detail,
-                ),
-            )
-            file_outcomes.append("retryable_error")
-            retryable_errors += 1
-            error_messages.append(error_detail)
-            continue
+                file_outcomes.append("failed")
+                failed += 1
+                error_messages.append(error_detail)
+            except Exception as exc:
+                if run_created_in_transaction:
+                    ingest_run_id = None
+                error_detail = str(exc)
+                queue_store.record_retryable_failure(row.ingest_queue_id, error_detail)
+                ingest_run_id, _ = _ensure_ingest_run(run_store, ingest_run_id)
+                run_store.append_file_outcome(
+                    ingest_run_id,
+                    IngestRunFileOutcome(
+                        ingest_queue_id=row.ingest_queue_id,
+                        path=claimed_path,
+                        outcome="retryable_error",
+                        error_detail=error_detail,
+                    ),
+                )
+                file_outcomes.append("retryable_error")
+                retryable_errors += 1
+                error_messages.append(error_detail)
+                continue
 
-    if ingest_run_id is None:
-        return result
+        if ingest_run_id is None:
+            return result
 
-    run_store.finalize_run(
-        ingest_run_id,
-        status=_run_status(file_outcomes),
-        files_seen=files_seen,
-        files_created=files_created,
-        files_updated=files_updated,
-        error_count=len(error_messages),
-        error_summary=_error_summary(error_messages),
-    )
+        run_store.finalize_run(
+            ingest_run_id,
+            status=_run_status(file_outcomes),
+            files_seen=files_seen,
+            files_created=files_created,
+            files_updated=files_updated,
+            error_count=len(error_messages),
+            error_summary=_error_summary(error_messages),
+        )
 
-    return ProcessQueueResult(
-        processed=processed,
-        failed=failed,
-        retryable_errors=retryable_errors,
-    )
+        return ProcessQueueResult(
+            processed=processed,
+            failed=failed,
+            retryable_errors=retryable_errors,
+        )
+    finally:
+        run_store.close()
+        queue_store.close()
+        engine.dispose()
 
 
 def payload_to_photo_record(payload: dict) -> PhotoRecord:
