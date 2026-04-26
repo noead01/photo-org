@@ -9,9 +9,12 @@ from sqlalchemy.orm import Session
 from app.dependencies import get_db
 from app.services.face_assignment import (
     FaceAlreadyAssignedError,
+    FaceAlreadyAssignedToPersonError,
+    FaceNotAssignedError,
     FaceNotFoundError,
     PersonNotFoundError,
     assign_face_to_person,
+    reassign_face_to_person,
 )
 
 
@@ -48,6 +51,19 @@ class FaceAssignmentResponse(BaseModel):
     person_id: str
 
 
+class FaceCorrectionResponse(BaseModel):
+    """Correction result for one face reassigned to a different person."""
+
+    model_config = ConfigDict(
+        json_schema_extra={"description": "Resolved face reassignment details."}
+    )
+
+    face_id: str
+    photo_id: str
+    previous_person_id: str
+    person_id: str
+
+
 @router.post(
     "/{face_id}/assignments",
     summary="Assign face to person",
@@ -79,3 +95,41 @@ def assign_face_to_person_endpoint(
 
     db.commit()
     return FaceAssignmentResponse.model_validate(assignment)
+
+
+@router.post(
+    "/{face_id}/corrections",
+    summary="Correct face assignment",
+    description="Reassign an already-labeled face to a different person identity.",
+    response_model=FaceCorrectionResponse,
+    responses={
+        status.HTTP_404_NOT_FOUND: {"description": "Face or person not found"},
+        status.HTTP_409_CONFLICT: {
+            "description": "Face is unassigned or already assigned to the requested person"
+        },
+    },
+)
+def correct_face_assignment_endpoint(
+    face_id: str,
+    body: AssignFaceRequest,
+    db: Session = Depends(get_db),
+) -> FaceCorrectionResponse:
+    try:
+        correction = reassign_face_to_person(
+            db.connection(),
+            face_id=face_id,
+            person_id=body.person_id,
+        )
+    except FaceNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PersonNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except FaceNotAssignedError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except FaceAlreadyAssignedToPersonError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except FaceAlreadyAssignedError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    db.commit()
+    return FaceCorrectionResponse.model_validate(correction)

@@ -294,6 +294,248 @@ def test_face_assignment_api_returns_409_when_reassigning_to_same_person(tmp_pat
     assert response.json()["detail"] == "Face already assigned"
 
 
+def test_face_correction_api_reassigns_assigned_face_to_different_person(tmp_path, monkeypatch):
+    database_url = _database_url(tmp_path, "face-correct-reassign.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        _insert_photo(connection, photo_id="photo-1")
+        _insert_person(connection, person_id="person-1", display_name="Jane Doe")
+        _insert_person(connection, person_id="person-2", display_name="John Doe")
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id="person-1",
+            )
+        )
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/faces/face-1/corrections",
+        json={"person_id": "person-2"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "face_id": "face-1",
+        "photo_id": "photo-1",
+        "previous_person_id": "person-1",
+        "person_id": "person-2",
+    }
+    with engine.connect() as connection:
+        persisted_person_id = connection.execute(
+            select(faces.c.person_id).where(faces.c.face_id == "face-1")
+        ).scalar_one_or_none()
+    assert persisted_person_id == "person-2"
+
+
+def test_face_correction_api_does_not_create_face_label_records_in_issue_43_slice(
+    tmp_path, monkeypatch
+):
+    database_url = _database_url(tmp_path, "face-correct-no-face-label-write.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        _insert_photo(connection, photo_id="photo-1")
+        _insert_person(connection, person_id="person-1", display_name="Jane Doe")
+        _insert_person(connection, person_id="person-2", display_name="John Doe")
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id="person-1",
+            )
+        )
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/faces/face-1/corrections",
+        json={"person_id": "person-2"},
+    )
+
+    assert response.status_code == 200
+    with engine.connect() as connection:
+        face_label_count = connection.execute(select(face_labels.c.face_label_id)).all()
+    assert face_label_count == []
+
+
+def test_face_correction_api_returns_404_for_missing_face(tmp_path, monkeypatch):
+    database_url = _database_url(tmp_path, "face-correct-missing-face.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        _insert_person(connection, person_id="person-1", display_name="Jane Doe")
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/faces/missing-face/corrections",
+        json={"person_id": "person-1"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Face not found"
+
+
+def test_face_correction_api_returns_404_for_missing_person(tmp_path, monkeypatch):
+    database_url = _database_url(tmp_path, "face-correct-missing-person.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        _insert_photo(connection, photo_id="photo-1")
+        _insert_person(connection, person_id="person-1", display_name="Jane Doe")
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id="person-1",
+            )
+        )
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/faces/face-1/corrections",
+        json={"person_id": "missing-person"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Person not found"
+    with engine.connect() as connection:
+        persisted_person_id = connection.execute(
+            select(faces.c.person_id).where(faces.c.face_id == "face-1")
+        ).scalar_one_or_none()
+    assert persisted_person_id == "person-1"
+
+
+def test_face_correction_api_returns_409_when_face_is_unassigned(tmp_path, monkeypatch):
+    database_url = _database_url(tmp_path, "face-correct-unassigned.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        _insert_photo(connection, photo_id="photo-1")
+        _insert_person(connection, person_id="person-1", display_name="Jane Doe")
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id=None,
+            )
+        )
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/faces/face-1/corrections",
+        json={"person_id": "person-1"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Face is not assigned"
+    with engine.connect() as connection:
+        persisted_person_id = connection.execute(
+            select(faces.c.person_id).where(faces.c.face_id == "face-1")
+        ).scalar_one_or_none()
+    assert persisted_person_id is None
+
+
+def test_face_correction_api_returns_409_when_reassigning_to_same_person(tmp_path, monkeypatch):
+    database_url = _database_url(tmp_path, "face-correct-same-person-conflict.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        _insert_photo(connection, photo_id="photo-1")
+        _insert_person(connection, person_id="person-1", display_name="Jane Doe")
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id="person-1",
+            )
+        )
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/faces/face-1/corrections",
+        json={"person_id": "person-1"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Face already assigned to person"
+
+
+def test_face_correction_api_returns_422_for_blank_person_id(tmp_path, monkeypatch):
+    database_url = _database_url(tmp_path, "face-correct-blank-person-id.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        _insert_photo(connection, photo_id="photo-1")
+        _insert_person(connection, person_id="person-1", display_name="Jane Doe")
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id="person-1",
+            )
+        )
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/faces/face-1/corrections",
+        json={"person_id": "   "},
+    )
+
+    assert response.status_code == 422
+    assert any(error["loc"][-1] == "person_id" for error in response.json()["detail"])
+
+
+def test_face_correction_api_returns_422_for_missing_person_id(tmp_path, monkeypatch):
+    database_url = _database_url(tmp_path, "face-correct-missing-person-id.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        _insert_photo(connection, photo_id="photo-1")
+        _insert_person(connection, person_id="person-1", display_name="Jane Doe")
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id="person-1",
+            )
+        )
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/faces/face-1/corrections",
+        json={},
+    )
+
+    assert response.status_code == 422
+    assert any(error["loc"][-1] == "person_id" for error in response.json()["detail"])
+
+
 def test_photo_detail_api_includes_face_id_for_assignment_workflow(tmp_path, monkeypatch):
     database_url = _database_url(tmp_path, "face-assign-photo-detail.db")
     upgrade_database(database_url)
@@ -349,4 +591,5 @@ def test_openapi_schema_includes_face_assignment_path_and_tag(tmp_path, monkeypa
     schema = client.get("/openapi.json").json()
 
     assert "/api/v1/faces/{face_id}/assignments" in schema["paths"]
+    assert "/api/v1/faces/{face_id}/corrections" in schema["paths"]
     assert any(tag["name"] == "face-labeling" for tag in schema["tags"])

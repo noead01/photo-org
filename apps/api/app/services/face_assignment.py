@@ -18,6 +18,14 @@ class FaceAlreadyAssignedError(RuntimeError):
     pass
 
 
+class FaceNotAssignedError(RuntimeError):
+    pass
+
+
+class FaceAlreadyAssignedToPersonError(RuntimeError):
+    pass
+
+
 def assign_face_to_person(
     connection: Connection,
     *,
@@ -52,6 +60,50 @@ def assign_face_to_person(
         raise PersonNotFoundError("Person not found")
 
     raise FaceAlreadyAssignedError("Face already assigned")
+
+
+def reassign_face_to_person(
+    connection: Connection,
+    *,
+    face_id: str,
+    person_id: str,
+) -> dict[str, str]:
+    row = _face_row(connection, face_id)
+    if row is None:
+        raise FaceNotFoundError("Face not found")
+
+    previous_person_id = row["person_id"]
+    if previous_person_id is None:
+        raise FaceNotAssignedError("Face is not assigned")
+    if previous_person_id == person_id:
+        raise FaceAlreadyAssignedToPersonError("Face already assigned to person")
+
+    person_exists = (
+        connection.execute(
+            select(people.c.person_id).where(people.c.person_id == person_id)
+        ).scalar_one_or_none()
+        is not None
+    )
+    if not person_exists:
+        raise PersonNotFoundError("Person not found")
+
+    result = connection.execute(
+        update(faces)
+        .where(
+            faces.c.face_id == face_id,
+            faces.c.person_id == previous_person_id,
+        )
+        .values(person_id=person_id)
+    )
+    if result.rowcount != 1:
+        raise FaceAlreadyAssignedError("Face assignment changed; retry correction")
+
+    return {
+        "face_id": row["face_id"],
+        "photo_id": row["photo_id"],
+        "previous_person_id": previous_person_id,
+        "person_id": person_id,
+    }
 
 
 def _face_row(connection: Connection, face_id: str):
