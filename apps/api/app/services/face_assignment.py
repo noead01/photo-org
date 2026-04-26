@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from sqlalchemy import insert, select, update
+from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 
 from photoorg_db_schema import (
     FACE_LABEL_SOURCE_HUMAN_CONFIRMED,
     FACE_LABEL_SOURCE_MACHINE_APPLIED,
+    FACE_LABEL_SOURCE_MACHINE_SUGGESTED,
 )
 
 from app.storage import face_labels, faces, people
@@ -180,6 +181,43 @@ def auto_apply_face_suggestion(
     }
 
 
+def record_review_needed_face_suggestion(
+    connection: Connection,
+    *,
+    face_id: str,
+    person_id: str,
+    confidence: float,
+    matched_face_id: str,
+    review_threshold: float,
+    auto_accept_threshold: float,
+) -> dict[str, object] | None:
+    face_row = _face_row(connection, face_id)
+    if face_row is None:
+        return None
+    if face_row["person_id"] is not None:
+        return None
+    if not _person_exists(connection, person_id):
+        return None
+
+    _upsert_machine_suggested_face_label_state(
+        connection,
+        face_id=face_id,
+        person_id=person_id,
+        confidence=confidence,
+        matched_face_id=matched_face_id,
+        review_threshold=review_threshold,
+        auto_accept_threshold=auto_accept_threshold,
+    )
+
+    return {
+        "face_id": str(face_row["face_id"]),
+        "photo_id": str(face_row["photo_id"]),
+        "person_id": person_id,
+        "confidence": float(confidence),
+        "matched_face_id": matched_face_id,
+    }
+
+
 def _face_row(connection: Connection, face_id: str):
     return (
         connection.execute(
@@ -283,5 +321,83 @@ def _persist_machine_applied_face_label_event(
                 "review_threshold": float(review_threshold),
                 "auto_accept_threshold": float(auto_accept_threshold),
             },
+        )
+    )
+
+
+def _upsert_machine_suggested_face_label_state(
+    connection: Connection,
+    *,
+    face_id: str,
+    person_id: str,
+    confidence: float,
+    matched_face_id: str,
+    review_threshold: float,
+    auto_accept_threshold: float,
+) -> None:
+    existing_rows = (
+        connection.execute(
+            select(
+                face_labels.c.face_label_id,
+                face_labels.c.person_id,
+            ).where(
+                face_labels.c.face_id == face_id,
+                face_labels.c.label_source == FACE_LABEL_SOURCE_MACHINE_SUGGESTED,
+            )
+        )
+        .mappings()
+        .all()
+    )
+    matched_existing_row = next(
+        (row for row in existing_rows if str(row["person_id"]) == person_id),
+        None,
+    )
+    provenance = {
+        "workflow": "recognition-suggestions",
+        "surface": "api",
+        "action": "review_needed",
+        "matched_face_id": matched_face_id,
+        "review_threshold": float(review_threshold),
+        "auto_accept_threshold": float(auto_accept_threshold),
+    }
+    if matched_existing_row is not None:
+        matched_face_label_id = str(matched_existing_row["face_label_id"])
+        connection.execute(
+            update(face_labels)
+            .where(face_labels.c.face_label_id == matched_face_label_id)
+            .values(
+                confidence=float(confidence),
+                model_version=None,
+                provenance=provenance,
+                updated_ts=func.current_timestamp(),
+            )
+        )
+        stale_ids = [
+            str(row["face_label_id"])
+            for row in existing_rows
+            if str(row["face_label_id"]) != matched_face_label_id
+        ]
+        if stale_ids:
+            connection.execute(
+                delete(face_labels).where(face_labels.c.face_label_id.in_(stale_ids))
+            )
+        return
+
+    if existing_rows:
+        connection.execute(
+            delete(face_labels).where(
+                face_labels.c.face_id == face_id,
+                face_labels.c.label_source == FACE_LABEL_SOURCE_MACHINE_SUGGESTED,
+            )
+        )
+    connection.execute(
+        insert(face_labels).values(
+            face_label_id=str(uuid4()),
+            face_id=face_id,
+            person_id=person_id,
+            label_source=FACE_LABEL_SOURCE_MACHINE_SUGGESTED,
+            confidence=float(confidence),
+            model_version=None,
+            provenance=provenance,
         )
     )

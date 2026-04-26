@@ -25,6 +25,7 @@ from sqlalchemy.engine import Connection, Engine
 EMBEDDING_DIMENSION = 128
 FACE_LABEL_SOURCE_HUMAN_CONFIRMED = "human_confirmed"
 FACE_LABEL_SOURCE_MACHINE_APPLIED = "machine_applied"
+FACE_LABEL_SOURCE_MACHINE_SUGGESTED = "machine_suggested"
 
 
 try:
@@ -194,7 +195,7 @@ face_labels = Table(
     Column("created_ts", TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
     Column("updated_ts", TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
     CheckConstraint(
-        "label_source IN ('human_confirmed', 'machine_applied')",
+        "label_source IN ('human_confirmed', 'machine_applied', 'machine_suggested')",
         name="ck_face_labels_label_source",
     ),
 )

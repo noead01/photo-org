@@ -14,6 +14,7 @@ from app.services.face_assignment import (
     FaceNotFoundError,
     PersonNotFoundError,
     auto_apply_face_suggestion,
+    record_review_needed_face_suggestion,
     assign_face_to_person,
     reassign_face_to_person,
 )
@@ -22,7 +23,10 @@ from app.services.face_candidates import (
     FaceNotFoundError as FaceCandidateNotFoundError,
     lookup_nearest_neighbor_candidates,
 )
-from app.services.recognition_policy import SUGGESTION_DECISION_AUTO_APPLY
+from app.services.recognition_policy import (
+    SUGGESTION_DECISION_AUTO_APPLY,
+    SUGGESTION_DECISION_REVIEW_NEEDED,
+)
 
 
 router = APIRouter(prefix="/faces", tags=["face-labeling"])
@@ -94,6 +98,16 @@ class AutoAppliedFaceAssignmentResponse(BaseModel):
     confidence: float
 
 
+class ReviewNeededFaceSuggestionResponse(BaseModel):
+    """Review-needed suggestion details for medium-confidence matches."""
+
+    face_id: str
+    photo_id: str
+    person_id: str
+    confidence: float
+    matched_face_id: str
+
+
 class FaceSuggestionPolicyResponse(BaseModel):
     """Threshold policy decision for the source face suggestion flow."""
 
@@ -115,6 +129,7 @@ class FaceCandidateLookupResponse(BaseModel):
     face_id: str
     candidates: list[FaceCandidateResponse]
     suggestion_policy: FaceSuggestionPolicyResponse
+    review_needed_suggestion: ReviewNeededFaceSuggestionResponse | None = None
     auto_applied_assignment: AutoAppliedFaceAssignmentResponse | None = None
 
 
@@ -221,6 +236,25 @@ def lookup_face_candidates_endpoint(
 
     suggestion_policy = result["suggestion_policy"]
     candidates = result["candidates"]
+    if (
+        suggestion_policy["decision"] == SUGGESTION_DECISION_REVIEW_NEEDED
+        and isinstance(candidates, list)
+        and candidates
+    ):
+        top_candidate = candidates[0]
+        review_needed_suggestion = record_review_needed_face_suggestion(
+            db.connection(),
+            face_id=face_id,
+            person_id=str(top_candidate["person_id"]),
+            confidence=float(top_candidate["confidence"]),
+            matched_face_id=str(top_candidate["matched_face_id"]),
+            review_threshold=float(suggestion_policy["review_threshold"]),
+            auto_accept_threshold=float(suggestion_policy["auto_accept_threshold"]),
+        )
+        if review_needed_suggestion is not None:
+            result["review_needed_suggestion"] = review_needed_suggestion
+            db.commit()
+
     if (
         suggestion_policy["decision"] == SUGGESTION_DECISION_AUTO_APPLY
         and isinstance(candidates, list)
