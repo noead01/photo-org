@@ -5,6 +5,12 @@ from math import sqrt
 from sqlalchemy import func, select
 from sqlalchemy.engine import Connection
 
+from app.services.recognition_policy import (
+    SUGGESTION_DECISION_NO_SUGGESTION,
+    classify_suggestion_confidence,
+    distance_to_confidence,
+    resolve_suggestion_thresholds,
+)
 from app.storage import faces, people
 
 
@@ -48,10 +54,33 @@ def lookup_nearest_neighbor_candidates(
             face_id=face_id,
             source_embedding=source_embedding,
         )
+    candidates_with_confidence = _with_candidate_confidence(ordered_candidates)
+    thresholds = resolve_suggestion_thresholds()
+    top_candidate_confidence = (
+        float(candidates_with_confidence[0]["confidence"]) if candidates_with_confidence else None
+    )
+    if top_candidate_confidence is None:
+        suggestion_decision = SUGGESTION_DECISION_NO_SUGGESTION
+    else:
+        suggestion_decision = classify_suggestion_confidence(
+            top_candidate_confidence,
+            review_threshold=thresholds["review_threshold"],
+            auto_accept_threshold=thresholds["auto_accept_threshold"],
+        )
+    if suggestion_decision == SUGGESTION_DECISION_NO_SUGGESTION:
+        candidates = []
+    else:
+        candidates = candidates_with_confidence[:limit]
 
     return {
         "face_id": face_id,
-        "candidates": ordered_candidates[:limit],
+        "candidates": candidates,
+        "suggestion_policy": {
+            "decision": suggestion_decision,
+            "review_threshold": thresholds["review_threshold"],
+            "auto_accept_threshold": thresholds["auto_accept_threshold"],
+            "top_candidate_confidence": top_candidate_confidence,
+        },
     }
 
 
@@ -162,6 +191,16 @@ def _lookup_candidates_python(
         best_by_person.values(),
         key=lambda item: (float(item["distance"]), str(item["person_id"])),
     )
+
+
+def _with_candidate_confidence(candidates: list[dict[str, object]]) -> list[dict[str, object]]:
+    results: list[dict[str, object]] = []
+    for candidate in candidates:
+        distance = float(candidate["distance"])
+        enriched = dict(candidate)
+        enriched["confidence"] = distance_to_confidence(distance)
+        results.append(enriched)
+    return results
 
 
 def _coerce_embedding(value: object) -> list[float] | None:
