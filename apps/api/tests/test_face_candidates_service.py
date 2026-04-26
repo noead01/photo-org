@@ -46,6 +46,8 @@ class _FakeConnection:
 
 
 def test_lookup_nearest_neighbor_candidates_uses_postgresql_strategy_in_isolation(monkeypatch):
+    monkeypatch.setenv("PHOTO_ORG_RECOGNITION_REVIEW_THRESHOLD", "0.6")
+    monkeypatch.setenv("PHOTO_ORG_RECOGNITION_AUTO_ACCEPT_THRESHOLD", "0.85")
     connection = _FakeConnection(dialect_name="postgresql", source_embedding=[1.0, 0.0, 0.0])
     called: dict[str, object] = {}
 
@@ -99,12 +101,21 @@ def test_lookup_nearest_neighbor_candidates_uses_postgresql_strategy_in_isolatio
                 "display_name": "Alex",
                 "matched_face_id": "match-face-1",
                 "distance": 0.1,
+                "confidence": 0.9,
             }
         ],
+        "suggestion_policy": {
+            "decision": "auto_apply",
+            "review_threshold": 0.6,
+            "auto_accept_threshold": 0.85,
+            "top_candidate_confidence": 0.9,
+        },
     }
 
 
 def test_lookup_nearest_neighbor_candidates_uses_python_fallback_outside_postgresql(monkeypatch):
+    monkeypatch.setenv("PHOTO_ORG_RECOGNITION_REVIEW_THRESHOLD", "0.75")
+    monkeypatch.setenv("PHOTO_ORG_RECOGNITION_AUTO_ACCEPT_THRESHOLD", "0.95")
     connection = _FakeConnection(dialect_name="sqlite", source_embedding=[1.0, 0.0, 0.0])
     called: dict[str, object] = {}
 
@@ -156,6 +167,60 @@ def test_lookup_nearest_neighbor_candidates_uses_python_fallback_outside_postgre
                 "display_name": "Blair",
                 "matched_face_id": "match-face-2",
                 "distance": 0.2,
+                "confidence": 0.8,
             }
         ],
+        "suggestion_policy": {
+            "decision": "review_needed",
+            "review_threshold": 0.75,
+            "auto_accept_threshold": 0.95,
+            "top_candidate_confidence": 0.8,
+        },
+    }
+
+
+def test_lookup_nearest_neighbor_candidates_applies_no_suggestion_policy_for_low_confidence(monkeypatch):
+    monkeypatch.setenv("PHOTO_ORG_RECOGNITION_REVIEW_THRESHOLD", "0.9")
+    monkeypatch.setenv("PHOTO_ORG_RECOGNITION_AUTO_ACCEPT_THRESHOLD", "0.95")
+    connection = _FakeConnection(dialect_name="sqlite", source_embedding=[1.0, 0.0, 0.0])
+
+    def _fake_postgresql_strategy(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("PostgreSQL strategy should not be used for SQLite")
+
+    def _fake_python_strategy(*args, **kwargs):  # noqa: ANN002, ANN003
+        return [
+            {
+                "person_id": "person-2",
+                "display_name": "Blair",
+                "matched_face_id": "match-face-2",
+                "distance": 0.2,
+            }
+        ]
+
+    monkeypatch.setattr(
+        face_candidates_service,
+        "_lookup_candidates_postgresql",
+        _fake_postgresql_strategy,
+    )
+    monkeypatch.setattr(
+        face_candidates_service,
+        "_lookup_candidates_python",
+        _fake_python_strategy,
+    )
+
+    result = face_candidates_service.lookup_nearest_neighbor_candidates(
+        connection,
+        face_id="source-face",
+        limit=7,
+    )
+
+    assert result == {
+        "face_id": "source-face",
+        "candidates": [],
+        "suggestion_policy": {
+            "decision": "no_suggestion",
+            "review_threshold": 0.9,
+            "auto_accept_threshold": 0.95,
+            "top_candidate_confidence": 0.8,
+        },
     }

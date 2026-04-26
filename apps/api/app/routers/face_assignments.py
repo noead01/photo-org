@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
@@ -80,6 +80,16 @@ class FaceCandidateResponse(BaseModel):
     display_name: str
     matched_face_id: str
     distance: float
+    confidence: float
+
+
+class FaceSuggestionPolicyResponse(BaseModel):
+    """Threshold policy decision for the source face suggestion flow."""
+
+    decision: Literal["auto_apply", "review_needed", "no_suggestion"]
+    review_threshold: float
+    auto_accept_threshold: float
+    top_candidate_confidence: float | None
 
 
 class FaceCandidateLookupResponse(BaseModel):
@@ -93,6 +103,7 @@ class FaceCandidateLookupResponse(BaseModel):
 
     face_id: str
     candidates: list[FaceCandidateResponse]
+    suggestion_policy: FaceSuggestionPolicyResponse
 
 
 @router.post(
