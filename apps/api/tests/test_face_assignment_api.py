@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, insert, select
 
-from app.dependencies import _get_session_factory
+from app.dependencies import FACE_VALIDATION_ROLE_HEADER, _get_session_factory
 from app.main import app
 from app.migrations import upgrade_database
 from app.storage import face_labels, faces, people, photos
@@ -21,6 +21,12 @@ def _client(tmp_path, monkeypatch, filename: str) -> TestClient:
 
 def _database_url(tmp_path, filename: str) -> str:
     return f"sqlite:///{tmp_path / filename}"
+
+
+def _authorized_client() -> TestClient:
+    client = TestClient(app)
+    client.headers[FACE_VALIDATION_ROLE_HEADER] = "contributor"
+    return client
 
 
 def _insert_photo(connection, *, photo_id: str) -> None:
@@ -65,7 +71,7 @@ def test_face_assignment_api_assigns_unlabeled_face_to_existing_person(tmp_path,
             )
         )
 
-    client = TestClient(app)
+    client = _authorized_client()
     response = client.post(
         "/api/v1/faces/face-1/assignments",
         json={"person_id": "person-1"},
@@ -82,6 +88,68 @@ def test_face_assignment_api_assigns_unlabeled_face_to_existing_person(tmp_path,
             select(faces.c.person_id).where(faces.c.face_id == "face-1")
         ).scalar_one_or_none()
     assert persisted_person_id == "person-1"
+
+
+def test_face_assignment_api_rejects_missing_face_validation_role(tmp_path, monkeypatch):
+    database_url = _database_url(tmp_path, "face-assign-missing-role.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        _insert_photo(connection, photo_id="photo-1")
+        _insert_person(connection, person_id="person-1", display_name="Jane Doe")
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id=None,
+            )
+        )
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/faces/face-1/assignments",
+        json={"person_id": "person-1"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Face validation role required"}
+    with engine.connect() as connection:
+        persisted_person_id = connection.execute(
+            select(faces.c.person_id).where(faces.c.face_id == "face-1")
+        ).scalar_one_or_none()
+    assert persisted_person_id is None
+
+
+def test_face_assignment_api_rejects_unrecognized_face_validation_role(tmp_path, monkeypatch):
+    database_url = _database_url(tmp_path, "face-assign-wrong-role.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        _insert_photo(connection, photo_id="photo-1")
+        _insert_person(connection, person_id="person-1", display_name="Jane Doe")
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id=None,
+            )
+        )
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/faces/face-1/assignments",
+        headers={FACE_VALIDATION_ROLE_HEADER: "viewer"},
+        json={"person_id": "person-1"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Face validation role required"}
 
 
 def test_face_assignment_api_persists_human_confirmed_face_label_provenance(
@@ -104,7 +172,7 @@ def test_face_assignment_api_persists_human_confirmed_face_label_provenance(
             )
         )
 
-    client = TestClient(app)
+    client = _authorized_client()
     response = client.post(
         "/api/v1/faces/face-1/assignments",
         json={"person_id": "person-1"},
@@ -145,7 +213,7 @@ def test_face_assignment_api_returns_404_for_missing_face(tmp_path, monkeypatch)
     with engine.begin() as connection:
         _insert_person(connection, person_id="person-1", display_name="Jane Doe")
 
-    client = TestClient(app)
+    client = _authorized_client()
     response = client.post(
         "/api/v1/faces/missing-face/assignments",
         json={"person_id": "person-1"},
@@ -172,7 +240,7 @@ def test_face_assignment_api_returns_404_for_missing_person(tmp_path, monkeypatc
             )
         )
 
-    client = TestClient(app)
+    client = _authorized_client()
     response = client.post(
         "/api/v1/faces/face-1/assignments",
         json={"person_id": "missing-person"},
@@ -206,7 +274,7 @@ def test_face_assignment_api_returns_409_for_already_assigned_face(tmp_path, mon
             )
         )
 
-    client = TestClient(app)
+    client = _authorized_client()
     response = client.post(
         "/api/v1/faces/face-1/assignments",
         json={"person_id": "person-1"},
@@ -238,7 +306,7 @@ def test_face_assignment_api_returns_422_for_blank_person_id(tmp_path, monkeypat
             )
         )
 
-    client = TestClient(app)
+    client = _authorized_client()
     response = client.post(
         "/api/v1/faces/face-1/assignments",
         json={"person_id": "   "},
@@ -270,7 +338,7 @@ def test_face_assignment_api_returns_422_for_missing_person_id(tmp_path, monkeyp
             )
         )
 
-    client = TestClient(app)
+    client = _authorized_client()
     response = client.post(
         "/api/v1/faces/face-1/assignments",
         json={},
@@ -303,7 +371,7 @@ def test_face_assignment_api_returns_409_when_reassigning_to_same_person(tmp_pat
             )
         )
 
-    client = TestClient(app)
+    client = _authorized_client()
     response = client.post(
         "/api/v1/faces/face-1/assignments",
         json={"person_id": "person-1"},
@@ -332,7 +400,7 @@ def test_face_correction_api_reassigns_assigned_face_to_different_person(tmp_pat
             )
         )
 
-    client = TestClient(app)
+    client = _authorized_client()
     response = client.post(
         "/api/v1/faces/face-1/corrections",
         json={"person_id": "person-2"},
@@ -350,6 +418,40 @@ def test_face_correction_api_reassigns_assigned_face_to_different_person(tmp_pat
             select(faces.c.person_id).where(faces.c.face_id == "face-1")
         ).scalar_one_or_none()
     assert persisted_person_id == "person-2"
+
+
+def test_face_correction_api_rejects_missing_face_validation_role(tmp_path, monkeypatch):
+    database_url = _database_url(tmp_path, "face-correct-missing-role.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        _insert_photo(connection, photo_id="photo-1")
+        _insert_person(connection, person_id="person-1", display_name="Jane Doe")
+        _insert_person(connection, person_id="person-2", display_name="John Doe")
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id="person-1",
+            )
+        )
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/faces/face-1/corrections",
+        json={"person_id": "person-2"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Face validation role required"}
+    with engine.connect() as connection:
+        persisted_person_id = connection.execute(
+            select(faces.c.person_id).where(faces.c.face_id == "face-1")
+        ).scalar_one_or_none()
+    assert persisted_person_id == "person-1"
 
 
 def test_face_correction_api_persists_human_confirmed_face_label_provenance(tmp_path, monkeypatch):
@@ -371,7 +473,7 @@ def test_face_correction_api_persists_human_confirmed_face_label_provenance(tmp_
             )
         )
 
-    client = TestClient(app)
+    client = _authorized_client()
     response = client.post(
         "/api/v1/faces/face-1/corrections",
         json={"person_id": "person-2"},
@@ -413,7 +515,7 @@ def test_face_correction_api_returns_404_for_missing_face(tmp_path, monkeypatch)
     with engine.begin() as connection:
         _insert_person(connection, person_id="person-1", display_name="Jane Doe")
 
-    client = TestClient(app)
+    client = _authorized_client()
     response = client.post(
         "/api/v1/faces/missing-face/corrections",
         json={"person_id": "person-1"},
@@ -441,7 +543,7 @@ def test_face_correction_api_returns_404_for_missing_person(tmp_path, monkeypatc
             )
         )
 
-    client = TestClient(app)
+    client = _authorized_client()
     response = client.post(
         "/api/v1/faces/face-1/corrections",
         json={"person_id": "missing-person"},
@@ -474,7 +576,7 @@ def test_face_correction_api_returns_409_when_face_is_unassigned(tmp_path, monke
             )
         )
 
-    client = TestClient(app)
+    client = _authorized_client()
     response = client.post(
         "/api/v1/faces/face-1/corrections",
         json={"person_id": "person-1"},
@@ -507,7 +609,7 @@ def test_face_correction_api_returns_409_when_reassigning_to_same_person(tmp_pat
             )
         )
 
-    client = TestClient(app)
+    client = _authorized_client()
     response = client.post(
         "/api/v1/faces/face-1/corrections",
         json={"person_id": "person-1"},
@@ -535,7 +637,7 @@ def test_face_correction_api_returns_422_for_blank_person_id(tmp_path, monkeypat
             )
         )
 
-    client = TestClient(app)
+    client = _authorized_client()
     response = client.post(
         "/api/v1/faces/face-1/corrections",
         json={"person_id": "   "},
@@ -563,7 +665,7 @@ def test_face_correction_api_returns_422_for_missing_person_id(tmp_path, monkeyp
             )
         )
 
-    client = TestClient(app)
+    client = _authorized_client()
     response = client.post(
         "/api/v1/faces/face-1/corrections",
         json={},
@@ -606,7 +708,7 @@ def test_photo_detail_api_includes_face_id_for_assignment_workflow(tmp_path, mon
             )
         )
 
-    client = TestClient(app)
+    client = _authorized_client()
     response = client.get("/api/v1/photos/photo-1")
 
     assert response.status_code == 200
@@ -629,4 +731,20 @@ def test_openapi_schema_includes_face_assignment_path_and_tag(tmp_path, monkeypa
 
     assert "/api/v1/faces/{face_id}/assignments" in schema["paths"]
     assert "/api/v1/faces/{face_id}/corrections" in schema["paths"]
+    assert schema["paths"]["/api/v1/faces/{face_id}/assignments"]["post"]["responses"]["403"][
+        "description"
+    ] == "Face validation role required"
+    assert schema["paths"]["/api/v1/faces/{face_id}/corrections"]["post"]["responses"]["403"][
+        "description"
+    ] == "Face validation role required"
+    assignment_parameters = schema["paths"]["/api/v1/faces/{face_id}/assignments"]["post"]["parameters"]
+    correction_parameters = schema["paths"]["/api/v1/faces/{face_id}/corrections"]["post"]["parameters"]
+    assert any(
+        parameter["in"] == "header" and parameter["name"] == FACE_VALIDATION_ROLE_HEADER
+        for parameter in assignment_parameters
+    )
+    assert any(
+        parameter["in"] == "header" and parameter["name"] == FACE_VALIDATION_ROLE_HEADER
+        for parameter in correction_parameters
+    )
     assert any(tag["name"] == "face-labeling" for tag in schema["tags"])

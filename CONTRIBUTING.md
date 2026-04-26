@@ -140,6 +140,12 @@ OpenAPI contribution notes:
 - `GET /docs` serves the Swagger UI docs surface
 - `apps/api/.generated/openapi.yaml` is generated locally and is ignored by git; do not commit it
 
+Face-labeling mutation permission contract:
+
+- `POST /api/v1/faces/{face_id}/assignments` and `POST /api/v1/faces/{face_id}/corrections` require the `X-Face-Validation-Role` request header
+- accepted role values are `contributor` and `admin`
+- requests without an accepted role return `403` with `{"detail":"Face validation role required"}`
+
 The `pre-push` target is intentionally scoped to checks that are currently expected to pass on this repo state.
 As broader lint and type-check coverage is cleaned up, that target should expand rather than drift into a second undocumented workflow.
 
