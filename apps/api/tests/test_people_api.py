@@ -401,7 +401,7 @@ def test_people_delete_api_returns_409_when_person_is_referenced_by_face_label(
                 face_label_id="face-label-1",
                 face_id="face-1",
                 person_id="person-1",
-                label_source="manual",
+                label_source="human_confirmed",
             )
         )
 

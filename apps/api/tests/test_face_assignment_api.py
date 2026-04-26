@@ -84,7 +84,7 @@ def test_face_assignment_api_assigns_unlabeled_face_to_existing_person(tmp_path,
     assert persisted_person_id == "person-1"
 
 
-def test_face_assignment_api_persists_manual_face_label_provenance(
+def test_face_assignment_api_persists_human_confirmed_face_label_provenance(
     tmp_path, monkeypatch
 ):
     database_url = _database_url(tmp_path, "face-assign-no-face-label-write.db")
@@ -125,7 +125,7 @@ def test_face_assignment_api_persists_manual_face_label_provenance(
     assert len(face_label_rows) == 1
     assert face_label_rows[0]["face_id"] == "face-1"
     assert face_label_rows[0]["person_id"] == "person-1"
-    assert face_label_rows[0]["label_source"] == "manual"
+    assert face_label_rows[0]["label_source"] == "human_confirmed"
     assert face_label_rows[0]["confidence"] is None
     assert face_label_rows[0]["model_version"] is None
     assert face_label_rows[0]["provenance"] == {
@@ -352,7 +352,7 @@ def test_face_correction_api_reassigns_assigned_face_to_different_person(tmp_pat
     assert persisted_person_id == "person-2"
 
 
-def test_face_correction_api_persists_manual_face_label_provenance(tmp_path, monkeypatch):
+def test_face_correction_api_persists_human_confirmed_face_label_provenance(tmp_path, monkeypatch):
     database_url = _database_url(tmp_path, "face-correct-no-face-label-write.db")
     upgrade_database(database_url)
     monkeypatch.setenv("DATABASE_URL", database_url)
@@ -392,7 +392,7 @@ def test_face_correction_api_persists_manual_face_label_provenance(tmp_path, mon
     assert len(face_label_rows) == 1
     assert face_label_rows[0]["face_id"] == "face-1"
     assert face_label_rows[0]["person_id"] == "person-2"
-    assert face_label_rows[0]["label_source"] == "manual"
+    assert face_label_rows[0]["label_source"] == "human_confirmed"
     assert face_label_rows[0]["confidence"] is None
     assert face_label_rows[0]["model_version"] is None
     assert face_label_rows[0]["provenance"] == {
