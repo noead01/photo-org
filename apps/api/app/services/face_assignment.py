@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from sqlalchemy import insert, select, update
 from sqlalchemy.engine import Connection
+from sqlalchemy.exc import IntegrityError
 
 from photoorg_db_schema import FACE_LABEL_SOURCE_HUMAN_CONFIRMED
 
@@ -36,24 +37,31 @@ def assign_face_to_person(
     face_id: str,
     person_id: str,
 ) -> dict[str, str]:
-    result = connection.execute(
-        update(faces)
-        .where(
-            faces.c.face_id == face_id,
-            faces.c.person_id.is_(None),
-            select(people.c.person_id).where(people.c.person_id == person_id).exists(),
+    try:
+        result = connection.execute(
+            update(faces)
+            .where(
+                faces.c.face_id == face_id,
+                faces.c.person_id.is_(None),
+                select(people.c.person_id).where(people.c.person_id == person_id).exists(),
+            )
+            .values(person_id=person_id)
         )
-        .values(person_id=person_id)
-    )
-    if result.rowcount == 1:
-        assignment = _face_assignment(connection, face_id)
-        _persist_face_label_event(
+        if result.rowcount == 1:
+            assignment = _face_assignment(connection, face_id)
+            _persist_face_label_event(
+                connection,
+                face_id=face_id,
+                person_id=person_id,
+                action="assignment",
+            )
+            return assignment
+    except IntegrityError as exc:
+        _raise_person_not_found_on_fk_violation(
             connection,
-            face_id=face_id,
             person_id=person_id,
-            action="assignment",
+            exc=exc,
         )
-        return assignment
 
     row = _face_row(connection, face_id)
     if row is None:
@@ -61,13 +69,7 @@ def assign_face_to_person(
     if row["person_id"] is not None:
         raise FaceAlreadyAssignedError("Face already assigned")
 
-    person_exists = (
-        connection.execute(
-            select(people.c.person_id).where(people.c.person_id == person_id)
-        ).scalar_one_or_none()
-        is not None
-    )
-    if not person_exists:
+    if not _person_exists(connection, person_id):
         raise PersonNotFoundError("Person not found")
 
     raise FaceAlreadyAssignedError("Face already assigned")
@@ -89,33 +91,34 @@ def reassign_face_to_person(
     if previous_person_id == person_id:
         raise FaceAlreadyAssignedToPersonError("Face already assigned to person")
 
-    person_exists = (
-        connection.execute(
-            select(people.c.person_id).where(people.c.person_id == person_id)
-        ).scalar_one_or_none()
-        is not None
-    )
-    if not person_exists:
+    if not _person_exists(connection, person_id):
         raise PersonNotFoundError("Person not found")
 
-    result = connection.execute(
-        update(faces)
-        .where(
-            faces.c.face_id == face_id,
-            faces.c.person_id == previous_person_id,
+    try:
+        result = connection.execute(
+            update(faces)
+            .where(
+                faces.c.face_id == face_id,
+                faces.c.person_id == previous_person_id,
+            )
+            .values(person_id=person_id)
         )
-        .values(person_id=person_id)
-    )
-    if result.rowcount != 1:
-        raise FaceAlreadyAssignedError("Face assignment changed; retry correction")
+        if result.rowcount != 1:
+            raise FaceAlreadyAssignedError("Face assignment changed; retry correction")
 
-    _persist_face_label_event(
-        connection,
-        face_id=face_id,
-        person_id=person_id,
-        action="correction",
-        previous_person_id=previous_person_id,
-    )
+        _persist_face_label_event(
+            connection,
+            face_id=face_id,
+            person_id=person_id,
+            action="correction",
+            previous_person_id=previous_person_id,
+        )
+    except IntegrityError as exc:
+        _raise_person_not_found_on_fk_violation(
+            connection,
+            person_id=person_id,
+            exc=exc,
+        )
 
     return {
         "face_id": row["face_id"],
@@ -137,6 +140,26 @@ def _face_row(connection: Connection, face_id: str):
         .mappings()
         .first()
     )
+
+
+def _person_exists(connection: Connection, person_id: str) -> bool:
+    return (
+        connection.execute(
+            select(people.c.person_id).where(people.c.person_id == person_id)
+        ).scalar_one_or_none()
+        is not None
+    )
+
+
+def _raise_person_not_found_on_fk_violation(
+    connection: Connection,
+    *,
+    person_id: str,
+    exc: IntegrityError,
+) -> None:
+    if not _person_exists(connection, person_id):
+        raise PersonNotFoundError("Person not found") from exc
+    raise exc
 
 
 def _face_assignment(connection: Connection, face_id: str) -> dict[str, str]:
