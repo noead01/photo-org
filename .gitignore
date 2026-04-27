@@ -17,3 +17,8 @@ packages/*/.venv/
 .codex
 apps/api/.generated/
 *.egg-info/
+apps/ui/node_modules/
+apps/ui/dist/
+apps/ui/*.tsbuildinfo
+apps/ui/playwright-report/
+apps/ui/test-results/
