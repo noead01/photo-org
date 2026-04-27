@@ -1,0 +1,97 @@
+name: ui-tests
+
+on:
+  pull_request:
+    paths:
+      - "apps/ui/**"
+      - "docs/testing/**"
+      - ".github/workflows/ui-tests.yml"
+      - ".gitignore"
+      - "CONTRIBUTING.md"
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/ui/**"
+      - "docs/testing/**"
+      - ".github/workflows/ui-tests.yml"
+      - ".gitignore"
+      - "CONTRIBUTING.md"
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+jobs:
+  ui-unit:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: apps/ui/package-lock.json
+      - name: Install UI dependencies
+        working-directory: apps/ui
+        run: npm ci
+      - name: Run Vitest unit suite
+        working-directory: apps/ui
+        run: npm run test
+
+  ui-e2e-smoke:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: apps/ui/package-lock.json
+      - name: Install UI dependencies
+        working-directory: apps/ui
+        run: npm ci
+      - name: Install Playwright Chromium
+        working-directory: apps/ui
+        run: npx playwright install --with-deps chromium
+      - name: Run smoke journeys
+        working-directory: apps/ui
+        run: npm run test:e2e:smoke
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-e2e-smoke-report
+          path: apps/ui/playwright-report
+          if-no-files-found: ignore
+
+  ui-e2e-full:
+    if: github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: apps/ui/package-lock.json
+      - name: Install UI dependencies
+        working-directory: apps/ui
+        run: npm ci
+      - name: Install Playwright Chromium
+        working-directory: apps/ui
+        run: npx playwright install --with-deps chromium
+      - name: Run full E2E lane
+        working-directory: apps/ui
+        run: npm run test:e2e:full
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-e2e-full-report
+          path: apps/ui/playwright-report
+          if-no-files-found: ignore
