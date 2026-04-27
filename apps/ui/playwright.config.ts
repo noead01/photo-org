@@ -1,11 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const localBaseURL = "http://127.0.0.1:4173";
-const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? localBaseURL;
+const configuredBaseURL = process.env.PLAYWRIGHT_BASE_URL;
 const forceLocalWebServer =
   process.env.PLAYWRIGHT_FORCE_LOCAL_WEBSERVER === "1" ||
   process.env.PLAYWRIGHT_FORCE_LOCAL_WEBSERVER === "true";
-const shouldStartLocalWebServer = !process.env.PLAYWRIGHT_BASE_URL || forceLocalWebServer;
+const baseURL = forceLocalWebServer ? localBaseURL : configuredBaseURL ?? localBaseURL;
+const shouldStartLocalWebServer = !configuredBaseURL || forceLocalWebServer;
 const isCI = !!process.env.CI;
 
 export default defineConfig({
