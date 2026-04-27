@@ -132,6 +132,18 @@ Current high-value targets:
   - regenerate the generated OpenAPI YAML artifact at `apps/api/.generated/openapi.yaml` from the current FastAPI app
   - the API also serves the same runtime schema at `GET /openapi.yaml` and the Swagger UI docs at `GET /docs`
 
+### UI Testing Commands
+
+For UI changes in `apps/ui`, run these commands from that directory:
+
+- `npm run test`
+- `npm run test:e2e:smoke`
+- `npm run test:e2e:technical`
+- `npm run test:e2e:full`
+
+Journey acceptance-criteria docs live in `docs/testing/journeys`.
+Playwright tests should include `JRN-*` IDs that map to `docs/testing/journey-traceability.md`.
+
 OpenAPI contribution notes:
 
 - the runtime FastAPI app is the source of truth for the contract
