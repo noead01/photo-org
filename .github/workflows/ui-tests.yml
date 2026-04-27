@@ -2,12 +2,7 @@ name: ui-tests
 
 on:
   pull_request:
-    paths:
-      - "apps/ui/**"
-      - "docs/testing/**"
-      - ".github/workflows/ui-tests.yml"
-      - ".gitignore"
-      - "CONTRIBUTING.md"
+  merge_group:
   push:
     branches:
       - main
@@ -41,7 +36,7 @@ jobs:
         run: npm run test
 
   ui-e2e-smoke:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -61,12 +56,12 @@ jobs:
         working-directory: apps/ui
         run: npm run test:e2e:smoke
       - name: Upload Playwright report
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: ui-e2e-smoke-report
           path: apps/ui/playwright-report
-          if-no-files-found: ignore
+          if-no-files-found: warn
 
   ui-e2e-full:
     if: github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
@@ -89,9 +84,9 @@ jobs:
         working-directory: apps/ui
         run: npm run test:e2e:full
       - name: Upload Playwright report
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: ui-e2e-full-report
           path: apps/ui/playwright-report
-          if-no-files-found: ignore
+          if-no-files-found: warn
