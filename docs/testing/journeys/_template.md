@@ -24,8 +24,8 @@
 
 ## Linked UI Stories
 
-- <issue reference>
+- Use Markdown links (not code formatting), e.g. [#123](https://github.com/<owner>/<repo>/issues/123)
 
 ## Linked Playwright Specs
 
-- <repo path>
+- Use Markdown links (not code formatting), e.g. [apps/ui/tests/e2e/journeys/app-shell-journeys.spec.ts](../../../apps/ui/tests/e2e/journeys/app-shell-journeys.spec.ts)

@@ -27,7 +27,7 @@ Users can open the Search route directly from a URL and land in the correct shel
 
 ## Linked UI Stories
 
-- #165
+- #179
 
 ## Linked Playwright Specs
 

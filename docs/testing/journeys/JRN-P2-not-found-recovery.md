@@ -10,7 +10,7 @@ Users can recover from an unknown URL without losing orientation or global navig
 
 - Given the user opens an unknown route
 - When the page renders
-- Then a not-found title is shown in content
+- Then the heading "Page Not Found" is shown in content
 - And primary navigation remains visible
 
 ### Scenario 2: Recovery to Browse from not-found page
