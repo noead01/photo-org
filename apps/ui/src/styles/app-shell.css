@@ -26,8 +26,16 @@ body {
   grid-area: header;
   background: #0f2a43;
   color: #f8fafc;
-  padding: 0.8rem 1.2rem;
+  padding: 0.8rem 1.2rem 1rem;
   border-bottom: 3px solid #1d4ed8;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.shell-title {
+  min-width: 0;
 }
 
 .shell-product {
@@ -42,6 +50,88 @@ body {
   margin: 0.2rem 0 0;
   font-size: 1.2rem;
   font-weight: 600;
+}
+
+.shell-account {
+  position: relative;
+  text-align: right;
+  max-width: min(21rem, 100%);
+}
+
+.shell-account-label {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.65rem;
+  opacity: 0.78;
+}
+
+.shell-account-name {
+  margin: 0.2rem 0 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.shell-account-email {
+  margin: 0.12rem 0 0.5rem;
+  font-size: 0.78rem;
+  opacity: 0.88;
+}
+
+.shell-account[data-session-state="missing"] .shell-account-email {
+  display: none;
+}
+
+.shell-account-trigger {
+  border: 1px solid #7aa2d8;
+  background: #11395f;
+  color: #f8fafc;
+  border-radius: 0.45rem;
+  padding: 0.4rem 0.65rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+.shell-account-trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.shell-account-menu {
+  margin: 0.45rem 0 0;
+  padding: 0.35rem;
+  list-style: none;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.5rem;
+  background: #f8fbff;
+  color: #0f172a;
+  min-width: 13rem;
+  box-shadow: 0 10px 28px rgba(15, 42, 67, 0.25);
+  position: absolute;
+  right: 0;
+  z-index: 10;
+}
+
+.shell-account-action {
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  border-radius: 0.35rem;
+  padding: 0.4rem 0.5rem;
+  font: inherit;
+}
+
+.shell-account-action:not(:disabled):hover {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  cursor: pointer;
+}
+
+.shell-account-action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .shell-nav {
