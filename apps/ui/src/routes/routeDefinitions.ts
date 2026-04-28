@@ -20,6 +20,12 @@ export interface PrimaryRouteDefinition {
   handoff: ShellHandoffExpectations;
 }
 
+export interface NavigationState {
+  activeRoute: PrimaryRouteDefinition;
+  pageContext: string;
+  usesFallback: boolean;
+}
+
 const baseHandoffExpectation: ShellHandoffExpectations = {
   loading:
     "Keep header and navigation visible while content shows a route-local loading state.",
@@ -72,6 +78,37 @@ export const PRIMARY_ROUTE_DEFINITIONS: PrimaryRouteDefinition[] = [
   }
 ];
 
+export const FALLBACK_PRIMARY_ROUTE = PRIMARY_ROUTE_DEFINITIONS[0];
+
+function normalizePathname(pathname: string): string {
+  const withLeadingSlash = pathname.startsWith("/") ? pathname : `/${pathname}`;
+
+  if (withLeadingSlash === "/") {
+    return withLeadingSlash;
+  }
+
+  return withLeadingSlash.replace(/\/+$/, "");
+}
+
+function routeOwnsPathname(route: PrimaryRouteDefinition, pathname: string): boolean {
+  return pathname === route.path || pathname.startsWith(`${route.path}/`);
+}
+
 export function findPrimaryRoute(pathname: string): PrimaryRouteDefinition | undefined {
-  return PRIMARY_ROUTE_DEFINITIONS.find((route) => route.path === pathname);
+  const normalizedPathname = normalizePathname(pathname);
+
+  return PRIMARY_ROUTE_DEFINITIONS.find((route) =>
+    routeOwnsPathname(route, normalizedPathname)
+  );
+}
+
+export function resolveNavigationState(pathname: string): NavigationState {
+  const matchedRoute = findPrimaryRoute(pathname);
+  const activeRoute = matchedRoute ?? FALLBACK_PRIMARY_ROUTE;
+
+  return {
+    activeRoute,
+    pageContext: activeRoute.title,
+    usesFallback: matchedRoute === undefined
+  };
 }

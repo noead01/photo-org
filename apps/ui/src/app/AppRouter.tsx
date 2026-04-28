@@ -10,8 +10,8 @@ import {
 import { useState } from "react";
 import { AppShell } from "./AppShell";
 import {
-  findPrimaryRoute,
   PRIMARY_ROUTE_DEFINITIONS,
+  resolveNavigationState,
   type PrimaryRouteDefinition
 } from "../routes/routeDefinitions";
 import { PrimaryRoutePage } from "../pages/PrimaryRoutePage";
@@ -29,8 +29,7 @@ interface AppShellLayoutProps {
 function AppShellLayout({ sessionIdentity, onSignOut }: AppShellLayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const activeRoute =
-    findPrimaryRoute(location.pathname) ?? PRIMARY_ROUTE_DEFINITIONS[0];
+  const navigationState = resolveNavigationState(location.pathname);
 
   function handleSignOut() {
     onSignOut();
@@ -39,7 +38,7 @@ function AppShellLayout({ sessionIdentity, onSignOut }: AppShellLayoutProps) {
 
   return (
     <AppShell
-      activeRoute={activeRoute}
+      navigationState={navigationState}
       sessionIdentity={sessionIdentity}
       onSignOut={handleSignOut}
     >

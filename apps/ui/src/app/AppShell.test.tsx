@@ -22,6 +22,12 @@ function renderAtPath(path: string, sessionIdentity: SessionIdentity | null = TE
   );
 }
 
+function expectShellContextText(text: string) {
+  const shellContext = document.querySelector(".shell-context");
+  expect(shellContext).not.toBeNull();
+  expect(shellContext).toHaveTextContent(text);
+}
+
 describe("App shell", () => {
   it.each(PRIMARY_ROUTE_DEFINITIONS)(
     "renders shared shell regions for $path",
@@ -61,6 +67,9 @@ describe("App shell", () => {
         level: 1
       })
     ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Search" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Browse" })).not.toHaveAttribute("aria-current");
+    expectShellContextText("Search");
   });
 
   it("renders user identity and exposes keyboard-accessible account actions", async () => {
@@ -103,5 +112,13 @@ describe("App shell", () => {
       })
     ).toBeDisabled();
     expect(screen.getByRole("heading", { name: "Browse", level: 1 })).toBeInTheDocument();
+  });
+
+  it("uses deterministic fallback nav and context for unknown route paths", () => {
+    renderAtPath("/unknown-route");
+
+    expect(screen.getByRole("heading", { name: "Page Not Found", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Browse" })).toHaveAttribute("aria-current", "page");
+    expectShellContextText("Browse");
   });
 });
