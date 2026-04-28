@@ -41,3 +41,24 @@ test(
     await expect(page.getByRole("heading", { name: "Operations", level: 1 })).toBeVisible();
   }
 );
+
+test(
+  "technical: account actions are keyboard-accessible and sign-out reaches fallback state @technical",
+  async ({ page }) => {
+    await page.goto("/browse");
+
+    const accountButton = page.getByRole("button", { name: "Account actions" });
+
+    await expect(accountButton).toBeVisible();
+    await accountButton.focus();
+    await page.keyboard.press("Enter");
+
+    await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+    await page.getByRole("button", { name: "Sign out" }).click();
+
+    await expect(page.getByText("Session unavailable")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Account actions unavailable" })
+    ).toBeDisabled();
+  }
+);
