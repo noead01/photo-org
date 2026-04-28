@@ -1,7 +1,7 @@
 import yaml
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.main import app, create_app
 from app.openapi_docs import OPENAPI_YAML_MEDIA_TYPE
 
 
@@ -114,3 +114,41 @@ class TestHealthEndpoint:
 
         assert response.status_code == 200
         assert "Swagger UI" in response.text
+
+    def test_given_allowed_origin_when_cors_preflight_then_returns_allow_origin_header(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv(
+            "PHOTO_ORG_API_CORS_ALLOWED_ORIGINS",
+            "http://localhost:5173,http://127.0.0.1:5173",
+        )
+        client = TestClient(create_app())
+
+        response = client.options(
+            "/healthz",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+        assert "GET" in response.headers["access-control-allow-methods"]
+
+    def test_given_disallowed_origin_when_cors_preflight_then_rejects_request(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv("PHOTO_ORG_API_CORS_ALLOWED_ORIGINS", "http://localhost:5173")
+        client = TestClient(create_app())
+
+        response = client.options(
+            "/healthz",
+            headers={
+                "Origin": "http://127.0.0.1:5173",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+
+        assert response.status_code == 400
+        assert "access-control-allow-origin" not in response.headers

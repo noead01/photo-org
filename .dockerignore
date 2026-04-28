@@ -1,0 +1,16 @@
+.git
+.gitignore
+.coverage*
+.pytest_cache
+.ruff_cache
+.venv
+.local
+.worktrees
+.codex
+**/__pycache__
+**/*.pyc
+**/.venv
+**/node_modules
+apps/ui/dist
+apps/ui/.vite
+apps/ui/*.tsbuildinfo
