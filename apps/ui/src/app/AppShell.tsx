@@ -1,13 +1,13 @@
-import { NavLink } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
   PRIMARY_ROUTE_DEFINITIONS,
-  type PrimaryRouteDefinition
+  type NavigationState
 } from "../routes/routeDefinitions";
 import type { SessionIdentity } from "../session/sessionIdentity";
 
 interface AppShellProps {
-  activeRoute: PrimaryRouteDefinition;
+  navigationState: NavigationState;
   sessionIdentity: SessionIdentity | null;
   onSignOut: () => void;
   children: ReactNode;
@@ -108,34 +108,38 @@ function AccountMenu({ sessionIdentity, onSignOut }: AccountMenuProps) {
 }
 
 export function AppShell({
-  activeRoute,
+  navigationState,
   sessionIdentity,
   onSignOut,
   children
 }: AppShellProps) {
   return (
-    <div className="app-shell" data-shell-route={activeRoute.key}>
+    <div className="app-shell" data-shell-route={navigationState.activeRoute.key}>
       <header className="shell-header">
         <div className="shell-title">
           <p className="shell-product">Photo Organizer</p>
-          <p className="shell-context">{activeRoute.title}</p>
+          <p className="shell-context">{navigationState.pageContext}</p>
         </div>
         <AccountMenu sessionIdentity={sessionIdentity} onSignOut={onSignOut} />
       </header>
 
       <nav aria-label="Primary" className="shell-nav">
         <ul>
-          {PRIMARY_ROUTE_DEFINITIONS.map((route) => (
-            <li key={route.key}>
-              <NavLink
-                to={route.path}
-                className={({ isActive }) => (isActive ? "active" : undefined)}
-                end
-              >
-                {route.navLabel}
-              </NavLink>
-            </li>
-          ))}
+          {PRIMARY_ROUTE_DEFINITIONS.map((route) => {
+            const isActive = route.key === navigationState.activeRoute.key;
+
+            return (
+              <li key={route.key}>
+                <Link
+                  to={route.path}
+                  className={isActive ? "active" : undefined}
+                  aria-current={isActive ? "page" : undefined}
+                >
+                  {route.navLabel}
+                </Link>
+              </li>
+            );
+          })}
         </ul>
       </nav>
 
