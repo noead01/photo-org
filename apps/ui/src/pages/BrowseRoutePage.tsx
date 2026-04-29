@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import type { NotificationEntry } from "../app/feedback/feedbackTypes";
 import { ToastStack } from "../app/feedback/ToastStack";
 
@@ -317,7 +317,11 @@ export function BrowseRoutePage() {
               )}
 
               <div className="browse-card-body">
-                <h2>{photo.photo_id}</h2>
+                <h2>
+                  <Link className="browse-photo-link" to={`/browse/${photo.photo_id}`}>
+                    {photo.photo_id}
+                  </Link>
+                </h2>
                 <p className="browse-path" title={photo.path}>{photo.path}</p>
                 <dl>
                   <div>
