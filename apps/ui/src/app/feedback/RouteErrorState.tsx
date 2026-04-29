@@ -1,9 +1,9 @@
 import type { RouteErrorContent } from "./feedbackTypes";
 
-type RouteErrorStateProps = {
+interface RouteErrorStateProps {
   content: RouteErrorContent;
   onRetry: () => void;
-};
+}
 
 export function RouteErrorState({ content, onRetry }: RouteErrorStateProps) {
   return (

@@ -1,11 +1,16 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { FeedbackSurface } from "./FeedbackSurface";
 import { RouteErrorState } from "./RouteErrorState";
 import { RouteLoadingState } from "./RouteLoadingState";
 import { ToastStack } from "./ToastStack";
 import type { NotificationEntry } from "./feedbackTypes";
 
 describe("feedback primitives", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("renders a route loading status label", () => {
     render(<RouteLoadingState label="Loading photos" />);
 
@@ -55,7 +60,45 @@ describe("feedback primitives", () => {
     expect(onDismiss).toHaveBeenCalledTimes(1);
     expect(onDismiss).toHaveBeenCalledWith("upload-success");
 
-    vi.useRealTimers();
+  });
+
+  it("keeps the original auto-dismiss schedule across rerenders", () => {
+    vi.useFakeTimers();
+
+    const firstOnDismiss = vi.fn();
+    const secondOnDismiss = vi.fn();
+    const firstNotifications: NotificationEntry[] = [
+      {
+        id: "upload-success",
+        tone: "success",
+        message: "Upload finished."
+      }
+    ];
+
+    const { rerender } = render(
+      <ToastStack notifications={firstNotifications} onDismiss={firstOnDismiss} />
+    );
+
+    vi.advanceTimersByTime(2000);
+
+    const recreatedNotifications: NotificationEntry[] = [
+      {
+        id: "upload-success",
+        tone: "success",
+        message: "Upload finished."
+      }
+    ];
+
+    rerender(<ToastStack notifications={recreatedNotifications} onDismiss={secondOnDismiss} />);
+
+    vi.advanceTimersByTime(1999);
+    expect(firstOnDismiss).not.toHaveBeenCalled();
+    expect(secondOnDismiss).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+    expect(firstOnDismiss).not.toHaveBeenCalled();
+    expect(secondOnDismiss).toHaveBeenCalledTimes(1);
+    expect(secondOnDismiss).toHaveBeenCalledWith("upload-success");
   });
 
   it("allows manual notification dismissal", async () => {
@@ -75,5 +118,30 @@ describe("feedback primitives", () => {
 
     expect(onDismiss).toHaveBeenCalledTimes(1);
     expect(onDismiss).toHaveBeenCalledWith("quota-warning");
+  });
+
+  it("renders ready content without requiring error details", () => {
+    render(
+      <FeedbackSurface
+        viewState="ready"
+        loadingLabel="Loading photos"
+        error={null}
+        onRetry={vi.fn()}
+        notifications={[
+          {
+            id: "ready-toast",
+            tone: "success",
+            message: "Ready state."
+          }
+        ]}
+        onDismissNotification={vi.fn()}
+      >
+        <p>Browse content</p>
+      </FeedbackSurface>
+    );
+
+    expect(screen.getByText("Browse content")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 2 })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Dismiss notification" })).toBeInTheDocument();
   });
 });

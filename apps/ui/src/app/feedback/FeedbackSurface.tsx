@@ -4,20 +4,20 @@ import { RouteLoadingState } from "./RouteLoadingState";
 import { ToastStack } from "./ToastStack";
 import type { FeedbackViewState, NotificationEntry, RouteErrorContent } from "./feedbackTypes";
 
-type FeedbackSurfaceProps = {
+interface FeedbackSurfaceProps {
   viewState: FeedbackViewState;
   loadingLabel: string;
-  errorContent: RouteErrorContent;
+  error: RouteErrorContent | null;
   onRetry: () => void;
   notifications: NotificationEntry[];
   onDismissNotification: (id: string) => void;
   children?: ReactNode;
-};
+}
 
 export function FeedbackSurface({
   viewState,
   loadingLabel,
-  errorContent,
+  error,
   onRetry,
   notifications,
   onDismissNotification,
@@ -27,8 +27,8 @@ export function FeedbackSurface({
 
   if (viewState === "loading") {
     content = <RouteLoadingState label={loadingLabel} />;
-  } else if (viewState === "error") {
-    content = <RouteErrorState content={errorContent} onRetry={onRetry} />;
+  } else if (viewState === "error" && error !== null) {
+    content = <RouteErrorState content={error} onRetry={onRetry} />;
   }
 
   return (
