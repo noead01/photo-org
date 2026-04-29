@@ -1,9 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router-dom";
 import { AppRouteTree } from "./AppRouter";
 import { PRIMARY_ROUTE_DEFINITIONS } from "../routes/routeDefinitions";
 import type { SessionIdentity } from "../session/sessionIdentity";
+import { PRIMARY_ROUTE_LOADING_LABELS } from "../pages/PrimaryRoutePage";
 
 const TEST_SESSION_IDENTITY: SessionIdentity = {
   userId: "test-operator",
@@ -22,19 +23,43 @@ function renderAtPath(path: string, sessionIdentity: SessionIdentity | null = TE
   );
 }
 
+function QueryParamBumpButton() {
+  const navigate = useNavigate();
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        navigate({
+          search: "?demoState=error&panel=secondary"
+        });
+      }}
+    >
+      Bump query
+    </button>
+  );
+}
+
+function renderAtPathWithQueryBump(
+  path: string,
+  sessionIdentity: SessionIdentity | null = TEST_SESSION_IDENTITY
+) {
+  return render(
+    <MemoryRouter
+      initialEntries={[path]}
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+    >
+      <QueryParamBumpButton />
+      <AppRouteTree initialSessionIdentity={sessionIdentity} />
+    </MemoryRouter>
+  );
+}
+
 function expectShellContextText(text: string) {
   const shellContext = document.querySelector(".shell-context");
   expect(shellContext).not.toBeNull();
   expect(shellContext).toHaveTextContent(text);
 }
-
-const ROUTE_LOADING_LABEL_BY_TITLE: Record<string, string> = {
-  Browse: "Loading browse workflow.",
-  Search: "Loading search workflow.",
-  Labeling: "Loading labeling workflow.",
-  Suggestions: "Loading suggestions workflow.",
-  Operations: "Loading operations workflow."
-};
 
 describe("App shell", () => {
   it.each(PRIMARY_ROUTE_DEFINITIONS)(
@@ -132,12 +157,10 @@ describe("App shell", () => {
 
   it.each(PRIMARY_ROUTE_DEFINITIONS)(
     "routes $title through shared loading feedback surface",
-    ({ path, title }) => {
+    ({ key, path }) => {
       renderAtPath(`${path}?demoState=loading`);
 
-      expect(screen.getByRole("status")).toHaveTextContent(
-        ROUTE_LOADING_LABEL_BY_TITLE[title]
-      );
+      expect(screen.getByRole("status")).toHaveTextContent(PRIMARY_ROUTE_LOADING_LABELS[key]);
       expect(screen.getByRole("banner")).toBeInTheDocument();
       expect(screen.getByRole("navigation", { name: "Primary" })).toBeInTheDocument();
     }
@@ -162,5 +185,19 @@ describe("App shell", () => {
 
     await user.click(screen.getByRole("button", { name: "Dismiss notification" }));
     expect(screen.queryByText("Browse is ready.")).not.toBeInTheDocument();
+  });
+
+  it("does not reset feedback state when unrelated query params change", async () => {
+    const user = userEvent.setup();
+    renderAtPathWithQueryBump("/browse?demoState=error&panel=primary");
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(screen.getByText("Browse is ready.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Bump query" }));
+
+    expect(screen.getByRole("heading", { name: "Browse", level: 1 })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(screen.getByText("Browse is ready.")).toBeInTheDocument();
   });
 });

@@ -12,7 +12,7 @@ interface PrimaryRoutePageProps {
   route: PrimaryRouteDefinition;
 }
 
-const LOADING_LABEL_BY_ROUTE_KEY: Record<PrimaryRouteDefinition["key"], string> = {
+export const PRIMARY_ROUTE_LOADING_LABELS: Record<PrimaryRouteDefinition["key"], string> = {
   browse: "Loading browse workflow.",
   search: "Loading search workflow.",
   labeling: "Loading labeling workflow.",
@@ -32,15 +32,16 @@ function resolveDemoViewState(search: string): FeedbackViewState {
 
 export function PrimaryRoutePage({ route }: PrimaryRoutePageProps) {
   const location = useLocation();
+  const demoViewState = resolveDemoViewState(location.search);
   const [viewState, setViewState] = useState<FeedbackViewState>(() =>
-    resolveDemoViewState(location.search)
+    demoViewState
   );
   const [notifications, setNotifications] = useState<NotificationEntry[]>([]);
 
   useEffect(() => {
-    setViewState(resolveDemoViewState(location.search));
+    setViewState(demoViewState);
     setNotifications([]);
-  }, [location.search, route.key]);
+  }, [demoViewState, route.key]);
 
   const error: RouteErrorContent = {
     title: `Could not load ${route.title}`,
@@ -65,7 +66,7 @@ export function PrimaryRoutePage({ route }: PrimaryRoutePageProps) {
   return (
     <FeedbackSurface
       viewState={viewState}
-      loadingLabel={LOADING_LABEL_BY_ROUTE_KEY[route.key]}
+      loadingLabel={PRIMARY_ROUTE_LOADING_LABELS[route.key]}
       error={error}
       onRetry={handleRetry}
       notifications={notifications}
