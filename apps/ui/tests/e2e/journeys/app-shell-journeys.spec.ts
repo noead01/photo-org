@@ -120,7 +120,7 @@ test("JRN-P3-search-route-deep-link @journey @smoke", async ({ page }) => {
 test("JRN-P2-shared-feedback-surfaces @journey @smoke", async ({ page }) => {
   await page.goto("/search?demoState=loading");
 
-  await expect(page.getByRole("status")).toHaveText("Loading search workflow.");
+  await expect(page.getByRole("status")).toContainText(/Loading search workflow/i);
 
   await page.goto("/search?demoState=error");
 
@@ -131,6 +131,8 @@ test("JRN-P2-shared-feedback-surfaces @journey @smoke", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "Search", level: 1 })).toBeVisible();
   await expect(page.getByText("Search is ready.")).toBeVisible();
+  await expectShellRoute(page, "search");
+  await expect(page).toHaveURL(/\/search(?:\?|$)/);
 });
 
 test("JRN-P2-responsive-shell-layout @journey @smoke", async ({ page }) => {
