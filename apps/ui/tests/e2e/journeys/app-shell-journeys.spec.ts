@@ -117,6 +117,22 @@ test("JRN-P3-search-route-deep-link @journey @smoke", async ({ page }) => {
   await expectShellRoute(page, "search");
 });
 
+test("JRN-P2-shared-feedback-surfaces @journey @smoke", async ({ page }) => {
+  await page.goto("/search?demoState=loading");
+
+  await expect(page.getByRole("status")).toHaveText("Loading search workflow.");
+
+  await page.goto("/search?demoState=error");
+
+  const retryButton = page.getByRole("button", { name: "Retry" });
+  await expect(retryButton).toBeVisible();
+
+  await retryButton.click();
+
+  await expect(page.getByRole("heading", { name: "Search", level: 1 })).toBeVisible();
+  await expect(page.getByText("Search is ready.")).toBeVisible();
+});
+
 test("JRN-P2-responsive-shell-layout @journey @smoke", async ({ page }) => {
   await page.goto("/search");
 
