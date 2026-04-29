@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FeedbackSurface } from "./FeedbackSurface";
@@ -6,8 +5,6 @@ import { RouteErrorState } from "./RouteErrorState";
 import { RouteLoadingState } from "./RouteLoadingState";
 import { ToastStack } from "./ToastStack";
 import type { NotificationEntry } from "./feedbackTypes";
-
-const appShellCss = readFileSync("src/styles/app-shell.css", "utf8");
 
 describe("feedback primitives", () => {
   afterEach(() => {
@@ -18,8 +15,10 @@ describe("feedback primitives", () => {
     render(<RouteLoadingState label="Loading photos" />);
 
     const loadingStatus = screen.getByRole("status");
+    const loadingPanel = loadingStatus.closest(".feedback-panel-loading");
     expect(loadingStatus).toHaveTextContent("Loading photos");
-    expect(appShellCss).toContain(".feedback-panel-loading");
+    expect(loadingPanel).toBeInTheDocument();
+    expect(loadingPanel).toHaveClass("feedback-panel");
   });
 
   it("renders route error content and retries once", async () => {

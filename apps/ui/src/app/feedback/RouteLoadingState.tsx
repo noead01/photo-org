@@ -3,5 +3,9 @@ interface RouteLoadingStateProps {
 }
 
 export function RouteLoadingState({ label }: RouteLoadingStateProps) {
-  return <p role="status">{label}</p>;
+  return (
+    <section className="feedback-panel feedback-panel-loading">
+      <p role="status">{label}</p>
+    </section>
+  );
 }
