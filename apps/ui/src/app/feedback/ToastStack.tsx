@@ -68,7 +68,7 @@ export function ToastStack({ notifications, onDismiss }: ToastStackProps) {
   }
 
   return (
-    <div aria-live="polite" aria-atomic="true">
+    <div className="toast-stack" aria-live="polite" aria-atomic="true">
       {notifications.map((notification) => (
         <article key={notification.id} className={`toast toast-${notification.tone}`}>
           <p>{notification.message}</p>

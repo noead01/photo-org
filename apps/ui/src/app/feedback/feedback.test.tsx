@@ -35,7 +35,12 @@ describe("feedback primitives", () => {
       />
     );
 
-    expect(screen.getByRole("heading", { name: "Could not load photos", level: 2 })).toBeInTheDocument();
+    const errorHeading = screen.getByRole("heading", { name: "Could not load photos", level: 2 });
+    const errorPanel = errorHeading.closest(".feedback-panel-error");
+    expect(errorPanel).toBeInTheDocument();
+    expect(errorPanel).toHaveClass("feedback-panel");
+    expect(errorPanel?.querySelector("h2")).toBe(errorHeading);
+    expect(errorHeading).toBeInTheDocument();
     expect(screen.getByText("Please try again.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Retry" }));
@@ -56,6 +61,8 @@ describe("feedback primitives", () => {
     ];
 
     render(<ToastStack notifications={notifications} onDismiss={onDismiss} />);
+    expect(screen.getByText("Upload finished.").closest(".toast-success")).toBeInTheDocument();
+    expect(screen.getByText("Upload finished.").closest(".toast")?.closest(".toast-stack")).toBeInTheDocument();
 
     vi.advanceTimersByTime(3999);
     expect(onDismiss).not.toHaveBeenCalled();
