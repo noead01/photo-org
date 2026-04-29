@@ -16,6 +16,7 @@ import {
 } from "../routes/routeDefinitions";
 import { PrimaryRoutePage } from "../pages/PrimaryRoutePage";
 import { BrowseRoutePage } from "../pages/BrowseRoutePage";
+import { PhotoDetailRoutePage } from "../pages/PhotoDetailRoutePage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import {
   resolveInitialSessionIdentity,
@@ -76,6 +77,7 @@ export function AppRouteTree({ initialSessionIdentity }: AppRouteTreeProps = {})
         }
       >
         <Route path="/" element={<Navigate to="/browse" replace />} />
+        <Route path="browse/:photoId" element={<PhotoDetailRoutePage />} />
         {PRIMARY_ROUTE_DEFINITIONS.map((route) => (
           <Route
             key={route.key}

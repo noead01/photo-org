@@ -296,6 +296,15 @@ body {
   color: #0f172a;
 }
 
+.browse-photo-link {
+  color: inherit;
+}
+
+.browse-photo-link:hover,
+.browse-photo-link:focus-visible {
+  color: #1d4ed8;
+}
+
 .browse-path {
   margin: 0;
   color: #475569;
@@ -327,6 +336,81 @@ body {
   font-size: 0.78rem;
   color: #0f172a;
   text-align: right;
+}
+
+.detail-page {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.detail-back-link {
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 0.45rem;
+  padding: 0.35rem 0.55rem;
+  text-decoration: none;
+}
+
+.detail-layout {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+}
+
+.detail-panel {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.7rem;
+  background: #ffffff;
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.detail-panel h2 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 1rem;
+}
+
+.detail-path {
+  margin: 0;
+  color: #475569;
+  font-size: 0.84rem;
+  overflow-wrap: anywhere;
+}
+
+.detail-panel dl {
+  margin: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.detail-panel dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.detail-panel dt {
+  color: #475569;
+  font-size: 0.8rem;
+}
+
+.detail-panel dd {
+  margin: 0;
+  color: #0f172a;
+  font-size: 0.82rem;
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 
 .feedback-panel {
