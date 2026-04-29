@@ -28,6 +28,14 @@ function expectShellContextText(text: string) {
   expect(shellContext).toHaveTextContent(text);
 }
 
+const ROUTE_LOADING_LABEL_BY_TITLE: Record<string, string> = {
+  Browse: "Loading browse workflow.",
+  Search: "Loading search workflow.",
+  Labeling: "Loading labeling workflow.",
+  Suggestions: "Loading suggestions workflow.",
+  Operations: "Loading operations workflow."
+};
+
 describe("App shell", () => {
   it.each(PRIMARY_ROUTE_DEFINITIONS)(
     "renders shared shell regions for $path",
@@ -120,5 +128,39 @@ describe("App shell", () => {
     expect(screen.getByRole("heading", { name: "Page Not Found", level: 1 })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Browse" })).toHaveAttribute("aria-current", "page");
     expectShellContextText("Browse");
+  });
+
+  it.each(PRIMARY_ROUTE_DEFINITIONS)(
+    "routes $title through shared loading feedback surface",
+    ({ path, title }) => {
+      renderAtPath(`${path}?demoState=loading`);
+
+      expect(screen.getByRole("status")).toHaveTextContent(
+        ROUTE_LOADING_LABEL_BY_TITLE[title]
+      );
+      expect(screen.getByRole("banner")).toBeInTheDocument();
+      expect(screen.getByRole("navigation", { name: "Primary" })).toBeInTheDocument();
+    }
+  );
+
+  it("transitions from route error to ready on retry", async () => {
+    const user = userEvent.setup();
+    renderAtPath("/browse?demoState=error");
+
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", {
+        name: "Could not load Browse",
+        level: 2
+      })
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(screen.getByRole("heading", { name: "Browse", level: 1 })).toBeInTheDocument();
+    expect(screen.getByText("Browse is ready.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Dismiss notification" }));
+    expect(screen.queryByText("Browse is ready.")).not.toBeInTheDocument();
   });
 });
