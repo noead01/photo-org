@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FeedbackSurface } from "./FeedbackSurface";
@@ -5,6 +6,8 @@ import { RouteErrorState } from "./RouteErrorState";
 import { RouteLoadingState } from "./RouteLoadingState";
 import { ToastStack } from "./ToastStack";
 import type { NotificationEntry } from "./feedbackTypes";
+
+const appShellCss = readFileSync("src/styles/app-shell.css", "utf8");
 
 describe("feedback primitives", () => {
   afterEach(() => {
@@ -14,7 +17,9 @@ describe("feedback primitives", () => {
   it("renders a route loading status label", () => {
     render(<RouteLoadingState label="Loading photos" />);
 
-    expect(screen.getByRole("status")).toHaveTextContent("Loading photos");
+    const loadingStatus = screen.getByRole("status");
+    expect(loadingStatus).toHaveTextContent("Loading photos");
+    expect(appShellCss).toContain(".feedback-panel-loading");
   });
 
   it("renders route error content and retries once", async () => {
@@ -113,6 +118,8 @@ describe("feedback primitives", () => {
     ];
 
     render(<ToastStack notifications={notifications} onDismiss={onDismiss} />);
+
+    expect(screen.getByText("Storage is almost full.").closest(".toast-warning")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Dismiss notification" }));
 
