@@ -15,6 +15,7 @@ import {
   type PrimaryRouteDefinition
 } from "../routes/routeDefinitions";
 import { PrimaryRoutePage } from "../pages/PrimaryRoutePage";
+import { BrowseRoutePage } from "../pages/BrowseRoutePage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import {
   resolveInitialSessionIdentity,
@@ -79,7 +80,13 @@ export function AppRouteTree({ initialSessionIdentity }: AppRouteTreeProps = {})
           <Route
             key={route.key}
             path={routePath(route)}
-            element={<PrimaryRoutePage route={route} />}
+            element={
+              route.key === "browse" ? (
+                <BrowseRoutePage />
+              ) : (
+                <PrimaryRoutePage route={route} />
+              )
+            }
           />
         ))}
         <Route path="*" element={<NotFoundPage />} />
