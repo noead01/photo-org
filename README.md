@@ -88,15 +88,14 @@ At a high level, setup should look like this:
 1. configure the application environment
 2. create an environment with `make env-create PHOTO_ORG_ENVIRONMENT=dev PHOTO_ORG_ENV_STORAGE_MODE=persistent`
 3. start it with `PHOTO_ORG_ENVIRONMENT=dev make compose-up`
-4. (optional) include the web UI service with `COMPOSE_PROFILES=ui PHOTO_ORG_ENVIRONMENT=dev make compose-up`
-5. confirm API base URL with `PHOTO_ORG_ENVIRONMENT=dev make print-compose-api-base-url`
-6. confirm UI base URL with `PHOTO_ORG_ENVIRONMENT=dev make print-compose-ui-base-url` when `COMPOSE_PROFILES=ui` is enabled
-7. rerun migrations with `PHOTO_ORG_ENVIRONMENT=dev make compose-migrate` if you need to repair its database
-8. open the web interface once the service is healthy
-9. sign in as an admin
-10. register one or more storage sources through the API at `POST /api/v1/storage-sources`
-11. add one or more watched folders under those sources
-12. let the system ingest the initial corpus
+4. confirm API base URL with `PHOTO_ORG_ENVIRONMENT=dev make print-compose-api-base-url`
+5. confirm UI base URL with `PHOTO_ORG_ENVIRONMENT=dev make print-compose-ui-base-url`
+6. rerun migrations with `PHOTO_ORG_ENVIRONMENT=dev make compose-migrate` if you need to repair its database
+7. open the web interface once the service is healthy
+8. sign in as an admin
+9. register one or more storage sources through the API at `POST /api/v1/storage-sources`
+10. add one or more watched folders under those sources
+11. let the system ingest the initial corpus
 
 Once that is done, users should be able to browse, search, and validate faces from the web UI.
 
@@ -104,8 +103,7 @@ For local operations:
 
 - `make env-create PHOTO_ORG_ENVIRONMENT=<name> PHOTO_ORG_ENV_STORAGE_MODE=persistent` registers a persistent environment with its own named Postgres volume
 - `make env-create PHOTO_ORG_ENVIRONMENT=<name> PHOTO_ORG_ENV_STORAGE_MODE=ephemeral` registers an ephemeral environment whose database lives only for the container lifecycle
-- `PHOTO_ORG_ENVIRONMENT=<name> make compose-up` starts the selected registered environment
-- `COMPOSE_PROFILES=ui PHOTO_ORG_ENVIRONMENT=<name> make compose-up` starts API + database + web UI together
+- `PHOTO_ORG_ENVIRONMENT=<name> make compose-up` starts the selected registered environment (API + database + web UI)
 - `PHOTO_ORG_ENVIRONMENT=<name> make compose-down` removes containers while preserving a persistent environment's named Postgres volume
 - `PHOTO_ORG_ENVIRONMENT=<name> make compose-down-volumes` removes containers and deletes a persistent environment's local Postgres volume
 - `PHOTO_ORG_ENVIRONMENT=<name> make compose-smoke` verifies the selected environment using its registered storage mode
@@ -116,7 +114,7 @@ For local operations:
 
 The default Compose file now bind-mounts `${PHOTO_ORG_PHOTO_LIBRARY_HOST_PATH}` into `${PHOTO_ORG_PHOTO_LIBRARY_CONTAINER_PATH}` for `db-service`, defaulting to `./seed-corpus` mounted at `/photos`. That runtime mount remains an internal deployment concern; watched-folder registration should stay relative to a registered source root.
 
-When the optional UI profile is enabled, the API allows cross-origin browser calls from the configured UI host origins through `PHOTO_ORG_API_CORS_ALLOWED_ORIGINS` (comma-separated origins).
+The API allows cross-origin browser calls from the configured UI host origins through `PHOTO_ORG_API_CORS_ALLOWED_ORIGINS` (comma-separated origins).
 
 ## Basic Usage
 

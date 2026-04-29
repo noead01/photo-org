@@ -38,7 +38,6 @@ services:
       - "${PHOTO_ORG_API_HOST_PORT:-8000}:8000"
 
   ui:
-    profiles: ["ui"]
     build:
       context: .
       dockerfile: apps/ui/Dockerfile

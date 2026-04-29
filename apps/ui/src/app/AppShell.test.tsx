@@ -62,6 +62,20 @@ function expectShellContextText(text: string) {
 }
 
 describe("App shell", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    fetchMock.mockImplementation(
+      () => new Promise<Response>(() => undefined)
+    );
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it.each(PRIMARY_ROUTE_DEFINITIONS)(
     "renders shared shell regions for $path",
     ({ path, title }) => {
@@ -168,36 +182,36 @@ describe("App shell", () => {
 
   it("transitions from route error to ready on retry", async () => {
     const user = userEvent.setup();
-    renderAtPath("/browse?demoState=error");
+    renderAtPath("/search?demoState=error");
 
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
     expect(
       screen.getByRole("heading", {
-        name: "Could not load Browse",
+        name: "Could not load Search",
         level: 2
       })
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Retry" }));
 
-    expect(screen.getByRole("heading", { name: "Browse", level: 1 })).toBeInTheDocument();
-    expect(screen.getByText("Browse is ready.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Search", level: 1 })).toBeInTheDocument();
+    expect(screen.getByText("Search is ready.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Dismiss notification" }));
-    expect(screen.queryByText("Browse is ready.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Search is ready.")).not.toBeInTheDocument();
   });
 
   it("does not reset feedback state when unrelated query params change", async () => {
     const user = userEvent.setup();
-    renderAtPathWithQueryBump("/browse?demoState=error&panel=primary");
+    renderAtPathWithQueryBump("/search?demoState=error&panel=primary");
 
     await user.click(screen.getByRole("button", { name: "Retry" }));
-    expect(screen.getByText("Browse is ready.")).toBeInTheDocument();
+    expect(screen.getByText("Search is ready.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Bump query" }));
 
-    expect(screen.getByRole("heading", { name: "Browse", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Search", level: 1 })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
-    expect(screen.getByText("Browse is ready.")).toBeInTheDocument();
+    expect(screen.getByText("Search is ready.")).toBeInTheDocument();
   });
 });

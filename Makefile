@@ -61,7 +61,7 @@ export PHOTO_ORG_COMPOSE_DATABASE_URL
 export PHOTO_ORG_UI_API_BASE_URL
 export PHOTO_ORG_API_CORS_ALLOWED_ORIGINS
 
-.PHONY: help sync lint test test-all test-e2e check pre-push migrate env-create compose-up compose-migrate compose-down compose-down-volumes compose-smoke compose-e2e-smoke print-compose-db-url print-compose-api-base-url print-compose-ui-base-url seed-corpus-check seed-corpus-load ensure-environment
+.PHONY: help sync lint test test-all ui-test ui-build test-e2e check pre-push migrate env-create compose-up compose-migrate compose-down compose-down-volumes compose-smoke compose-e2e-smoke print-compose-db-url print-compose-api-base-url print-compose-ui-base-url seed-corpus-check seed-corpus-load ensure-environment
 
 help:
 	@printf '%s\n' \
@@ -69,13 +69,14 @@ help:
 		'make lint      - run the currently enforced ruff checks for Phase 0 schema/tooling surfaces' \
 		'make test      - run the current schema/migration/ingest verification slice' \
 		'make test-all  - run the full apps/api pytest suite with the enforced coverage gate' \
+		'make ui-test   - run the apps/ui unit test suite' \
+		'make ui-build  - run the apps/ui production build' \
 		'make test-e2e  - run the seed-corpus end-to-end verification slice' \
 		'make check     - run lint and the focused test slice' \
-		'make pre-push  - run lint plus the full coverage-enforced test suite' \
+		'make pre-push  - run lint, full API tests, plus UI test and UI build checks' \
 		'make migrate   - apply database migrations through the repo-root wrapper' \
 		'make env-create PHOTO_ORG_ENVIRONMENT=<name> PHOTO_ORG_ENV_STORAGE_MODE=<persistent|ephemeral> - register a local environment with immutable storage mode' \
-		'make compose-up PHOTO_ORG_ENVIRONMENT=<name> - build and start the selected registered environment' \
-		'COMPOSE_PROFILES=ui make compose-up PHOTO_ORG_ENVIRONMENT=<name> - include the web UI service' \
+		'make compose-up PHOTO_ORG_ENVIRONMENT=<name> - build and start the selected registered environment (postgres + api + ui)' \
 		'make compose-migrate PHOTO_ORG_ENVIRONMENT=<name> - rerun database migrations for the selected environment' \
 		'make compose-down PHOTO_ORG_ENVIRONMENT=<name> - stop and remove the selected environment while preserving named volumes' \
 		'make compose-down-volumes PHOTO_ORG_ENVIRONMENT=<name> - stop and remove the selected environment plus named volumes' \
@@ -96,12 +97,18 @@ test:
 test-all:
 	$(PYTEST) apps/api/tests $(PYTEST_COV_ARGS)
 
+ui-test:
+	npm --prefix apps/ui run test
+
+ui-build:
+	npm --prefix apps/ui run build
+
 test-e2e:
 	PYTHONPATH=apps/api $(PYTEST) apps/e2e/tests -q
 
 check: lint test
 
-pre-push: lint test-all
+pre-push: lint test-all ui-test ui-build
 
 migrate:
 	./scripts/photo-org migrate

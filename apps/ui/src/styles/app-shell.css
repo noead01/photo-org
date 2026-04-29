@@ -185,6 +185,150 @@ body {
   color: #334155;
 }
 
+.browse-page {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.browse-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.browse-controls {
+  display: grid;
+  gap: 0.6rem;
+  justify-items: end;
+}
+
+.browse-sort-control {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: #1e293b;
+}
+
+.browse-sort-control select {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.45rem;
+  padding: 0.3rem 0.4rem;
+  background: #ffffff;
+  color: #0f172a;
+  font: inherit;
+}
+
+.browse-pagination {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.browse-pagination button {
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 0.45rem;
+  padding: 0.35rem 0.55rem;
+  font: inherit;
+}
+
+.browse-pagination button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.browse-page-indicator {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #1e293b;
+}
+
+.browse-summary {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #475569;
+}
+
+.browse-grid {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+}
+
+.browse-card {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.7rem;
+  background: #ffffff;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: 9rem 1fr;
+}
+
+.browse-thumbnail {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #e2e8f0;
+}
+
+.browse-thumbnail-placeholder {
+  display: grid;
+  place-items: center;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.browse-card-body {
+  padding: 0.65rem 0.75rem 0.8rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.browse-card-body h2 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #0f172a;
+}
+
+.browse-path {
+  margin: 0;
+  color: #475569;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.browse-card-body dl {
+  margin: 0;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.browse-card-body dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.browse-card-body dt {
+  font-size: 0.78rem;
+  color: #475569;
+}
+
+.browse-card-body dd {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #0f172a;
+  text-align: right;
+}
+
 .feedback-panel {
   border: 1px solid #cbd5e1;
   border-radius: 0.65rem;
@@ -302,5 +446,13 @@ body {
 
   .shell-content {
     padding: 0.95rem;
+  }
+
+  .browse-controls {
+    justify-items: start;
+  }
+
+  .browse-card {
+    grid-template-rows: 7.5rem 1fr;
   }
 }
