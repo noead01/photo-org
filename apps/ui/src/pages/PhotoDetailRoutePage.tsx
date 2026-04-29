@@ -50,6 +50,17 @@ type PhotoDetailPayload = {
 
 const MISSING_VALUE = "Not available";
 
+type MediaPresentationMode = "fit" | "actual";
+
+type FaceOverlayRegion = {
+  faceId: string;
+  personId: string | null;
+  leftPercent: number;
+  topPercent: number;
+  widthPercent: number;
+  heightPercent: number;
+};
+
 function formatTimestamp(value: string | null): string {
   if (!value) {
     return MISSING_VALUE;
@@ -93,6 +104,10 @@ function formatOptionalText(value: string | null): string {
   return value && value.trim().length > 0 ? value : MISSING_VALUE;
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
 async function fetchPhotoDetail(photoId: string): Promise<PhotoDetailPayload> {
   const response = await fetch(`/api/v1/photos/${photoId}`);
   if (!response.ok) {
@@ -107,6 +122,7 @@ export function PhotoDetailRoutePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [mediaMode, setMediaMode] = useState<MediaPresentationMode>("fit");
 
   useEffect(() => {
     if (!photoId) {
@@ -148,6 +164,66 @@ export function PhotoDetailRoutePage() {
     return count === 1 ? "1 detected" : `${count} detected`;
   }, [detail]);
 
+  const faceOverlayRegions = useMemo<FaceOverlayRegion[]>(() => {
+    if (!detail?.thumbnail || detail.thumbnail.width <= 0 || detail.thumbnail.height <= 0) {
+      return [];
+    }
+
+    const thumbnailWidth = detail.thumbnail.width;
+    const thumbnailHeight = detail.thumbnail.height;
+
+    return detail.faces
+      .map((face) => {
+        if (
+          face.bbox_x === null ||
+          face.bbox_y === null ||
+          face.bbox_w === null ||
+          face.bbox_h === null ||
+          face.bbox_w <= 0 ||
+          face.bbox_h <= 0
+        ) {
+          return null;
+        }
+
+        const left = clamp((face.bbox_x / thumbnailWidth) * 100, 0, 100);
+        const top = clamp((face.bbox_y / thumbnailHeight) * 100, 0, 100);
+        const right = clamp(((face.bbox_x + face.bbox_w) / thumbnailWidth) * 100, 0, 100);
+        const bottom = clamp(((face.bbox_y + face.bbox_h) / thumbnailHeight) * 100, 0, 100);
+        const width = right - left;
+        const height = bottom - top;
+
+        if (width <= 0 || height <= 0) {
+          return null;
+        }
+
+        return {
+          faceId: face.face_id,
+          personId: face.person_id,
+          leftPercent: left,
+          topPercent: top,
+          widthPercent: width,
+          heightPercent: height
+        };
+      })
+      .filter((region): region is FaceOverlayRegion => region !== null);
+  }, [detail]);
+
+  const faceRegionState = useMemo(() => {
+    if (!detail) {
+      return MISSING_VALUE;
+    }
+
+    if (detail.faces.length === 0) {
+      return "No face regions detected for this photo.";
+    }
+
+    if (faceOverlayRegions.length === 0) {
+      return "Face regions are present but could not be rendered on this preview.";
+    }
+
+    return `${faceOverlayRegions.length} face region${faceOverlayRegions.length === 1 ? "" : "s"} rendered.`;
+  }, [detail, faceOverlayRegions.length]);
+
   return (
     <section aria-labelledby="page-title" className="page detail-page">
       <div className="detail-header">
@@ -178,6 +254,66 @@ export function PhotoDetailRoutePage() {
 
       {!isLoading && !error && detail ? (
         <div className="detail-layout">
+          <article className="detail-panel">
+            <h2>Preview</h2>
+            {detail.thumbnail ? (
+              <>
+                <div className="detail-media-controls" role="group" aria-label="Preview display mode">
+                  <button
+                    type="button"
+                    className={mediaMode === "fit" ? "is-active" : undefined}
+                    onClick={() => setMediaMode("fit")}
+                  >
+                    Fit to panel
+                  </button>
+                  <button
+                    type="button"
+                    className={mediaMode === "actual" ? "is-active" : undefined}
+                    onClick={() => setMediaMode("actual")}
+                  >
+                    Actual pixels
+                  </button>
+                </div>
+                <div className="detail-media-frame" data-mode={mediaMode}>
+                  <div className="detail-media-stage">
+                    <img
+                      className="detail-media-image"
+                      src={`data:${detail.thumbnail.mime_type};base64,${detail.thumbnail.data_base64}`}
+                      width={detail.thumbnail.width}
+                      height={detail.thumbnail.height}
+                      alt={`Preview for ${detail.photo_id}`}
+                    />
+                    {faceOverlayRegions.length > 0 ? (
+                      <ol className="detail-face-overlay-list" aria-label="Detected face regions">
+                        {faceOverlayRegions.map((region, index) => (
+                          <li
+                            key={region.faceId}
+                            className="detail-face-overlay"
+                            aria-label={`Face region ${index + 1}${region.personId ? ` for ${region.personId}` : ""}`}
+                            style={{
+                              left: `${region.leftPercent}%`,
+                              top: `${region.topPercent}%`,
+                              width: `${region.widthPercent}%`,
+                              height: `${region.heightPercent}%`
+                            }}
+                          />
+                        ))}
+                      </ol>
+                    ) : null}
+                  </div>
+                </div>
+                <p className="detail-face-state">{faceRegionState}</p>
+              </>
+            ) : (
+              <>
+                <div className="browse-thumbnail browse-thumbnail-placeholder" aria-hidden="true">
+                  No preview
+                </div>
+                <p className="detail-face-state">{faceRegionState}</p>
+              </>
+            )}
+          </article>
+
           <article className="detail-panel">
             <h2>{detail.photo_id}</h2>
             <p className="detail-path">{detail.path}</p>

@@ -71,7 +71,12 @@ function buildPayload(partial: Partial<PhotoDetailPayload> = {}): PhotoDetailPay
         bbox_h: 40
       }
     ],
-    thumbnail: null,
+    thumbnail: {
+      mime_type: "image/jpeg",
+      width: 100,
+      height: 100,
+      data_base64: "dGh1bWI="
+    },
     original: {
       is_available: true,
       availability_state: "active",
@@ -137,6 +142,9 @@ describe("PhotoDetailRoutePage", () => {
     expect(screen.getByText("exif:DateTimeOriginal")).toBeInTheDocument();
     expect(screen.getByText("12.3456, -45.6789")).toBeInTheDocument();
     expect(screen.getByText("1 detected")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Preview for photo-1" })).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Detected face regions" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Face region 1 for person-1")).toBeInTheDocument();
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/v1/photos/photo-1");
@@ -174,6 +182,44 @@ describe("PhotoDetailRoutePage", () => {
     expect(screen.getByText("No tags")).toBeInTheDocument();
     expect(screen.getByText("No recognized people")).toBeInTheDocument();
     expect(screen.getByText("Unknown availability")).toBeInTheDocument();
+  });
+
+  it("shows explicit no-face state when no face regions are present", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () =>
+        buildPayload({
+          faces: [],
+          people: [],
+          metadata: {
+            ...buildPayload().metadata,
+            faces_count: 0
+          }
+        })
+    } as Response);
+
+    renderDetail();
+
+    expect(await screen.findByText("No face regions detected for this photo.")).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Detected face regions" })).not.toBeInTheDocument();
+  });
+
+  it("keeps face overlays coherent when switching image presentation mode", async () => {
+    const user = userEvent.setup();
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => buildPayload()
+    } as Response);
+
+    renderDetail();
+
+    expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
+    expect(screen.getByLabelText("Face region 1 for person-1")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Actual pixels" }));
+
+    expect(screen.getByLabelText("Face region 1 for person-1")).toBeInTheDocument();
   });
 
   it("renders deterministic loading and error transitions", async () => {
