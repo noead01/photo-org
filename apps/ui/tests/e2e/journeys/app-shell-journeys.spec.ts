@@ -118,21 +118,21 @@ test("JRN-P3-search-route-deep-link @journey @smoke", async ({ page }) => {
 });
 
 test("JRN-P2-shared-feedback-surfaces @journey @smoke", async ({ page }) => {
-  await page.goto("/search?demoState=loading");
+  await page.goto("/labeling?demoState=loading");
 
-  await expect(page.getByRole("status")).toContainText(/Loading search workflow/i);
+  await expect(page.getByRole("status")).toContainText(/Loading labeling workflow/i);
 
-  await page.goto("/search?demoState=error");
+  await page.goto("/labeling?demoState=error");
 
   const retryButton = page.getByRole("button", { name: "Retry" });
   await expect(retryButton).toBeVisible();
 
   await retryButton.click();
 
-  await expect(page.getByRole("heading", { name: "Search", level: 1 })).toBeVisible();
-  await expect(page.getByText("Search is ready.")).toBeVisible();
-  await expectShellRoute(page, "search");
-  await expect(page).toHaveURL(/\/search(?:\?|$)/);
+  await expect(page.getByRole("heading", { name: "Labeling", level: 1 })).toBeVisible();
+  await expect(page.getByText("Labeling is ready.")).toBeVisible();
+  await expectShellRoute(page, "labeling");
+  await expect(page).toHaveURL(/\/labeling(?:\?|$)/);
 });
 
 test("JRN-P2-responsive-shell-layout @journey @smoke", async ({ page }) => {
