@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { deriveIngestStatus, INGEST_STATUS_LEGEND } from "../app/ingestStatus";
 
 type PhotoDetailPayload = {
   photo_id: string;
@@ -224,6 +225,20 @@ export function PhotoDetailRoutePage() {
     return `${faceOverlayRegions.length} face region${faceOverlayRegions.length === 1 ? "" : "s"} rendered.`;
   }, [detail, faceOverlayRegions.length]);
 
+  const ingestStatus = useMemo(() => {
+    if (!detail) {
+      return null;
+    }
+    return deriveIngestStatus({
+      availabilityState: detail.original?.availability_state ?? null,
+      isAvailable: detail.original?.is_available ?? null,
+      lastFailureReason: detail.original?.last_failure_reason ?? null,
+      hasThumbnail: Boolean(detail.thumbnail),
+      includeFaceDetection: true,
+      facesDetectedTs: detail.metadata.faces_detected_ts
+    });
+  }, [detail]);
+
   return (
     <section aria-labelledby="page-title" className="page detail-page">
       <div className="detail-header">
@@ -235,6 +250,17 @@ export function PhotoDetailRoutePage() {
           Back to browse
         </Link>
       </div>
+      <section className="status-legend" aria-label="Ingest status legend">
+        <h2>Ingest status legend</h2>
+        <ul>
+          {INGEST_STATUS_LEGEND.map((entry) => (
+            <li key={entry.tone}>
+              <span className={`ingest-status-badge is-${entry.tone}`}>{entry.label}</span>
+              <span>{entry.description}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
 
       {isLoading ? (
         <div className="feedback-panel feedback-panel-loading" role="status" aria-live="polite">
@@ -338,7 +364,18 @@ export function PhotoDetailRoutePage() {
                 <dt>Availability</dt>
                 <dd>{detail.original?.availability_state ?? "Unknown availability"}</dd>
               </div>
+              <div>
+                <dt>Ingest status</dt>
+                <dd>
+                  {ingestStatus ? (
+                    <span className={`ingest-status-badge is-${ingestStatus.tone}`}>{ingestStatus.label}</span>
+                  ) : (
+                    "Unknown"
+                  )}
+                </dd>
+              </div>
             </dl>
+            {ingestStatus ? <p className="detail-ingest-status-detail">{ingestStatus.description}</p> : null}
           </article>
 
           <article className="detail-panel">

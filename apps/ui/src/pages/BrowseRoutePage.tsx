@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import type { NotificationEntry } from "../app/feedback/feedbackTypes";
 import { ToastStack } from "../app/feedback/ToastStack";
+import { deriveIngestStatus, INGEST_STATUS_LEGEND } from "../app/ingestStatus";
 
 type SortDirection = "asc" | "desc";
 
@@ -275,6 +276,17 @@ export function BrowseRoutePage() {
       </div>
 
       <p className="browse-summary" aria-live="polite">{summaryLabel}</p>
+      <section className="status-legend" aria-label="Ingest status legend">
+        <h2>Ingest status legend</h2>
+        <ul>
+          {INGEST_STATUS_LEGEND.map((entry) => (
+            <li key={entry.tone}>
+              <span className={`ingest-status-badge is-${entry.tone}`}>{entry.label}</span>
+              <span>{entry.description}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
 
       {error ? (
         <div className="feedback-panel feedback-panel-error">
@@ -300,8 +312,20 @@ export function BrowseRoutePage() {
 
       {!error && !isLoading && photos.length > 0 ? (
         <ol className="browse-grid" aria-label="Photo gallery">
-          {photos.map((photo) => (
-            <li key={photo.photo_id} className="browse-card">
+          {photos.map((photo) => {
+            const ingestStatus = deriveIngestStatus({
+              availabilityState: photo.original?.availability_state ?? null,
+              isAvailable: photo.original?.is_available ?? null,
+              lastFailureReason: photo.original?.last_failure_reason ?? null,
+              hasThumbnail: Boolean(photo.thumbnail)
+            });
+
+            return (
+              <li key={photo.photo_id} className="browse-card">
+                <p className="browse-ingest-status">
+                  <span className={`ingest-status-badge is-${ingestStatus.tone}`}>{ingestStatus.label}</span>
+                  <span className="browse-ingest-status-detail">{ingestStatus.description}</span>
+                </p>
               {photo.thumbnail ? (
                 <img
                   className="browse-thumbnail"
@@ -342,8 +366,9 @@ export function BrowseRoutePage() {
                   </div>
                 </dl>
               </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ol>
       ) : null}
 
