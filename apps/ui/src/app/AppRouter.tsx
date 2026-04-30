@@ -16,6 +16,7 @@ import {
 } from "../routes/routeDefinitions";
 import { PrimaryRoutePage } from "../pages/PrimaryRoutePage";
 import { BrowseRoutePage } from "../pages/BrowseRoutePage";
+import { SearchRoutePage } from "../pages/SearchRoutePage";
 import { PhotoDetailRoutePage } from "../pages/PhotoDetailRoutePage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import {
@@ -85,6 +86,8 @@ export function AppRouteTree({ initialSessionIdentity }: AppRouteTreeProps = {})
             element={
               route.key === "browse" ? (
                 <BrowseRoutePage />
+              ) : route.key === "search" ? (
+                <SearchRoutePage />
               ) : (
                 <PrimaryRoutePage route={route} />
               )

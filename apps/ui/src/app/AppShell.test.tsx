@@ -61,6 +61,10 @@ function expectShellContextText(text: string) {
   expect(shellContext).toHaveTextContent(text);
 }
 
+const ROUTES_WITH_PRIMARY_PAGE_FEEDBACK = PRIMARY_ROUTE_DEFINITIONS.filter(
+  (route) => route.key !== "search"
+);
+
 describe("App shell", () => {
   const fetchMock = vi.fn();
 
@@ -169,7 +173,7 @@ describe("App shell", () => {
     expectShellContextText("Browse");
   });
 
-  it.each(PRIMARY_ROUTE_DEFINITIONS)(
+  it.each(ROUTES_WITH_PRIMARY_PAGE_FEEDBACK)(
     "routes $title through shared loading feedback surface",
     ({ key, path }) => {
       renderAtPath(`${path}?demoState=loading`);
@@ -180,38 +184,51 @@ describe("App shell", () => {
     }
   );
 
-  it("transitions from route error to ready on retry", async () => {
+  it("transitions from route error to ready on retry for primary-placeholder routes", async () => {
     const user = userEvent.setup();
-    renderAtPath("/search?demoState=error");
+    renderAtPath("/labeling?demoState=error");
 
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
     expect(
       screen.getByRole("heading", {
-        name: "Could not load Search",
+        name: "Could not load Labeling",
         level: 2
       })
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Retry" }));
 
-    expect(screen.getByRole("heading", { name: "Search", level: 1 })).toBeInTheDocument();
-    expect(screen.getByText("Search is ready.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Labeling", level: 1 })).toBeInTheDocument();
+    expect(screen.getByText("Labeling is ready.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Dismiss notification" }));
-    expect(screen.queryByText("Search is ready.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Labeling is ready.")).not.toBeInTheDocument();
   });
 
   it("does not reset feedback state when unrelated query params change", async () => {
     const user = userEvent.setup();
-    renderAtPathWithQueryBump("/search?demoState=error&panel=primary");
+    renderAtPathWithQueryBump("/labeling?demoState=error&panel=primary");
 
     await user.click(screen.getByRole("button", { name: "Retry" }));
-    expect(screen.getByText("Search is ready.")).toBeInTheDocument();
+    expect(screen.getByText("Labeling is ready.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Bump query" }));
 
-    expect(screen.getByRole("heading", { name: "Search", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Labeling", level: 1 })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
-    expect(screen.getByText("Search is ready.")).toBeInTheDocument();
+    expect(screen.getByText("Labeling is ready.")).toBeInTheDocument();
+  });
+
+  it("renders search query controls on the /search route", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ hits: { total: 0, cursor: null, items: [] }, facets: {} })
+    } as Response);
+
+    renderAtPath("/search");
+
+    expect(await screen.findByRole("heading", { name: "Search", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Search query" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Search" })).toBeInTheDocument();
   });
 });
