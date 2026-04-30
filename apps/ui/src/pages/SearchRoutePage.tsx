@@ -1,5 +1,13 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { LocationRadiusPicker } from "./search/LocationRadiusPicker";
+import { FacetFilterPanel } from "./search/FacetFilterPanel";
+import {
+  normalizePathHintFilters,
+  parseHasFacesFacetCounts,
+  toPathHintFacetCounts,
+  type FacetCountEntry,
+  type SearchFacetPayload
+} from "./search/facetFilters";
 import {
   buildLocationRadiusFilter,
   formatLocationChipLabel,
@@ -22,6 +30,7 @@ type SearchResponsePayload = {
     cursor: string | null;
     items: SearchPhoto[];
   };
+  facets?: SearchFacetPayload;
 };
 
 type PersonRecord = {
@@ -87,24 +96,31 @@ function buildSearchFilters(
   fromDate: string,
   toDate: string,
   selectedPersonNames: string[],
-  locationRadius: { latitude: number; longitude: number; radius_km: number } | null
+  locationRadius: { latitude: number; longitude: number; radius_km: number } | null,
+  hasFaces: boolean | null,
+  pathHints: string[]
 ): {
   date?: { from?: string; to?: string };
   person_names?: string[];
   location_radius?: { latitude: number; longitude: number; radius_km: number };
+  has_faces?: boolean;
+  path_hints?: string[];
 } | null {
   const dateFilter = buildDateFilter(fromDate, toDate);
   const personNameFilter = selectedPersonNames.length > 0 ? selectedPersonNames : null;
   const locationFilter = locationRadius;
+  const pathHintFilter = pathHints.length > 0 ? pathHints : null;
 
-  if (!dateFilter && !personNameFilter && !locationFilter) {
+  if (!dateFilter && !personNameFilter && !locationFilter && hasFaces === null && !pathHintFilter) {
     return null;
   }
 
   return {
     ...(dateFilter ? { date: dateFilter } : {}),
     ...(personNameFilter ? { person_names: personNameFilter } : {}),
-    ...(locationFilter ? { location_radius: locationFilter } : {})
+    ...(locationFilter ? { location_radius: locationFilter } : {}),
+    ...(hasFaces === null ? {} : { has_faces: hasFaces }),
+    ...(pathHintFilter ? { path_hints: pathHintFilter } : {})
   };
 }
 
@@ -113,9 +129,18 @@ async function fetchSearchResults(
   fromDate: string,
   toDate: string,
   selectedPersonNames: string[],
-  locationRadius: { latitude: number; longitude: number; radius_km: number } | null
+  locationRadius: { latitude: number; longitude: number; radius_km: number } | null,
+  hasFaces: boolean | null,
+  pathHints: string[]
 ): Promise<SearchResponsePayload> {
-  const searchFilters = buildSearchFilters(fromDate, toDate, selectedPersonNames, locationRadius);
+  const searchFilters = buildSearchFilters(
+    fromDate,
+    toDate,
+    selectedPersonNames,
+    locationRadius,
+    hasFaces,
+    pathHints
+  );
   const response = await fetch("/api/v1/search", {
     method: "POST",
     headers: {
@@ -149,6 +174,13 @@ export function SearchRoutePage() {
   const [peopleDirectory, setPeopleDirectory] = useState<PersonRecord[]>([]);
   const [personMessage, setPersonMessage] = useState<string | null>(null);
   const [mapMessage, setMapMessage] = useState<string | null>(null);
+  const [hasFacesFilter, setHasFacesFilter] = useState<boolean | null>(null);
+  const [pathHintFilters, setPathHintFilters] = useState<string[]>([]);
+  const [facetHasFacesCounts, setFacetHasFacesCounts] = useState<{ true: number; false: number }>({
+    true: 0,
+    false: 0
+  });
+  const [facetPathHintCounts, setFacetPathHintCounts] = useState<FacetCountEntry[]>([]);
   const [results, setResults] = useState<SearchPhoto[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -169,6 +201,8 @@ export function SearchRoutePage() {
   const hasActiveDateFilter = Boolean(fromDate || toDate);
   const hasActivePersonFilter = selectedPersonNames.length > 0;
   const hasActiveLocationFilter = Boolean(locationRadiusFilter);
+  const hasActiveHasFacesFilter = hasFacesFilter !== null;
+  const hasActivePathHintFilter = pathHintFilters.length > 0;
   const matchingPeople = useMemo(() => {
     const trimmed = personDraft.trim();
     if (!trimmed) {
@@ -214,7 +248,9 @@ export function SearchRoutePage() {
     activeFromDate: string,
     activeToDate: string,
     activePersonNames: string[],
-    activeLocationRadius: { latitude: number; longitude: number; radius_km: number } | null
+    activeLocationRadius: { latitude: number; longitude: number; radius_km: number } | null,
+    activeHasFaces: boolean | null,
+    activePathHints: string[]
   ) {
     if (validateDateRange(activeFromDate, activeToDate)) {
       return;
@@ -230,10 +266,14 @@ export function SearchRoutePage() {
         activeFromDate,
         activeToDate,
         activePersonNames,
-        activeLocationRadius
+        activeLocationRadius,
+        activeHasFaces,
+        activePathHints
       );
       setResults(payload.hits.items);
       setTotalCount(payload.hits.total);
+      setFacetHasFacesCounts(parseHasFacesFacetCounts(payload.facets));
+      setFacetPathHintCounts(toPathHintFacetCounts(payload.facets, activePathHints));
     } catch (caughtError: unknown) {
       const message =
         caughtError instanceof Error
@@ -242,9 +282,36 @@ export function SearchRoutePage() {
       setError(message);
       setResults([]);
       setTotalCount(0);
+      setFacetHasFacesCounts({ true: 0, false: 0 });
+      setFacetPathHintCounts(
+        activePathHints.map((value) => ({
+          value,
+          count: 0
+        }))
+      );
     } finally {
       setIsLoading(false);
     }
+  }
+
+  function requestSearch(overrides: {
+    chips?: string[];
+    fromDate?: string;
+    toDate?: string;
+    personNames?: string[];
+    locationRadius?: { latitude: number; longitude: number; radius_km: number } | null;
+    hasFaces?: boolean | null;
+    pathHints?: string[];
+  } = {}) {
+    void runSearch(
+      overrides.chips ?? queryChips,
+      overrides.fromDate ?? fromDate,
+      overrides.toDate ?? toDate,
+      overrides.personNames ?? selectedPersonNames,
+      overrides.locationRadius === undefined ? locationRadiusFilter : overrides.locationRadius,
+      overrides.hasFaces === undefined ? hasFacesFilter : overrides.hasFaces,
+      overrides.pathHints ?? pathHintFilters
+    );
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -255,7 +322,14 @@ export function SearchRoutePage() {
     }
 
     const trimmed = draftQuery.trim();
-    if (!trimmed && !hasActiveDateFilter && !hasActivePersonFilter && !hasActiveLocationFilter) {
+    if (
+      !trimmed &&
+      !hasActiveDateFilter &&
+      !hasActivePersonFilter &&
+      !hasActiveLocationFilter &&
+      !hasActiveHasFacesFilter &&
+      !hasActivePathHintFilter
+    ) {
       return;
     }
 
@@ -265,23 +339,23 @@ export function SearchRoutePage() {
       setDraftQuery("");
     }
 
-    void runSearch(nextChips, fromDate, toDate, selectedPersonNames, locationRadiusFilter);
+    requestSearch({ chips: nextChips });
   }
 
   function handleDismissChip(indexToRemove: number) {
     const nextChips = queryChips.filter((_, index) => index !== indexToRemove);
     setQueryChips(nextChips);
-    void runSearch(nextChips, fromDate, toDate, selectedPersonNames, locationRadiusFilter);
+    requestSearch({ chips: nextChips });
   }
 
   function handleClearFromDate() {
     setFromDate("");
-    void runSearch(queryChips, "", toDate, selectedPersonNames, locationRadiusFilter);
+    requestSearch({ fromDate: "" });
   }
 
   function handleClearToDate() {
     setToDate("");
-    void runSearch(queryChips, fromDate, "", selectedPersonNames, locationRadiusFilter);
+    requestSearch({ toDate: "" });
   }
 
   function handleAddPersonByName(displayName: string) {
@@ -319,7 +393,7 @@ export function SearchRoutePage() {
     const nextNames = selectedPersonNames.filter((name) => name !== displayName);
     setSelectedPersonNames(nextNames);
     setPersonMessage(null);
-    void runSearch(queryChips, fromDate, toDate, nextNames, locationRadiusFilter);
+    requestSearch({ personNames: nextNames });
   }
 
   function handleMapLocationChange(location: LocationRadiusValue) {
@@ -333,11 +407,54 @@ export function SearchRoutePage() {
     setLatitudeDraft("");
     setLongitudeDraft("");
     setRadiusDraft("");
-    void runSearch(queryChips, fromDate, toDate, selectedPersonNames, null);
+    requestSearch({ locationRadius: null });
+  }
+
+  function handleToggleHasFacesFilter(nextValue: boolean) {
+    const resolvedValue = hasFacesFilter === nextValue ? null : nextValue;
+    setHasFacesFilter(resolvedValue);
+    requestSearch({ hasFaces: resolvedValue });
+  }
+
+  function handleClearHasFacesFilter() {
+    if (hasFacesFilter === null) {
+      return;
+    }
+
+    setHasFacesFilter(null);
+    requestSearch({ hasFaces: null });
+  }
+
+  function handleTogglePathHintFilter(pathHint: string) {
+    const nextHints = pathHintFilters.includes(pathHint)
+      ? pathHintFilters.filter((hint) => hint !== pathHint)
+      : normalizePathHintFilters([...pathHintFilters, pathHint]);
+
+    setPathHintFilters(nextHints);
+    requestSearch({ pathHints: nextHints });
+  }
+
+  function handleClearPathHintFilter(pathHint: string) {
+    const nextHints = pathHintFilters.filter((hint) => hint !== pathHint);
+    if (nextHints.length === pathHintFilters.length) {
+      return;
+    }
+
+    setPathHintFilters(nextHints);
+    requestSearch({ pathHints: nextHints });
+  }
+
+  function handleClearAllPathHints() {
+    if (pathHintFilters.length === 0) {
+      return;
+    }
+
+    setPathHintFilters([]);
+    requestSearch({ pathHints: [] });
   }
 
   function handleRetry() {
-    void runSearch(queryChips, fromDate, toDate, selectedPersonNames, locationRadiusFilter);
+    requestSearch();
   }
 
   const summaryLabel = useMemo(() => {
@@ -453,6 +570,16 @@ export function SearchRoutePage() {
             onMapError={setMapMessage}
           />
         </div>
+        <FacetFilterPanel
+          hasFacesFilter={hasFacesFilter}
+          pathHintFilters={pathHintFilters}
+          hasFacesCounts={facetHasFacesCounts}
+          pathHintCounts={facetPathHintCounts}
+          onToggleHasFaces={handleToggleHasFacesFilter}
+          onClearHasFaces={handleClearHasFacesFilter}
+          onTogglePathHint={handleTogglePathHintFilter}
+          onClearAllPathHints={handleClearAllPathHints}
+        />
         {dateRangeError ? (
           <p id="search-date-validation" className="search-validation-message" role="alert">
             {dateRangeError}
@@ -490,7 +617,12 @@ export function SearchRoutePage() {
         ) : null}
       </form>
 
-      {queryChips.length > 0 || hasActiveDateFilter || hasActivePersonFilter || hasActiveLocationFilter ? (
+      {queryChips.length > 0 ||
+      hasActiveDateFilter ||
+      hasActivePersonFilter ||
+      hasActiveLocationFilter ||
+      hasActiveHasFacesFilter ||
+      hasActivePathHintFilter ? (
         <ul className="search-chip-list" aria-label="Active search filters">
           {locationRadiusFilter ? (
             <li>
@@ -522,6 +654,32 @@ export function SearchRoutePage() {
                 onClick={() => handleRemovePersonFilter(displayName)}
               >
                 person: {displayName}
+                <span aria-hidden="true"> ×</span>
+              </button>
+            </li>
+          ))}
+          {hasFacesFilter !== null ? (
+            <li>
+              <button
+                type="button"
+                className="search-chip"
+                aria-label={`Remove has faces filter ${hasFacesFilter ? "with faces" : "without faces"}`}
+                onClick={handleClearHasFacesFilter}
+              >
+                has faces: {hasFacesFilter ? "yes" : "no"}
+                <span aria-hidden="true"> ×</span>
+              </button>
+            </li>
+          ) : null}
+          {pathHintFilters.map((pathHint) => (
+            <li key={pathHint}>
+              <button
+                type="button"
+                className="search-chip"
+                aria-label={`Remove path hint ${pathHint}`}
+                onClick={() => handleClearPathHintFilter(pathHint)}
+              >
+                path hint: {pathHint}
                 <span aria-hidden="true"> ×</span>
               </button>
             </li>
@@ -616,6 +774,10 @@ export function SearchRoutePage() {
         {locationRadiusFilter
           ? `${locationRadiusFilter.latitude.toFixed(4)}, ${locationRadiusFilter.longitude.toFixed(4)} (${locationRadiusFilter.radius_km.toFixed(1)} km)`
           : "(none)"}
+        {" | Has faces: "}
+        {hasFacesFilter === null ? "(none)" : hasFacesFilter ? "true" : "false"}
+        {" | Path hints: "}
+        {pathHintFilters.length > 0 ? pathHintFilters.join(", ") : "(none)"}
       </p>
     </section>
   );
