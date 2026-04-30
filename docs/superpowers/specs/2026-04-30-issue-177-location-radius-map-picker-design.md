@@ -116,11 +116,13 @@ On submit, include location filter only when active:
 - Add dependencies:
   - `leaflet` in `apps/ui/package.json`
   - `@types/leaflet` in `apps/ui/package.json` dev dependencies
-- Extend `apps/ui/src/pages/SearchRoutePage.tsx`:
-  - add location draft and parsed state
-  - add location validation helper(s)
-  - extend `buildSearchFilters(...)` and request builder for `location_radius`
-  - integrate a small map/editor subcomponent colocated in this file for issue scope
+- Keep `apps/ui/src/pages/SearchRoutePage.tsx` focused on route orchestration only (submit flow, high-level state wiring).
+- Extract location-specific logic into SRP-aligned modules so this story does not bloat one TSX file:
+  - `apps/ui/src/pages/search/locationFilter.ts` for location parsing, validation, chip label formatting, and payload-shape helpers
+  - `apps/ui/src/pages/search/LocationRadiusPicker.tsx` for Leaflet map + circle/handle interaction UI
+  - `apps/ui/src/pages/search/types.ts` (or equivalent) for local filter/state types when needed
+- Update `SearchRoutePage.tsx` to compose these modules instead of accumulating map math/validation/event code inline.
+- Extend `buildSearchFilters(...)` and request builder to include `location_radius` via extracted helper(s).
 - Extend `apps/ui/src/styles/app-shell.css` with location panel/map/handle styling and responsive behavior.
 
 ## Accessibility And Failure Handling
