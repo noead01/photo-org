@@ -18,7 +18,12 @@ interface SearchResponsePayload {
       tags: string[];
       people: string[];
       faces: Array<{ person_id: string | null }>;
-      thumbnail: null;
+      thumbnail: {
+        mime_type: string;
+        width: number;
+        height: number;
+        data_base64: string;
+      } | null;
       original: {
         is_available: boolean;
         availability_state: string;
@@ -189,5 +194,63 @@ describe("BrowseRoutePage", () => {
 
     expect(screen.getByText("Reset to page 1 because that page position is unavailable.")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders ingest status badges and legend entries", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        hits: {
+          total: 3,
+          cursor: null,
+          items: [
+            {
+              ...buildPayload(["photo-complete"], null).hits.items[0],
+              photo_id: "photo-complete",
+              thumbnail: {
+                mime_type: "image/jpeg",
+                width: 10,
+                height: 10,
+                data_base64: "dGh1bWI="
+              },
+              original: {
+                is_available: true,
+                availability_state: "active",
+                last_failure_reason: null
+              }
+            },
+            {
+              ...buildPayload(["photo-pending"], null).hits.items[0],
+              photo_id: "photo-pending",
+              thumbnail: null,
+              original: {
+                is_available: true,
+                availability_state: "active",
+                last_failure_reason: null
+              }
+            },
+            {
+              ...buildPayload(["photo-unknown"], null).hits.items[0],
+              photo_id: "photo-unknown",
+              thumbnail: null,
+              original: {
+                is_available: true,
+                availability_state: "mystery",
+                last_failure_reason: null
+              }
+            }
+          ]
+        },
+        facets: {}
+      })
+    } as Response);
+
+    renderBrowseAt("/browse");
+
+    expect(await screen.findByText("photo-complete")).toBeInTheDocument();
+    expect(screen.getByText("Ingest status legend")).toBeInTheDocument();
+    expect(screen.getAllByText("Complete").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Pending").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Unknown").length).toBeGreaterThan(0);
   });
 });

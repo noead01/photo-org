@@ -182,6 +182,7 @@ describe("PhotoDetailRoutePage", () => {
     expect(screen.getByText("No tags")).toBeInTheDocument();
     expect(screen.getByText("No recognized people")).toBeInTheDocument();
     expect(screen.getByText("Unknown availability")).toBeInTheDocument();
+    expect(screen.getAllByText("Unknown").length).toBeGreaterThan(0);
   });
 
   it("shows explicit no-face state when no face regions are present", async () => {
@@ -257,5 +258,29 @@ describe("PhotoDetailRoutePage", () => {
       expect(screen.getByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("renders pending ingest status when face detection is still in progress", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () =>
+        buildPayload({
+          original: {
+            is_available: true,
+            availability_state: "active",
+            last_failure_reason: null
+          },
+          metadata: {
+            ...buildPayload().metadata,
+            faces_detected_ts: null
+          }
+        })
+    } as Response);
+
+    renderDetail();
+
+    expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
+    expect(screen.getByText("Ingest status legend")).toBeInTheDocument();
+    expect(screen.getAllByText("Pending").length).toBeGreaterThan(0);
   });
 });

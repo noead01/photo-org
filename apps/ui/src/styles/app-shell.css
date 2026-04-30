@@ -252,6 +252,37 @@ body {
   color: #475569;
 }
 
+.status-legend {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.65rem;
+  background: #ffffff;
+  padding: 0.7rem 0.8rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.status-legend h2 {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #0f172a;
+}
+
+.status-legend ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.status-legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: #334155;
+  font-size: 0.8rem;
+}
+
 .browse-grid {
   margin: 0;
   padding: 0;
@@ -267,7 +298,20 @@ body {
   background: #ffffff;
   overflow: hidden;
   display: grid;
-  grid-template-rows: 9rem 1fr;
+  grid-template-rows: auto 9rem 1fr;
+}
+
+.browse-ingest-status {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem 0.75rem 0.2rem;
+}
+
+.browse-ingest-status-detail {
+  color: #334155;
+  font-size: 0.75rem;
 }
 
 .browse-thumbnail {
@@ -488,6 +532,46 @@ body {
   margin: 0;
   font-size: 0.82rem;
   color: #334155;
+}
+
+.ingest-status-badge {
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.72rem;
+  padding: 0.1rem 0.5rem;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.ingest-status-badge.is-complete {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.ingest-status-badge.is-pending {
+  border-color: #fcd34d;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.ingest-status-badge.is-failed {
+  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.ingest-status-badge.is-unknown {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+}
+
+.detail-ingest-status-detail {
+  margin: 0;
+  color: #334155;
+  font-size: 0.8rem;
 }
 
 .feedback-panel {
