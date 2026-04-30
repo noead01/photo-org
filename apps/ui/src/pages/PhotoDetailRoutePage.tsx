@@ -1,6 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { deriveIngestStatus, INGEST_STATUS_LEGEND } from "../app/ingestStatus";
+import {
+  resolveDetailReturnState,
+  setPendingBrowseFocusPhotoId
+} from "./browseFocusState";
 
 type PhotoDetailPayload = {
   photo_id: string;
@@ -62,6 +66,16 @@ type FaceOverlayRegion = {
   heightPercent: number;
 };
 
+class PhotoDetailRequestError extends Error {
+  status: number;
+
+  constructor(status: number) {
+    super(`Photo detail request failed (${status})`);
+    this.status = status;
+    this.name = "PhotoDetailRequestError";
+  }
+}
+
 function formatTimestamp(value: string | null): string {
   if (!value) {
     return MISSING_VALUE;
@@ -112,22 +126,31 @@ function clamp(value: number, min: number, max: number): number {
 async function fetchPhotoDetail(photoId: string): Promise<PhotoDetailPayload> {
   const response = await fetch(`/api/v1/photos/${photoId}`);
   if (!response.ok) {
-    throw new Error(`Photo detail request failed (${response.status})`);
+    throw new PhotoDetailRequestError(response.status);
   }
   return (await response.json()) as PhotoDetailPayload;
 }
 
 export function PhotoDetailRoutePage() {
+  const location = useLocation();
   const { photoId } = useParams<{ photoId: string }>();
+  const returnState = resolveDetailReturnState(location.state);
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
   const [detail, setDetail] = useState<PhotoDetailPayload | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isNotFound, setIsNotFound] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const [mediaMode, setMediaMode] = useState<MediaPresentationMode>("fit");
 
   useEffect(() => {
+    headingRef.current?.focus();
+  }, [photoId]);
+
+  useEffect(() => {
     if (!photoId) {
       setError("Photo identifier is missing.");
+      setIsNotFound(false);
       setIsLoading(false);
       return;
     }
@@ -135,12 +158,14 @@ export function PhotoDetailRoutePage() {
     const controller = new AbortController();
     setIsLoading(true);
     setError(null);
+    setIsNotFound(false);
 
     fetchPhotoDetail(photoId)
       .then((payload) => {
         if (controller.signal.aborted) {
           return;
         }
+        setIsNotFound(false);
         setDetail(payload);
         setIsLoading(false);
       })
@@ -148,7 +173,17 @@ export function PhotoDetailRoutePage() {
         if (controller.signal.aborted) {
           return;
         }
+
+        if (caughtError instanceof PhotoDetailRequestError && caughtError.status === 404) {
+          setDetail(null);
+          setError(null);
+          setIsNotFound(true);
+          setIsLoading(false);
+          return;
+        }
+
         setError(caughtError instanceof Error ? caughtError.message : "Could not load photo detail.");
+        setIsNotFound(false);
         setIsLoading(false);
       });
 
@@ -239,14 +274,30 @@ export function PhotoDetailRoutePage() {
     });
   }, [detail]);
 
+  const backLinkFocusPhotoId = detail?.photo_id ?? returnState.returnFocusPhotoId ?? photoId ?? null;
+
   return (
     <section aria-labelledby="page-title" className="page detail-page">
       <div className="detail-header">
         <div>
-          <h1 id="page-title">Photo detail</h1>
+          <h1 id="page-title" ref={headingRef} tabIndex={-1}>
+            Photo detail
+          </h1>
           <p>Inspect canonical metadata and availability fields for a single photo.</p>
         </div>
-        <Link className="detail-back-link" to="/browse">
+        <Link
+          className="detail-back-link"
+          to={{
+            pathname: "/browse",
+            search: returnState.returnToBrowseSearch ?? ""
+          }}
+          state={backLinkFocusPhotoId ? { restoreFocusPhotoId: backLinkFocusPhotoId } : undefined}
+          onClick={() => {
+            if (backLinkFocusPhotoId) {
+              setPendingBrowseFocusPhotoId(backLinkFocusPhotoId);
+            }
+          }}
+        >
           Back to browse
         </Link>
       </div>
@@ -450,6 +501,13 @@ export function PhotoDetailRoutePage() {
             </dl>
           </article>
         </div>
+      ) : null}
+
+      {!isLoading && !error && isNotFound ? (
+        <section className="feedback-panel" aria-labelledby="photo-not-found-title">
+          <h2 id="photo-not-found-title">Photo not found</h2>
+          <p>This photo is no longer available in the catalog.</p>
+        </section>
       ) : null}
     </section>
   );
