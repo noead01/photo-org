@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type SearchPhoto = {
   photo_id: string;
@@ -14,6 +14,11 @@ type SearchResponsePayload = {
     cursor: string | null;
     items: SearchPhoto[];
   };
+};
+
+type PersonRecord = {
+  person_id: string;
+  display_name: string;
 };
 
 const DEFAULT_SORT = { by: "shot_ts", dir: "desc" } as const;
@@ -41,12 +46,60 @@ function validateDateRange(from: string, to: string): string | null {
   return null;
 }
 
+function normalizeForFuzzyMatch(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function isFuzzyNameMatch(query: string, candidate: string): boolean {
+  const normalizedQuery = normalizeForFuzzyMatch(query);
+  const normalizedCandidate = normalizeForFuzzyMatch(candidate);
+
+  if (!normalizedQuery || !normalizedCandidate) {
+    return false;
+  }
+
+  if (normalizedCandidate.includes(normalizedQuery)) {
+    return true;
+  }
+
+  let queryIndex = 0;
+  for (const character of normalizedCandidate) {
+    if (character === normalizedQuery[queryIndex]) {
+      queryIndex += 1;
+      if (queryIndex === normalizedQuery.length) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function buildSearchFilters(
+  fromDate: string,
+  toDate: string,
+  selectedPersonNames: string[]
+): { date?: { from?: string; to?: string }; person_names?: string[] } | null {
+  const dateFilter = buildDateFilter(fromDate, toDate);
+  const personNameFilter = selectedPersonNames.length > 0 ? selectedPersonNames : null;
+
+  if (!dateFilter && !personNameFilter) {
+    return null;
+  }
+
+  return {
+    ...(dateFilter ? { date: dateFilter } : {}),
+    ...(personNameFilter ? { person_names: personNameFilter } : {})
+  };
+}
+
 async function fetchSearchResults(
   query: string,
   fromDate: string,
-  toDate: string
+  toDate: string,
+  selectedPersonNames: string[]
 ): Promise<SearchResponsePayload> {
-  const dateFilter = buildDateFilter(fromDate, toDate);
+  const searchFilters = buildSearchFilters(fromDate, toDate, selectedPersonNames);
   const response = await fetch("/api/v1/search", {
     method: "POST",
     headers: {
@@ -54,7 +107,7 @@ async function fetchSearchResults(
     },
     body: JSON.stringify({
       q: query,
-      ...(dateFilter ? { filters: { date: dateFilter } } : {}),
+      ...(searchFilters ? { filters: searchFilters } : {}),
       sort: DEFAULT_SORT,
       page: DEFAULT_PAGE
     })
@@ -72,6 +125,10 @@ export function SearchRoutePage() {
   const [queryChips, setQueryChips] = useState<string[]>([]);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [personDraft, setPersonDraft] = useState("");
+  const [selectedPersonNames, setSelectedPersonNames] = useState<string[]>([]);
+  const [peopleDirectory, setPeopleDirectory] = useState<PersonRecord[]>([]);
+  const [personMessage, setPersonMessage] = useState<string | null>(null);
   const [results, setResults] = useState<SearchPhoto[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -81,8 +138,53 @@ export function SearchRoutePage() {
   const serializedQuery = useMemo(() => queryChips.join(" "), [queryChips]);
   const dateRangeError = useMemo(() => validateDateRange(fromDate, toDate), [fromDate, toDate]);
   const hasActiveDateFilter = Boolean(fromDate || toDate);
+  const hasActivePersonFilter = selectedPersonNames.length > 0;
+  const matchingPeople = useMemo(() => {
+    const trimmed = personDraft.trim();
+    if (!trimmed) {
+      return [] as PersonRecord[];
+    }
 
-  async function runSearch(chips: string[], activeFromDate: string, activeToDate: string) {
+    return peopleDirectory.filter(
+      (person) =>
+        !selectedPersonNames.includes(person.display_name) &&
+        isFuzzyNameMatch(trimmed, person.display_name)
+    );
+  }, [peopleDirectory, personDraft, selectedPersonNames]);
+
+  useEffect(() => {
+    let isCanceled = false;
+
+    async function loadPeopleDirectory() {
+      try {
+        const response = await fetch("/api/v1/people");
+        if (!response.ok) {
+          throw new Error();
+        }
+        const payload = (await response.json()) as PersonRecord[];
+        if (!isCanceled) {
+          setPeopleDirectory(payload);
+        }
+      } catch {
+        if (!isCanceled) {
+          setPersonMessage("People lookup is unavailable. Search can continue without person filters.");
+        }
+      }
+    }
+
+    void loadPeopleDirectory();
+
+    return () => {
+      isCanceled = true;
+    };
+  }, []);
+
+  async function runSearch(
+    chips: string[],
+    activeFromDate: string,
+    activeToDate: string,
+    activePersonNames: string[]
+  ) {
     if (validateDateRange(activeFromDate, activeToDate)) {
       return;
     }
@@ -92,7 +194,12 @@ export function SearchRoutePage() {
     setHasRequested(true);
 
     try {
-      const payload = await fetchSearchResults(chips.join(" "), activeFromDate, activeToDate);
+      const payload = await fetchSearchResults(
+        chips.join(" "),
+        activeFromDate,
+        activeToDate,
+        activePersonNames
+      );
       setResults(payload.hits.items);
       setTotalCount(payload.hits.total);
     } catch (caughtError: unknown) {
@@ -116,7 +223,7 @@ export function SearchRoutePage() {
     }
 
     const trimmed = draftQuery.trim();
-    if (!trimmed && !hasActiveDateFilter) {
+    if (!trimmed && !hasActiveDateFilter && !hasActivePersonFilter) {
       return;
     }
 
@@ -126,27 +233,65 @@ export function SearchRoutePage() {
       setDraftQuery("");
     }
 
-    void runSearch(nextChips, fromDate, toDate);
+    void runSearch(nextChips, fromDate, toDate, selectedPersonNames);
   }
 
   function handleDismissChip(indexToRemove: number) {
     const nextChips = queryChips.filter((_, index) => index !== indexToRemove);
     setQueryChips(nextChips);
-    void runSearch(nextChips, fromDate, toDate);
+    void runSearch(nextChips, fromDate, toDate, selectedPersonNames);
   }
 
   function handleClearFromDate() {
     setFromDate("");
-    void runSearch(queryChips, "", toDate);
+    void runSearch(queryChips, "", toDate, selectedPersonNames);
   }
 
   function handleClearToDate() {
     setToDate("");
-    void runSearch(queryChips, fromDate, "");
+    void runSearch(queryChips, fromDate, "", selectedPersonNames);
+  }
+
+  function handleAddPersonByName(displayName: string) {
+    if (selectedPersonNames.includes(displayName)) {
+      setPersonDraft("");
+      setPersonMessage(null);
+      return;
+    }
+
+    setSelectedPersonNames((current) => [...current, displayName]);
+    setPersonDraft("");
+    setPersonMessage(null);
+  }
+
+  function handleAddPersonFilter() {
+    const trimmed = personDraft.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    if (matchingPeople.length === 0) {
+      setPersonMessage(`No people match "${trimmed}". Search still works without this filter.`);
+      return;
+    }
+
+    if (matchingPeople.length > 1) {
+      setPersonMessage(`Multiple people match "${trimmed}". Select one from suggestions.`);
+      return;
+    }
+
+    handleAddPersonByName(matchingPeople[0].display_name);
+  }
+
+  function handleRemovePersonFilter(displayName: string) {
+    const nextNames = selectedPersonNames.filter((name) => name !== displayName);
+    setSelectedPersonNames(nextNames);
+    setPersonMessage(null);
+    void runSearch(queryChips, fromDate, toDate, nextNames);
   }
 
   function handleRetry() {
-    void runSearch(queryChips, fromDate, toDate);
+    void runSearch(queryChips, fromDate, toDate, selectedPersonNames);
   }
 
   const summaryLabel = useMemo(() => {
@@ -202,15 +347,63 @@ export function SearchRoutePage() {
             aria-describedby="search-query-summary search-date-validation"
           />
         </div>
+        <div className="search-person-row">
+          <label htmlFor="search-person-input">Person filter</label>
+          <div className="search-person-input-row">
+            <input
+              id="search-person-input"
+              type="text"
+              value={personDraft}
+              onChange={(event) => setPersonDraft(event.target.value)}
+              aria-describedby="search-query-summary search-person-validation"
+            />
+            <button type="button" onClick={handleAddPersonFilter}>
+              Add person filter
+            </button>
+          </div>
+        </div>
         {dateRangeError ? (
           <p id="search-date-validation" className="search-validation-message" role="alert">
             {dateRangeError}
           </p>
         ) : null}
+        {personMessage ? (
+          <p id="search-person-validation" className="search-validation-message" role="status">
+            {personMessage}
+          </p>
+        ) : null}
+        {personMessage?.startsWith("Multiple people match") && matchingPeople.length > 0 ? (
+          <ul className="search-person-suggestion-list" aria-label="Person suggestions">
+            {matchingPeople.map((person) => (
+              <li key={person.person_id}>
+                <button
+                  type="button"
+                  className="search-person-suggestion"
+                  onClick={() => handleAddPersonByName(person.display_name)}
+                >
+                  {person.display_name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </form>
 
-      {queryChips.length > 0 || hasActiveDateFilter ? (
+      {queryChips.length > 0 || hasActiveDateFilter || hasActivePersonFilter ? (
         <ul className="search-chip-list" aria-label="Active search filters">
+          {selectedPersonNames.map((displayName) => (
+            <li key={displayName}>
+              <button
+                type="button"
+                className="search-chip"
+                aria-label={`Remove person ${displayName}`}
+                onClick={() => handleRemovePersonFilter(displayName)}
+              >
+                person: {displayName}
+                <span aria-hidden="true"> ×</span>
+              </button>
+            </li>
+          ))}
           {fromDate ? (
             <li>
               <button
@@ -295,6 +488,8 @@ export function SearchRoutePage() {
       <p className="search-serialized-query" aria-live="off">
         Active query: {serializedQuery || "(none)"} | Date range:{" "}
         {fromDate || toDate ? `${fromDate || "(open)"} to ${toDate || "(open)"}` : "(none)"}
+        {" | People: "}
+        {selectedPersonNames.length > 0 ? selectedPersonNames.join(", ") : "(none)"}
       </p>
     </section>
   );
