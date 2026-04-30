@@ -738,6 +738,58 @@ body {
   gap: 0.45rem;
 }
 
+.search-facet-panel {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.search-facet-group {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.search-facet-group-label {
+  margin: 0;
+  color: #334155;
+  font-size: 0.9rem;
+}
+
+.search-facet-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.search-facet-option {
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #1e293b;
+  border-radius: 0.45rem;
+  padding: 0.35rem 0.65rem;
+  font: inherit;
+}
+
+.search-facet-option-active {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.search-facet-clear {
+  border: 1px solid #bfdbfe;
+  background: #f8fbff;
+  color: #1e3a8a;
+  border-radius: 0.45rem;
+  padding: 0.35rem 0.65rem;
+  font: inherit;
+}
+
+.search-facet-empty {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.88rem;
+}
+
 .search-location-row {
   display: grid;
   grid-template-columns: auto minmax(7rem, 1fr) auto minmax(8rem, 1fr) auto minmax(6rem, 1fr);

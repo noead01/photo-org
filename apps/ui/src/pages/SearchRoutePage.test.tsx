@@ -22,7 +22,11 @@ interface SearchResponsePayload {
       filesize: number;
     }>;
   };
-  facets: Record<string, unknown>;
+  facets: {
+    has_faces?: Record<string, unknown>;
+    path_hints?: Array<{ value: string; count: number }>;
+    tags?: Array<{ value: string; count: number }>;
+  };
 }
 
 interface PersonPayload {
@@ -32,7 +36,11 @@ interface PersonPayload {
   updated_ts: string;
 }
 
-function buildPayload(photoIds: string[], total = photoIds.length): SearchResponsePayload {
+function buildPayload(
+  photoIds: string[],
+  total = photoIds.length,
+  facets: SearchResponsePayload["facets"] = {}
+): SearchResponsePayload {
   return {
     hits: {
       total,
@@ -45,7 +53,7 @@ function buildPayload(photoIds: string[], total = photoIds.length): SearchRespon
         filesize: 1024 + index
       }))
     },
-    facets: {}
+    facets
   };
 }
 
@@ -477,5 +485,77 @@ describe("SearchRoutePage", () => {
         radius_km: 12.5
       }
     });
+  });
+
+  it("renders has-faces facet counts and toggles has_faces filter deterministically", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === PEOPLE_ENDPOINT) {
+        return {
+          ok: true,
+          json: async () => PEOPLE_FIXTURE
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () =>
+          buildPayload(["photo-1"], 1, {
+            has_faces: { true: 5, false: 2 },
+            tags: [{ value: "event:lake-weekend", count: 3 }]
+          })
+      } as Response;
+    });
+
+    renderSearchAt();
+    await user.type(await screen.findByRole("textbox", { name: "Search query" }), "lake");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+
+    expect(await screen.findByRole("button", { name: "With faces (5)" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Without faces (2)" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "With faces (5)" }));
+    expect(lastSearchBody(fetchMock).filters).toEqual({ has_faces: true });
+
+    await user.click(screen.getByRole("button", { name: "With faces (5)" }));
+    expect(lastSearchBody(fetchMock).filters).toBeUndefined();
+  });
+
+  it("uses path-hint facet counts for toggle and clear interactions", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === PEOPLE_ENDPOINT) {
+        return {
+          ok: true,
+          json: async () => PEOPLE_FIXTURE
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () =>
+          buildPayload(["photo-1"], 1, {
+            has_faces: { true: 1, false: 0 },
+            tags: [
+              { value: "event:lake-weekend", count: 4 },
+              { value: "event:city-break", count: 2 }
+            ]
+          })
+      } as Response;
+    });
+
+    renderSearchAt();
+    await user.type(await screen.findByRole("textbox", { name: "Search query" }), "travel");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+
+    await user.click(screen.getByRole("button", { name: "path: city-break (2)" }));
+    await user.click(screen.getByRole("button", { name: "path: lake-weekend (4)" }));
+
+    expect(lastSearchBody(fetchMock).filters).toEqual({
+      path_hints: ["city-break", "lake-weekend"]
+    });
+
+    await user.click(screen.getByRole("button", { name: "Clear path hints" }));
+    expect(lastSearchBody(fetchMock).filters).toBeUndefined();
   });
 });
