@@ -1,8 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import type { NotificationEntry } from "../app/feedback/feedbackTypes";
 import { ToastStack } from "../app/feedback/ToastStack";
 import { deriveIngestStatus, INGEST_STATUS_LEGEND } from "../app/ingestStatus";
+import {
+  consumePendingBrowseFocusPhotoId,
+  resolveBrowseReturnState,
+  setPendingBrowseFocusPhotoId
+} from "./browseFocusState";
 
 type SortDirection = "asc" | "desc";
 
@@ -119,6 +124,7 @@ export function BrowseRoutePage() {
   const location = useLocation();
   const navigate = useNavigate();
   const requestedPage = parseRequestedPage(location.search);
+  const initialReturnState = resolveBrowseReturnState(location.state);
 
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [cursorByPage, setCursorByPage] = useState<Record<number, string | null>>({ 1: null });
@@ -129,6 +135,10 @@ export function BrowseRoutePage() {
   const [error, setError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [notifications, setNotifications] = useState<NotificationEntry[]>([]);
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
+  const pendingReturnFocusPhotoIdRef = useRef<string | null>(
+    initialReturnState?.restoreFocusPhotoId ?? consumePendingBrowseFocusPhotoId()
+  );
 
   const cursorForPage = cursorByPage[requestedPage];
 
@@ -216,6 +226,37 @@ export function BrowseRoutePage() {
     };
   }, [cursorForPage, reloadToken, requestedPage, sortDirection]);
 
+  useEffect(() => {
+    const pendingPhotoId = pendingReturnFocusPhotoIdRef.current;
+    if (!pendingPhotoId || isLoading) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      if (error) {
+        headingRef.current?.focus();
+        pendingReturnFocusPhotoIdRef.current = null;
+        return;
+      }
+
+      const focusTarget = document.querySelector<HTMLAnchorElement>(
+        `[data-photo-id="${pendingPhotoId}"]`
+      );
+
+      if (focusTarget) {
+        focusTarget.focus();
+      } else {
+        headingRef.current?.focus();
+      }
+
+      pendingReturnFocusPhotoIdRef.current = null;
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [error, isLoading, photos]);
+
   const canGoPrevious = requestedPage > 1 && !isLoading;
   const canGoNext = nextCursor !== null && !isLoading;
 
@@ -233,7 +274,9 @@ export function BrowseRoutePage() {
     <section aria-labelledby="page-title" className="page browse-page">
       <div className="browse-header">
         <div>
-          <h1 id="page-title">Browse</h1>
+          <h1 id="page-title" ref={headingRef} tabIndex={-1}>
+            Browse
+          </h1>
           <p>Deterministic gallery ordering with stable cursor pagination.</p>
         </div>
         <div className="browse-controls" role="group" aria-label="Browse controls">
@@ -326,46 +369,55 @@ export function BrowseRoutePage() {
                   <span className={`ingest-status-badge is-${ingestStatus.tone}`}>{ingestStatus.label}</span>
                   <span className="browse-ingest-status-detail">{ingestStatus.description}</span>
                 </p>
-              {photo.thumbnail ? (
-                <img
-                  className="browse-thumbnail"
-                  src={`data:${photo.thumbnail.mime_type};base64,${photo.thumbnail.data_base64}`}
-                  width={photo.thumbnail.width}
-                  height={photo.thumbnail.height}
-                  alt={`Thumbnail for ${photo.photo_id}`}
-                />
-              ) : (
-                <div className="browse-thumbnail browse-thumbnail-placeholder" aria-hidden="true">
-                  No preview
-                </div>
-              )}
+                {photo.thumbnail ? (
+                  <img
+                    className="browse-thumbnail"
+                    src={`data:${photo.thumbnail.mime_type};base64,${photo.thumbnail.data_base64}`}
+                    width={photo.thumbnail.width}
+                    height={photo.thumbnail.height}
+                    alt={`Thumbnail for ${photo.photo_id}`}
+                  />
+                ) : (
+                  <div className="browse-thumbnail browse-thumbnail-placeholder" aria-hidden="true">
+                    No preview
+                  </div>
+                )}
 
-              <div className="browse-card-body">
-                <h2>
-                  <Link className="browse-photo-link" to={`/browse/${photo.photo_id}`}>
-                    {photo.photo_id}
-                  </Link>
-                </h2>
-                <p className="browse-path" title={photo.path}>{photo.path}</p>
-                <dl>
-                  <div>
-                    <dt>Captured</dt>
-                    <dd>{formatShotTimestamp(photo.shot_ts)}</dd>
-                  </div>
-                  <div>
-                    <dt>Size</dt>
-                    <dd>{formatFilesize(photo.filesize)}</dd>
-                  </div>
-                  <div>
-                    <dt>People</dt>
-                    <dd>{photo.people.length}</dd>
-                  </div>
-                  <div>
-                    <dt>Original</dt>
-                    <dd>{photo.original?.availability_state ?? "unknown"}</dd>
-                  </div>
-                </dl>
-              </div>
+                <div className="browse-card-body">
+                  <h2>
+                    <Link
+                      className="browse-photo-link"
+                      data-photo-id={photo.photo_id}
+                      to={`/browse/${photo.photo_id}`}
+                      state={{
+                        returnToBrowseSearch: location.search,
+                        returnFocusPhotoId: photo.photo_id
+                      }}
+                      onClick={() => setPendingBrowseFocusPhotoId(photo.photo_id)}
+                    >
+                      {photo.photo_id}
+                    </Link>
+                  </h2>
+                  <p className="browse-path" title={photo.path}>{photo.path}</p>
+                  <dl>
+                    <div>
+                      <dt>Captured</dt>
+                      <dd>{formatShotTimestamp(photo.shot_ts)}</dd>
+                    </div>
+                    <div>
+                      <dt>Size</dt>
+                      <dd>{formatFilesize(photo.filesize)}</dd>
+                    </div>
+                    <div>
+                      <dt>People</dt>
+                      <dd>{photo.people.length}</dd>
+                    </div>
+                    <div>
+                      <dt>Original</dt>
+                      <dd>{photo.original?.availability_state ?? "unknown"}</dd>
+                    </div>
+                  </dl>
+                </div>
               </li>
             );
           })}

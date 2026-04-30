@@ -216,11 +216,11 @@ describe("PhotoDetailRoutePage", () => {
     renderDetail();
 
     expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
-    expect(screen.getByLabelText("Face region 1 for person-1")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Face region 1 for person-1")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Actual pixels" }));
 
-    expect(screen.getByLabelText("Face region 1 for person-1")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Face region 1 for person-1")).toBeInTheDocument();
   });
 
   it("renders deterministic loading and error transitions", async () => {
@@ -282,5 +282,32 @@ describe("PhotoDetailRoutePage", () => {
     expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
     expect(screen.getByText("Ingest status legend")).toBeInTheDocument();
     expect(screen.getAllByText("Pending").length).toBeGreaterThan(0);
+  });
+
+  it("moves keyboard focus to the detail heading when opened", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => buildPayload()
+    } as Response);
+
+    renderDetail();
+
+    const heading = await screen.findByRole("heading", { name: "Photo detail", level: 1 });
+    await waitFor(() => {
+      expect(heading).toHaveFocus();
+    });
+  });
+
+  it("renders an explicit empty state when the photo is not found", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 404
+    } as Response);
+
+    renderDetail();
+
+    expect(await screen.findByRole("heading", { name: "Photo not found", level: 2 })).toBeInTheDocument();
+    expect(screen.getByText("This photo is no longer available in the catalog.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to browse" })).toBeInTheDocument();
   });
 });

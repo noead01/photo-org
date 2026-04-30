@@ -253,4 +253,60 @@ describe("BrowseRoutePage", () => {
     expect(screen.getAllByText("Pending").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Unknown").length).toBeGreaterThan(0);
   });
+
+  it("restores focus to the previously selected photo when returning from detail", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => buildPayload(["photo-a", "photo-b"], null, 2)
+    } as Response);
+
+    render(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: "/browse",
+            state: { restoreFocusPhotoId: "photo-b" }
+          }
+        ]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <Routes>
+          <Route path="/browse" element={<BrowseRoutePage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    const targetLink = await screen.findByRole("link", { name: "photo-b" });
+    await waitFor(() => {
+      expect(targetLink).toHaveFocus();
+    });
+  });
+
+  it("falls back to the browse heading when return-focus target is unavailable", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => buildPayload(["photo-a"], null, 1)
+    } as Response);
+
+    render(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: "/browse",
+            state: { restoreFocusPhotoId: "photo-missing" }
+          }
+        ]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <Routes>
+          <Route path="/browse" element={<BrowseRoutePage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    const heading = await screen.findByRole("heading", { name: "Browse", level: 1 });
+    await waitFor(() => {
+      expect(heading).toHaveFocus();
+    });
+  });
 });
