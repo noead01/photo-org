@@ -3,6 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { SearchRoutePage } from "./SearchRoutePage";
 
+vi.mock("./search/LocationRadiusPicker", () => ({
+  LocationRadiusPicker: () => <div data-testid="location-radius-picker" />
+}));
+
 const SEARCH_ENDPOINT = "/api/v1/search";
 const PEOPLE_ENDPOINT = "/api/v1/people";
 
@@ -381,5 +385,97 @@ describe("SearchRoutePage", () => {
     await user.click(screen.getByRole("button", { name: "Remove person Inez Alvarez" }));
     const body = lastSearchBody(fetchMock);
     expect(body.filters).toBeUndefined();
+  });
+
+  it("submits valid location filter as filters.location_radius", async () => {
+    const user = userEvent.setup();
+    renderSearchAt();
+
+    await user.type(await screen.findByLabelText("Latitude"), "37.7749");
+    await user.type(screen.getByLabelText("Longitude"), "-122.4194");
+    await user.type(screen.getByLabelText("Radius (km)"), "12.5");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+
+    const body = lastSearchBody(fetchMock);
+    expect(body.filters).toEqual({
+      location_radius: {
+        latitude: 37.7749,
+        longitude: -122.4194,
+        radius_km: 12.5
+      }
+    });
+  });
+
+  it("blocks submit when location values are invalid", async () => {
+    const user = userEvent.setup();
+    renderSearchAt();
+
+    await user.type(await screen.findByLabelText("Latitude"), "91");
+    await user.type(screen.getByLabelText("Longitude"), "-122.4194");
+    await user.type(screen.getByLabelText("Radius (km)"), "12");
+    await user.type(screen.getByRole("textbox", { name: "Search query" }), "coast");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+
+    expect(searchCalls(fetchMock)).toHaveLength(0);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Latitude must be between -90 and 90."
+    );
+  });
+
+  it("removes location chip and re-fetches without location_radius filters", async () => {
+    const user = userEvent.setup();
+    renderSearchAt();
+
+    await user.type(await screen.findByLabelText("Latitude"), "37.7749");
+    await user.type(screen.getByLabelText("Longitude"), "-122.4194");
+    await user.type(screen.getByLabelText("Radius (km)"), "12.5");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+
+    await user.click(
+      screen.getByRole("button", { name: "Remove location: 37.7749, -122.4194 (12.5 km)" })
+    );
+
+    const body = lastSearchBody(fetchMock);
+    expect(body.filters).toBeUndefined();
+  });
+
+  it("does not auto-search when location fields change", async () => {
+    const user = userEvent.setup();
+    renderSearchAt();
+
+    await user.type(await screen.findByLabelText("Latitude"), "37.7749");
+    await user.type(screen.getByLabelText("Longitude"), "-122.4194");
+    await user.type(screen.getByLabelText("Radius (km)"), "12.5");
+
+    expect(searchCalls(fetchMock)).toHaveLength(0);
+  });
+
+  it("combines location, person, and date filters in one deterministic request payload", async () => {
+    const user = userEvent.setup();
+    renderSearchAt();
+
+    await user.type(await screen.findByLabelText("Latitude"), "37.7749");
+    await user.type(screen.getByLabelText("Longitude"), "-122.4194");
+    await user.type(screen.getByLabelText("Radius (km)"), "12.5");
+    await user.type(screen.getByLabelText("From date"), "2026-04-01");
+
+    const personInput = screen.getByLabelText("Person filter");
+    await user.type(personInput, "inez");
+    await user.click(screen.getByRole("button", { name: "Add person filter" }));
+
+    await user.click(screen.getByRole("button", { name: "Search" }));
+
+    const body = lastSearchBody(fetchMock);
+    expect(body.filters).toEqual({
+      date: {
+        from: "2026-04-01"
+      },
+      person_names: ["Inez Alvarez"],
+      location_radius: {
+        latitude: 37.7749,
+        longitude: -122.4194,
+        radius_km: 12.5
+      }
+    });
   });
 });

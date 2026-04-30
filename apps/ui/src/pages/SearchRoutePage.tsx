@@ -1,4 +1,12 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { LocationRadiusPicker } from "./search/LocationRadiusPicker";
+import {
+  buildLocationRadiusFilter,
+  formatLocationChipLabel,
+  parseLocationDraft,
+  validateLocationDraft
+} from "./search/locationFilter";
+import type { LocationRadiusValue } from "./search/types";
 
 type SearchPhoto = {
   photo_id: string;
@@ -78,18 +86,25 @@ function isFuzzyNameMatch(query: string, candidate: string): boolean {
 function buildSearchFilters(
   fromDate: string,
   toDate: string,
-  selectedPersonNames: string[]
-): { date?: { from?: string; to?: string }; person_names?: string[] } | null {
+  selectedPersonNames: string[],
+  locationRadius: { latitude: number; longitude: number; radius_km: number } | null
+): {
+  date?: { from?: string; to?: string };
+  person_names?: string[];
+  location_radius?: { latitude: number; longitude: number; radius_km: number };
+} | null {
   const dateFilter = buildDateFilter(fromDate, toDate);
   const personNameFilter = selectedPersonNames.length > 0 ? selectedPersonNames : null;
+  const locationFilter = locationRadius;
 
-  if (!dateFilter && !personNameFilter) {
+  if (!dateFilter && !personNameFilter && !locationFilter) {
     return null;
   }
 
   return {
     ...(dateFilter ? { date: dateFilter } : {}),
-    ...(personNameFilter ? { person_names: personNameFilter } : {})
+    ...(personNameFilter ? { person_names: personNameFilter } : {}),
+    ...(locationFilter ? { location_radius: locationFilter } : {})
   };
 }
 
@@ -97,9 +112,10 @@ async function fetchSearchResults(
   query: string,
   fromDate: string,
   toDate: string,
-  selectedPersonNames: string[]
+  selectedPersonNames: string[],
+  locationRadius: { latitude: number; longitude: number; radius_km: number } | null
 ): Promise<SearchResponsePayload> {
-  const searchFilters = buildSearchFilters(fromDate, toDate, selectedPersonNames);
+  const searchFilters = buildSearchFilters(fromDate, toDate, selectedPersonNames, locationRadius);
   const response = await fetch("/api/v1/search", {
     method: "POST",
     headers: {
@@ -127,8 +143,12 @@ export function SearchRoutePage() {
   const [toDate, setToDate] = useState("");
   const [personDraft, setPersonDraft] = useState("");
   const [selectedPersonNames, setSelectedPersonNames] = useState<string[]>([]);
+  const [latitudeDraft, setLatitudeDraft] = useState("");
+  const [longitudeDraft, setLongitudeDraft] = useState("");
+  const [radiusDraft, setRadiusDraft] = useState("");
   const [peopleDirectory, setPeopleDirectory] = useState<PersonRecord[]>([]);
   const [personMessage, setPersonMessage] = useState<string | null>(null);
+  const [mapMessage, setMapMessage] = useState<string | null>(null);
   const [results, setResults] = useState<SearchPhoto[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -137,8 +157,18 @@ export function SearchRoutePage() {
 
   const serializedQuery = useMemo(() => queryChips.join(" "), [queryChips]);
   const dateRangeError = useMemo(() => validateDateRange(fromDate, toDate), [fromDate, toDate]);
+  const parsedLocation = useMemo(
+    () => parseLocationDraft(latitudeDraft, longitudeDraft, radiusDraft),
+    [latitudeDraft, longitudeDraft, radiusDraft]
+  );
+  const locationError = useMemo(() => validateLocationDraft(parsedLocation), [parsedLocation]);
+  const locationRadiusFilter = useMemo(
+    () => buildLocationRadiusFilter(parsedLocation),
+    [parsedLocation]
+  );
   const hasActiveDateFilter = Boolean(fromDate || toDate);
   const hasActivePersonFilter = selectedPersonNames.length > 0;
+  const hasActiveLocationFilter = Boolean(locationRadiusFilter);
   const matchingPeople = useMemo(() => {
     const trimmed = personDraft.trim();
     if (!trimmed) {
@@ -183,7 +213,8 @@ export function SearchRoutePage() {
     chips: string[],
     activeFromDate: string,
     activeToDate: string,
-    activePersonNames: string[]
+    activePersonNames: string[],
+    activeLocationRadius: { latitude: number; longitude: number; radius_km: number } | null
   ) {
     if (validateDateRange(activeFromDate, activeToDate)) {
       return;
@@ -198,7 +229,8 @@ export function SearchRoutePage() {
         chips.join(" "),
         activeFromDate,
         activeToDate,
-        activePersonNames
+        activePersonNames,
+        activeLocationRadius
       );
       setResults(payload.hits.items);
       setTotalCount(payload.hits.total);
@@ -218,12 +250,12 @@ export function SearchRoutePage() {
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (dateRangeError) {
+    if (dateRangeError || locationError) {
       return;
     }
 
     const trimmed = draftQuery.trim();
-    if (!trimmed && !hasActiveDateFilter && !hasActivePersonFilter) {
+    if (!trimmed && !hasActiveDateFilter && !hasActivePersonFilter && !hasActiveLocationFilter) {
       return;
     }
 
@@ -233,23 +265,23 @@ export function SearchRoutePage() {
       setDraftQuery("");
     }
 
-    void runSearch(nextChips, fromDate, toDate, selectedPersonNames);
+    void runSearch(nextChips, fromDate, toDate, selectedPersonNames, locationRadiusFilter);
   }
 
   function handleDismissChip(indexToRemove: number) {
     const nextChips = queryChips.filter((_, index) => index !== indexToRemove);
     setQueryChips(nextChips);
-    void runSearch(nextChips, fromDate, toDate, selectedPersonNames);
+    void runSearch(nextChips, fromDate, toDate, selectedPersonNames, locationRadiusFilter);
   }
 
   function handleClearFromDate() {
     setFromDate("");
-    void runSearch(queryChips, "", toDate, selectedPersonNames);
+    void runSearch(queryChips, "", toDate, selectedPersonNames, locationRadiusFilter);
   }
 
   function handleClearToDate() {
     setToDate("");
-    void runSearch(queryChips, fromDate, "", selectedPersonNames);
+    void runSearch(queryChips, fromDate, "", selectedPersonNames, locationRadiusFilter);
   }
 
   function handleAddPersonByName(displayName: string) {
@@ -287,11 +319,25 @@ export function SearchRoutePage() {
     const nextNames = selectedPersonNames.filter((name) => name !== displayName);
     setSelectedPersonNames(nextNames);
     setPersonMessage(null);
-    void runSearch(queryChips, fromDate, toDate, nextNames);
+    void runSearch(queryChips, fromDate, toDate, nextNames, locationRadiusFilter);
+  }
+
+  function handleMapLocationChange(location: LocationRadiusValue) {
+    setLatitudeDraft(String(location.latitude));
+    setLongitudeDraft(String(location.longitude));
+    setRadiusDraft(String(Number(location.radiusKm.toFixed(3))));
+    setMapMessage(null);
+  }
+
+  function handleClearLocationFilter() {
+    setLatitudeDraft("");
+    setLongitudeDraft("");
+    setRadiusDraft("");
+    void runSearch(queryChips, fromDate, toDate, selectedPersonNames, null);
   }
 
   function handleRetry() {
-    void runSearch(queryChips, fromDate, toDate, selectedPersonNames);
+    void runSearch(queryChips, fromDate, toDate, selectedPersonNames, locationRadiusFilter);
   }
 
   const summaryLabel = useMemo(() => {
@@ -362,14 +408,69 @@ export function SearchRoutePage() {
             </button>
           </div>
         </div>
+        <div className="search-location-panel">
+          <p className="search-filter-section-label">Location radius</p>
+          <div className="search-location-row">
+            <label htmlFor="search-location-latitude">Latitude</label>
+            <input
+              id="search-location-latitude"
+              type="text"
+              inputMode="decimal"
+              value={latitudeDraft}
+              onChange={(event) => setLatitudeDraft(event.target.value)}
+              aria-describedby="search-query-summary search-location-validation"
+            />
+            <label htmlFor="search-location-longitude">Longitude</label>
+            <input
+              id="search-location-longitude"
+              type="text"
+              inputMode="decimal"
+              value={longitudeDraft}
+              onChange={(event) => setLongitudeDraft(event.target.value)}
+              aria-describedby="search-query-summary search-location-validation"
+            />
+            <label htmlFor="search-location-radius">Radius (km)</label>
+            <input
+              id="search-location-radius"
+              type="text"
+              inputMode="decimal"
+              value={radiusDraft}
+              onChange={(event) => setRadiusDraft(event.target.value)}
+              aria-describedby="search-query-summary search-location-validation"
+            />
+          </div>
+          <LocationRadiusPicker
+            value={
+              locationRadiusFilter
+                ? {
+                    latitude: locationRadiusFilter.latitude,
+                    longitude: locationRadiusFilter.longitude,
+                    radiusKm: locationRadiusFilter.radius_km
+                  }
+                : null
+            }
+            onChange={handleMapLocationChange}
+            onMapError={setMapMessage}
+          />
+        </div>
         {dateRangeError ? (
           <p id="search-date-validation" className="search-validation-message" role="alert">
             {dateRangeError}
           </p>
         ) : null}
+        {locationError ? (
+          <p id="search-location-validation" className="search-validation-message" role="alert">
+            {locationError}
+          </p>
+        ) : null}
         {personMessage ? (
           <p id="search-person-validation" className="search-validation-message" role="status">
             {personMessage}
+          </p>
+        ) : null}
+        {mapMessage ? (
+          <p className="search-map-message" role="status">
+            {mapMessage}
           </p>
         ) : null}
         {personMessage?.startsWith("Multiple people match") && matchingPeople.length > 0 ? (
@@ -389,8 +490,29 @@ export function SearchRoutePage() {
         ) : null}
       </form>
 
-      {queryChips.length > 0 || hasActiveDateFilter || hasActivePersonFilter ? (
+      {queryChips.length > 0 || hasActiveDateFilter || hasActivePersonFilter || hasActiveLocationFilter ? (
         <ul className="search-chip-list" aria-label="Active search filters">
+          {locationRadiusFilter ? (
+            <li>
+              <button
+                type="button"
+                className="search-chip"
+                aria-label={`Remove ${formatLocationChipLabel({
+                  latitude: locationRadiusFilter.latitude,
+                  longitude: locationRadiusFilter.longitude,
+                  radiusKm: locationRadiusFilter.radius_km
+                })}`}
+                onClick={handleClearLocationFilter}
+              >
+                {formatLocationChipLabel({
+                  latitude: locationRadiusFilter.latitude,
+                  longitude: locationRadiusFilter.longitude,
+                  radiusKm: locationRadiusFilter.radius_km
+                })}
+                <span aria-hidden="true"> ×</span>
+              </button>
+            </li>
+          ) : null}
           {selectedPersonNames.map((displayName) => (
             <li key={displayName}>
               <button
@@ -490,6 +612,10 @@ export function SearchRoutePage() {
         {fromDate || toDate ? `${fromDate || "(open)"} to ${toDate || "(open)"}` : "(none)"}
         {" | People: "}
         {selectedPersonNames.length > 0 ? selectedPersonNames.join(", ") : "(none)"}
+        {" | Location: "}
+        {locationRadiusFilter
+          ? `${locationRadiusFilter.latitude.toFixed(4)}, ${locationRadiusFilter.longitude.toFixed(4)} (${locationRadiusFilter.radius_km.toFixed(1)} km)`
+          : "(none)"}
       </p>
     </section>
   );
