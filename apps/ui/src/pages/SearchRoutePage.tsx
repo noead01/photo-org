@@ -19,7 +19,34 @@ type SearchResponsePayload = {
 const DEFAULT_SORT = { by: "shot_ts", dir: "desc" } as const;
 const DEFAULT_PAGE = { limit: 24, cursor: null } as const;
 
-async function fetchSearchResults(query: string): Promise<SearchResponsePayload> {
+function buildDateFilter(from: string, to: string): { from?: string; to?: string } | null {
+  const trimmedFrom = from.trim();
+  const trimmedTo = to.trim();
+
+  if (!trimmedFrom && !trimmedTo) {
+    return null;
+  }
+
+  return {
+    ...(trimmedFrom ? { from: trimmedFrom } : {}),
+    ...(trimmedTo ? { to: trimmedTo } : {})
+  };
+}
+
+function validateDateRange(from: string, to: string): string | null {
+  if (from && to && from > to) {
+    return "From date must be on or before To date.";
+  }
+
+  return null;
+}
+
+async function fetchSearchResults(
+  query: string,
+  fromDate: string,
+  toDate: string
+): Promise<SearchResponsePayload> {
+  const dateFilter = buildDateFilter(fromDate, toDate);
   const response = await fetch("/api/v1/search", {
     method: "POST",
     headers: {
@@ -27,6 +54,7 @@ async function fetchSearchResults(query: string): Promise<SearchResponsePayload>
     },
     body: JSON.stringify({
       q: query,
+      ...(dateFilter ? { filters: { date: dateFilter } } : {}),
       sort: DEFAULT_SORT,
       page: DEFAULT_PAGE
     })
@@ -42,6 +70,8 @@ async function fetchSearchResults(query: string): Promise<SearchResponsePayload>
 export function SearchRoutePage() {
   const [draftQuery, setDraftQuery] = useState("");
   const [queryChips, setQueryChips] = useState<string[]>([]);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [results, setResults] = useState<SearchPhoto[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -49,14 +79,20 @@ export function SearchRoutePage() {
   const [hasRequested, setHasRequested] = useState(false);
 
   const serializedQuery = useMemo(() => queryChips.join(" "), [queryChips]);
+  const dateRangeError = useMemo(() => validateDateRange(fromDate, toDate), [fromDate, toDate]);
+  const hasActiveDateFilter = Boolean(fromDate || toDate);
 
-  async function runSearch(chips: string[]) {
+  async function runSearch(chips: string[], activeFromDate: string, activeToDate: string) {
+    if (validateDateRange(activeFromDate, activeToDate)) {
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
     setHasRequested(true);
 
     try {
-      const payload = await fetchSearchResults(chips.join(" "));
+      const payload = await fetchSearchResults(chips.join(" "), activeFromDate, activeToDate);
       setResults(payload.hits.items);
       setTotalCount(payload.hits.total);
     } catch (caughtError: unknown) {
@@ -75,25 +111,42 @@ export function SearchRoutePage() {
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const trimmed = draftQuery.trim();
-    if (!trimmed) {
+    if (dateRangeError) {
       return;
     }
 
-    const nextChips = [...queryChips, trimmed];
-    setQueryChips(nextChips);
-    setDraftQuery("");
-    void runSearch(nextChips);
+    const trimmed = draftQuery.trim();
+    if (!trimmed && !hasActiveDateFilter) {
+      return;
+    }
+
+    const nextChips = trimmed ? [...queryChips, trimmed] : queryChips;
+    if (trimmed) {
+      setQueryChips(nextChips);
+      setDraftQuery("");
+    }
+
+    void runSearch(nextChips, fromDate, toDate);
   }
 
   function handleDismissChip(indexToRemove: number) {
     const nextChips = queryChips.filter((_, index) => index !== indexToRemove);
     setQueryChips(nextChips);
-    void runSearch(nextChips);
+    void runSearch(nextChips, fromDate, toDate);
+  }
+
+  function handleClearFromDate() {
+    setFromDate("");
+    void runSearch(queryChips, "", toDate);
+  }
+
+  function handleClearToDate() {
+    setToDate("");
+    void runSearch(queryChips, fromDate, "");
   }
 
   function handleRetry() {
-    void runSearch(queryChips);
+    void runSearch(queryChips, fromDate, toDate);
   }
 
   const summaryLabel = useMemo(() => {
@@ -116,7 +169,7 @@ export function SearchRoutePage() {
     <section aria-labelledby="page-title" className="page search-page">
       <div>
         <h1 id="page-title">Search</h1>
-        <p>Tokenized phrase chips with deterministic submit and reset behavior.</p>
+        <p>Tokenized phrase chips and inclusive date range filters with deterministic request state.</p>
       </div>
 
       <form className="search-query-form" onSubmit={handleSubmit}>
@@ -131,10 +184,59 @@ export function SearchRoutePage() {
           />
           <button type="submit">Search</button>
         </div>
+        <div className="search-date-row">
+          <label htmlFor="search-date-from">From date</label>
+          <input
+            id="search-date-from"
+            type="date"
+            value={fromDate}
+            onChange={(event) => setFromDate(event.target.value)}
+            aria-describedby="search-query-summary search-date-validation"
+          />
+          <label htmlFor="search-date-to">To date</label>
+          <input
+            id="search-date-to"
+            type="date"
+            value={toDate}
+            onChange={(event) => setToDate(event.target.value)}
+            aria-describedby="search-query-summary search-date-validation"
+          />
+        </div>
+        {dateRangeError ? (
+          <p id="search-date-validation" className="search-validation-message" role="alert">
+            {dateRangeError}
+          </p>
+        ) : null}
       </form>
 
-      {queryChips.length > 0 ? (
-        <ul className="search-chip-list" aria-label="Active query filters">
+      {queryChips.length > 0 || hasActiveDateFilter ? (
+        <ul className="search-chip-list" aria-label="Active search filters">
+          {fromDate ? (
+            <li>
+              <button
+                type="button"
+                className="search-chip"
+                aria-label={`Remove from date ${fromDate}`}
+                onClick={handleClearFromDate}
+              >
+                from: {fromDate}
+                <span aria-hidden="true"> ×</span>
+              </button>
+            </li>
+          ) : null}
+          {toDate ? (
+            <li>
+              <button
+                type="button"
+                className="search-chip"
+                aria-label={`Remove to date ${toDate}`}
+                onClick={handleClearToDate}
+              >
+                to: {toDate}
+                <span aria-hidden="true"> ×</span>
+              </button>
+            </li>
+          ) : null}
           {queryChips.map((chip, index) => (
             <li key={`${chip}-${index}`}>
               <button
@@ -191,7 +293,8 @@ export function SearchRoutePage() {
       ) : null}
 
       <p className="search-serialized-query" aria-live="off">
-        Active query: {serializedQuery || "(none)"}
+        Active query: {serializedQuery || "(none)"} | Date range:{" "}
+        {fromDate || toDate ? `${fromDate || "(open)"} to ${toDate || "(open)"}` : "(none)"}
       </p>
     </section>
   );

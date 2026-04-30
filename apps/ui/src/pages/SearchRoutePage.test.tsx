@@ -100,6 +100,25 @@ describe("SearchRoutePage", () => {
     expect(body.q).toBe("first phrase second phrase");
   });
 
+  it("submits date-only filters and sends date range under filters.date", async () => {
+    const user = userEvent.setup();
+    renderSearchAt();
+
+    await user.type(await screen.findByLabelText("From date"), "2026-04-01");
+    await user.type(screen.getByLabelText("To date"), "2026-04-30");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+
+    const lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
+    const body = JSON.parse(String((lastCall?.[1] as RequestInit).body));
+    expect(body.q).toBe("");
+    expect(body.filters).toEqual({
+      date: {
+        from: "2026-04-01",
+        to: "2026-04-30"
+      }
+    });
+  });
+
   it("ignores whitespace-only submit and keeps existing chips and request count unchanged", async () => {
     const user = userEvent.setup();
     renderSearchAt();
@@ -134,6 +153,46 @@ describe("SearchRoutePage", () => {
     expect(body.q).toBe("beta");
     expect(screen.queryByRole("button", { name: "Remove query alpha" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Remove query beta" })).toBeInTheDocument();
+  });
+
+  it("blocks submit for an invalid date range and shows explicit validation messaging", async () => {
+    const user = userEvent.setup();
+    renderSearchAt();
+
+    await user.type(await screen.findByLabelText("From date"), "2026-04-30");
+    await user.type(screen.getByLabelText("To date"), "2026-04-01");
+    await user.type(screen.getByRole("textbox", { name: "Search query" }), "lake");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "From date must be on or before To date."
+    );
+  });
+
+  it("removes active date chips and re-fetches with updated date filter state", async () => {
+    const user = userEvent.setup();
+    renderSearchAt();
+
+    await user.type(await screen.findByLabelText("From date"), "2026-04-01");
+    await user.type(screen.getByLabelText("To date"), "2026-04-30");
+    await user.type(screen.getByRole("textbox", { name: "Search query" }), "coast");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+
+    await user.click(screen.getByRole("button", { name: "Remove from date 2026-04-01" }));
+
+    const afterFromClear = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
+    const fromClearedBody = JSON.parse(String((afterFromClear?.[1] as RequestInit).body));
+    expect(fromClearedBody.filters).toEqual({
+      date: {
+        to: "2026-04-30"
+      }
+    });
+
+    await user.click(screen.getByRole("button", { name: "Remove to date 2026-04-30" }));
+    const afterToClear = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
+    const toClearedBody = JSON.parse(String((afterToClear?.[1] as RequestInit).body));
+    expect(toClearedBody.filters).toBeUndefined();
   });
 
   it("renders loading status while the search request is pending", async () => {

@@ -656,6 +656,31 @@ body {
   font: inherit;
 }
 
+.search-date-row {
+  display: grid;
+  grid-template-columns: auto minmax(9rem, 1fr) auto minmax(9rem, 1fr);
+  gap: 0.45rem 0.6rem;
+  align-items: center;
+}
+
+.search-date-row label {
+  color: #334155;
+  font-size: 0.9rem;
+}
+
+.search-date-row input {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.45rem;
+  padding: 0.4rem 0.5rem;
+  font: inherit;
+}
+
+.search-validation-message {
+  margin: 0;
+  color: #b91c1c;
+  font-size: 0.9rem;
+}
+
 .search-chip-list {
   margin: 0;
   padding: 0;
@@ -797,5 +822,9 @@ body {
 
   .search-query-row button {
     width: fit-content;
+  }
+
+  .search-date-row {
+    grid-template-columns: 1fr;
   }
 }
