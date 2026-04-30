@@ -675,6 +675,58 @@ body {
   font: inherit;
 }
 
+.search-person-row {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.search-person-row label {
+  color: #334155;
+  font-size: 0.9rem;
+}
+
+.search-person-input-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.search-person-input-row input {
+  flex: 1 1 16rem;
+  min-width: 12rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.45rem;
+  padding: 0.45rem 0.55rem;
+  font: inherit;
+}
+
+.search-person-input-row button {
+  border: 1px solid #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 0.45rem;
+  padding: 0.45rem 0.7rem;
+  font: inherit;
+}
+
+.search-person-suggestion-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.search-person-suggestion {
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #1e293b;
+  border-radius: 0.45rem;
+  padding: 0.3rem 0.6rem;
+  font: inherit;
+}
+
 .search-validation-message {
   margin: 0;
   color: #b91c1c;
@@ -821,6 +873,14 @@ body {
   }
 
   .search-query-row button {
+    width: fit-content;
+  }
+
+  .search-person-input-row {
+    flex-direction: column;
+  }
+
+  .search-person-input-row button {
     width: fit-content;
   }
 

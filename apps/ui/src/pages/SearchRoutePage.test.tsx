@@ -3,6 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { SearchRoutePage } from "./SearchRoutePage";
 
+const SEARCH_ENDPOINT = "/api/v1/search";
+const PEOPLE_ENDPOINT = "/api/v1/people";
+
 interface SearchResponsePayload {
   hits: {
     total: number;
@@ -16,6 +19,13 @@ interface SearchResponsePayload {
     }>;
   };
   facets: Record<string, unknown>;
+}
+
+interface PersonPayload {
+  person_id: string;
+  display_name: string;
+  created_ts: string;
+  updated_ts: string;
 }
 
 function buildPayload(photoIds: string[], total = photoIds.length): SearchResponsePayload {
@@ -35,6 +45,27 @@ function buildPayload(photoIds: string[], total = photoIds.length): SearchRespon
   };
 }
 
+const PEOPLE_FIXTURE: PersonPayload[] = [
+  {
+    person_id: "person-inez",
+    display_name: "Inez Alvarez",
+    created_ts: "2026-04-10T12:00:00Z",
+    updated_ts: "2026-04-11T12:00:00Z"
+  },
+  {
+    person_id: "person-ana",
+    display_name: "Ana Morales",
+    created_ts: "2026-04-10T12:00:00Z",
+    updated_ts: "2026-04-11T12:00:00Z"
+  },
+  {
+    person_id: "person-andy",
+    display_name: "Andy Morgan",
+    created_ts: "2026-04-10T12:00:00Z",
+    updated_ts: "2026-04-11T12:00:00Z"
+  }
+];
+
 function renderSearchAt(path = "/search") {
   return render(
     <MemoryRouter
@@ -48,16 +79,37 @@ function renderSearchAt(path = "/search") {
   );
 }
 
+function searchCalls(fetchMock: ReturnType<typeof vi.fn>) {
+  return fetchMock.mock.calls.filter(
+    ([url]) => typeof url === "string" && url === SEARCH_ENDPOINT
+  );
+}
+
+function lastSearchBody(fetchMock: ReturnType<typeof vi.fn>) {
+  const calls = searchCalls(fetchMock);
+  const lastCall = calls[calls.length - 1];
+  return JSON.parse(String((lastCall?.[1] as RequestInit).body));
+}
+
 describe("SearchRoutePage", () => {
   const fetchMock = vi.fn();
 
   beforeEach(() => {
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => buildPayload([], 0)
-    } as Response);
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === PEOPLE_ENDPOINT) {
+        return {
+          ok: true,
+          json: async () => PEOPLE_FIXTURE
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => buildPayload([], 0)
+      } as Response;
+    });
   });
 
   afterEach(() => {
@@ -73,8 +125,8 @@ describe("SearchRoutePage", () => {
 
     expect(await screen.findByRole("button", { name: "Remove query lake weekend" })).toBeInTheDocument();
 
-    const lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
-    expect(lastCall?.[0]).toBe("/api/v1/search");
+    const lastCall = searchCalls(fetchMock)[searchCalls(fetchMock).length - 1];
+    expect(lastCall?.[0]).toBe(SEARCH_ENDPOINT);
     const body = JSON.parse(String((lastCall?.[1] as RequestInit).body));
     expect(body.q).toBe("lake weekend");
     expect(body.sort).toEqual({ by: "shot_ts", dir: "desc" });
@@ -95,8 +147,7 @@ describe("SearchRoutePage", () => {
     expect(screen.getByRole("button", { name: "Remove query first phrase" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Remove query second phrase" })).toBeInTheDocument();
 
-    const lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
-    const body = JSON.parse(String((lastCall?.[1] as RequestInit).body));
+    const body = lastSearchBody(fetchMock);
     expect(body.q).toBe("first phrase second phrase");
   });
 
@@ -108,8 +159,7 @@ describe("SearchRoutePage", () => {
     await user.type(screen.getByLabelText("To date"), "2026-04-30");
     await user.click(screen.getByRole("button", { name: "Search" }));
 
-    const lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
-    const body = JSON.parse(String((lastCall?.[1] as RequestInit).body));
+    const body = lastSearchBody(fetchMock);
     expect(body.q).toBe("");
     expect(body.filters).toEqual({
       date: {
@@ -126,13 +176,13 @@ describe("SearchRoutePage", () => {
     const input = await screen.findByRole("textbox", { name: "Search query" });
     await user.type(input, "coastline");
     await user.click(screen.getByRole("button", { name: "Search" }));
-    const callsAfterFirstSubmit = fetchMock.mock.calls.length;
+    const callsAfterFirstSubmit = searchCalls(fetchMock).length;
 
     await user.clear(input);
     await user.type(input, "   ");
     await user.keyboard("{Enter}");
 
-    expect(fetchMock.mock.calls.length).toBe(callsAfterFirstSubmit);
+    expect(searchCalls(fetchMock).length).toBe(callsAfterFirstSubmit);
     expect(screen.getByRole("button", { name: "Remove query coastline" })).toBeInTheDocument();
   });
 
@@ -148,8 +198,7 @@ describe("SearchRoutePage", () => {
 
     await user.click(screen.getByRole("button", { name: "Remove query alpha" }));
 
-    const lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
-    const body = JSON.parse(String((lastCall?.[1] as RequestInit).body));
+    const body = lastSearchBody(fetchMock);
     expect(body.q).toBe("beta");
     expect(screen.queryByRole("button", { name: "Remove query alpha" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Remove query beta" })).toBeInTheDocument();
@@ -164,7 +213,7 @@ describe("SearchRoutePage", () => {
     await user.type(screen.getByRole("textbox", { name: "Search query" }), "lake");
     await user.click(screen.getByRole("button", { name: "Search" }));
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(searchCalls(fetchMock)).toHaveLength(0);
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "From date must be on or before To date."
     );
@@ -181,8 +230,7 @@ describe("SearchRoutePage", () => {
 
     await user.click(screen.getByRole("button", { name: "Remove from date 2026-04-01" }));
 
-    const afterFromClear = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
-    const fromClearedBody = JSON.parse(String((afterFromClear?.[1] as RequestInit).body));
+    const fromClearedBody = lastSearchBody(fetchMock);
     expect(fromClearedBody.filters).toEqual({
       date: {
         to: "2026-04-30"
@@ -190,19 +238,24 @@ describe("SearchRoutePage", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "Remove to date 2026-04-30" }));
-    const afterToClear = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
-    const toClearedBody = JSON.parse(String((afterToClear?.[1] as RequestInit).body));
+    const toClearedBody = lastSearchBody(fetchMock);
     expect(toClearedBody.filters).toBeUndefined();
   });
 
   it("renders loading status while the search request is pending", async () => {
     let resolveResponse!: (value: Response) => void;
-    fetchMock.mockImplementationOnce(
-      () =>
-        new Promise<Response>((resolve) => {
-          resolveResponse = resolve;
-        })
-    );
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === PEOPLE_ENDPOINT) {
+        return {
+          ok: true,
+          json: async () => PEOPLE_FIXTURE
+        } as Response;
+      }
+
+      return await new Promise<Response>((resolve) => {
+        resolveResponse = resolve;
+      });
+    });
 
     const user = userEvent.setup();
     renderSearchAt();
@@ -224,12 +277,25 @@ describe("SearchRoutePage", () => {
   it("shows retry UI on failure and retries with active chips", async () => {
     const user = userEvent.setup();
 
-    fetchMock
-      .mockResolvedValueOnce({ ok: false, status: 503 } as Response)
-      .mockResolvedValueOnce({
+    let searchRequestCount = 0;
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === PEOPLE_ENDPOINT) {
+        return {
+          ok: true,
+          json: async () => PEOPLE_FIXTURE
+        } as Response;
+      }
+
+      searchRequestCount += 1;
+      if (searchRequestCount === 1) {
+        return { ok: false, status: 503 } as Response;
+      }
+
+      return {
         ok: true,
         json: async () => buildPayload(["photo-1"], 1)
-      } as Response);
+      } as Response;
+    });
 
     renderSearchAt();
     const input = await screen.findByRole("textbox", { name: "Search query" });
@@ -245,9 +311,75 @@ describe("SearchRoutePage", () => {
 
     await user.click(screen.getByRole("button", { name: "Retry" }));
 
-    const lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
-    const body = JSON.parse(String((lastCall?.[1] as RequestInit).body));
+    const body = lastSearchBody(fetchMock);
     expect(body.q).toBe("storm coast");
     expect(await screen.findByText("photo-1")).toBeInTheDocument();
+  });
+
+  it("adds a fuzzy-matched person filter and submits it as filters.person_names", async () => {
+    const user = userEvent.setup();
+    renderSearchAt();
+
+    const personInput = await screen.findByLabelText("Person filter");
+    await user.type(personInput, "inz");
+    await user.click(screen.getByRole("button", { name: "Add person filter" }));
+
+    expect(screen.getByRole("button", { name: "Remove person Inez Alvarez" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    const body = lastSearchBody(fetchMock);
+    expect(body.filters).toEqual({
+      person_names: ["Inez Alvarez"]
+    });
+  });
+
+  it("surfaces ambiguous fuzzy matches and allows selecting a specific person suggestion", async () => {
+    const user = userEvent.setup();
+    renderSearchAt();
+
+    const personInput = await screen.findByLabelText("Person filter");
+    await user.type(personInput, "an");
+    await user.click(screen.getByRole("button", { name: "Add person filter" }));
+
+    expect(
+      await screen.findByText('Multiple people match "an". Select one from suggestions.')
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Ana Morales" }));
+    expect(screen.getByRole("button", { name: "Remove person Ana Morales" })).toBeInTheDocument();
+  });
+
+  it("shows explicit no-match feedback without blocking other search submission", async () => {
+    const user = userEvent.setup();
+    renderSearchAt();
+
+    const personInput = await screen.findByLabelText("Person filter");
+    await user.type(personInput, "zzzz");
+    await user.click(screen.getByRole("button", { name: "Add person filter" }));
+
+    expect(
+      await screen.findByText('No people match "zzzz". Search still works without this filter.')
+    ).toBeInTheDocument();
+
+    await user.type(screen.getByRole("textbox", { name: "Search query" }), "coast");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+
+    const body = lastSearchBody(fetchMock);
+    expect(body.q).toBe("coast");
+    expect(body.filters).toBeUndefined();
+  });
+
+  it("removes selected person chips and re-fetches without person_names filters", async () => {
+    const user = userEvent.setup();
+    renderSearchAt();
+
+    const personInput = await screen.findByLabelText("Person filter");
+    await user.type(personInput, "inez");
+    await user.click(screen.getByRole("button", { name: "Add person filter" }));
+    await user.click(screen.getByRole("button", { name: "Search" }));
+
+    await user.click(screen.getByRole("button", { name: "Remove person Inez Alvarez" }));
+    const body = lastSearchBody(fetchMock);
+    expect(body.filters).toBeUndefined();
   });
 });
