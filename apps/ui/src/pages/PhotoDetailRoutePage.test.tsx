@@ -216,11 +216,11 @@ describe("PhotoDetailRoutePage", () => {
     renderDetail();
 
     expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
-    expect(screen.getByLabelText("Face region 1 for person-1")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Face region 1 for person-1")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Actual pixels" }));
 
-    expect(screen.getByLabelText("Face region 1 for person-1")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Face region 1 for person-1")).toBeInTheDocument();
   });
 
   it("renders deterministic loading and error transitions", async () => {
