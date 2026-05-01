@@ -57,7 +57,7 @@ export const PRIMARY_ROUTE_DEFINITIONS: PrimaryRouteDefinition[] = [
     path: "/labeling",
     navLabel: "Labeling",
     title: "Labeling",
-    description: "Face-labeling workflow surface placeholder.",
+    description: "People management workflows for labeling identities.",
     handoff: baseHandoffExpectation
   },
   {

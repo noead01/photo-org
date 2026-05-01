@@ -955,6 +955,130 @@ body {
   color: #64748b;
 }
 
+.people-management-page {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.people-management-header p {
+  margin-top: 0;
+  color: #334155;
+}
+
+.people-management-panel {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.7rem;
+  background: #ffffff;
+  padding: 0.8rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.people-management-panel h2 {
+  margin: 0;
+  font-size: 1rem;
+  color: #0f172a;
+}
+
+.people-create-form {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.people-create-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.people-create-row input {
+  flex: 1 1 16rem;
+  min-width: 11rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.45rem;
+  padding: 0.42rem 0.52rem;
+  font: inherit;
+}
+
+.people-create-row button {
+  border: 1px solid #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 0.45rem;
+  padding: 0.42rem 0.65rem;
+  font: inherit;
+}
+
+.people-management-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.people-management-item {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.7rem;
+  background: #ffffff;
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.people-management-item h2 {
+  margin: 0;
+  font-size: 0.98rem;
+  color: #0f172a;
+}
+
+.people-management-id {
+  margin: 0;
+  color: #475569;
+  font-size: 0.78rem;
+}
+
+.people-management-item label {
+  color: #334155;
+  font-size: 0.9rem;
+}
+
+.people-management-actions {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.people-management-actions input {
+  flex: 1 1 15rem;
+  min-width: 11rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.45rem;
+  padding: 0.4rem 0.5rem;
+  font: inherit;
+}
+
+.people-management-actions button {
+  border: 1px solid #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 0.45rem;
+  padding: 0.38rem 0.58rem;
+  font: inherit;
+}
+
+.people-management-actions button:disabled,
+.people-create-row button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.people-validation-message {
+  margin: 0;
+  color: #b91c1c;
+  font-size: 0.88rem;
+}
+
 @media (max-width: 1024px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -1051,6 +1175,26 @@ body {
   }
 
   .search-person-input-row button {
+    width: fit-content;
+  }
+
+  .people-create-row {
+    flex-direction: column;
+  }
+
+  .people-create-row button {
+    width: fit-content;
+  }
+
+  .people-management-actions {
+    flex-direction: column;
+  }
+
+  .people-management-actions input {
+    width: 100%;
+  }
+
+  .people-management-actions button {
     width: fit-content;
   }
 

@@ -62,7 +62,7 @@ function expectShellContextText(text: string) {
 }
 
 const ROUTES_WITH_PRIMARY_PAGE_FEEDBACK = PRIMARY_ROUTE_DEFINITIONS.filter(
-  (route) => route.key !== "search"
+  (route) => route.key !== "search" && route.key !== "labeling"
 );
 
 describe("App shell", () => {
@@ -186,37 +186,37 @@ describe("App shell", () => {
 
   it("transitions from route error to ready on retry for primary-placeholder routes", async () => {
     const user = userEvent.setup();
-    renderAtPath("/labeling?demoState=error");
+    renderAtPath("/operations?demoState=error");
 
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
     expect(
       screen.getByRole("heading", {
-        name: "Could not load Labeling",
+        name: "Could not load Operations",
         level: 2
       })
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Retry" }));
 
-    expect(screen.getByRole("heading", { name: "Labeling", level: 1 })).toBeInTheDocument();
-    expect(screen.getByText("Labeling is ready.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Operations", level: 1 })).toBeInTheDocument();
+    expect(screen.getByText("Operations is ready.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Dismiss notification" }));
-    expect(screen.queryByText("Labeling is ready.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Operations is ready.")).not.toBeInTheDocument();
   });
 
   it("does not reset feedback state when unrelated query params change", async () => {
     const user = userEvent.setup();
-    renderAtPathWithQueryBump("/labeling?demoState=error&panel=primary");
+    renderAtPathWithQueryBump("/operations?demoState=error&panel=primary");
 
     await user.click(screen.getByRole("button", { name: "Retry" }));
-    expect(screen.getByText("Labeling is ready.")).toBeInTheDocument();
+    expect(screen.getByText("Operations is ready.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Bump query" }));
 
-    expect(screen.getByRole("heading", { name: "Labeling", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Operations", level: 1 })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
-    expect(screen.getByText("Labeling is ready.")).toBeInTheDocument();
+    expect(screen.getByText("Operations is ready.")).toBeInTheDocument();
   });
 
   it("renders search query controls on the /search route", async () => {
@@ -230,5 +230,18 @@ describe("App shell", () => {
     expect(await screen.findByRole("heading", { name: "Search", level: 1 })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Search query" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Search" })).toBeInTheDocument();
+  });
+
+  it("renders people-management controls on the /labeling route", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => []
+    } as Response);
+
+    renderAtPath("/labeling");
+
+    expect(await screen.findByRole("heading", { name: "Labeling", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Create person display name" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create person" })).toBeInTheDocument();
   });
 });
