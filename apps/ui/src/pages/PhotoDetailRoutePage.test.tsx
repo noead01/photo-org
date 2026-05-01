@@ -287,6 +287,66 @@ describe("PhotoDetailRoutePage", () => {
     expect(screen.getByText("person-1")).toBeInTheDocument();
   });
 
+  it("updates local face state after correction success and shows correction provenance", async () => {
+    const user = userEvent.setup();
+
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () =>
+          buildPayload({
+            people: ["person-1"],
+            faces: [
+              {
+                face_id: "face-1",
+                person_id: "person-1",
+                bbox_x: 10,
+                bbox_y: 10,
+                bbox_w: 20,
+                bbox_h: 20
+              }
+            ]
+          })
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            person_id: "person-1",
+            display_name: "Inez",
+            created_ts: "2026-03-28T19:30:00Z",
+            updated_ts: "2026-03-28T19:30:00Z"
+          },
+          {
+            person_id: "person-2",
+            display_name: "Mateo",
+            created_ts: "2026-03-28T19:30:00Z",
+            updated_ts: "2026-03-28T19:30:00Z"
+          }
+        ]
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          face_id: "face-1",
+          photo_id: "photo-1",
+          previous_person_id: "person-1",
+          person_id: "person-2"
+        })
+      } as Response);
+
+    renderDetail();
+
+    expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
+    await user.selectOptions(await screen.findByLabelText("Correct face 1"), "person-2");
+    await user.click(screen.getByRole("button", { name: "Confirm reassignment" }));
+
+    expect(await screen.findByText("Correction recorded: Inez -> Mateo.")).toBeInTheDocument();
+    expect(screen.getByText("Face 1: Mateo")).toBeInTheDocument();
+    expect(screen.getByText("person-2")).toBeInTheDocument();
+  });
+
   it("renders deterministic loading and error transitions", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: false,
