@@ -19,6 +19,7 @@ import { BrowseRoutePage } from "../pages/BrowseRoutePage";
 import { SearchRoutePage } from "../pages/SearchRoutePage";
 import { PhotoDetailRoutePage } from "../pages/PhotoDetailRoutePage";
 import { NotFoundPage } from "../pages/NotFoundPage";
+import { PeopleManagementRoutePage } from "../pages/PeopleManagementRoutePage";
 import {
   resolveInitialSessionIdentity,
   type SessionIdentity
@@ -88,6 +89,8 @@ export function AppRouteTree({ initialSessionIdentity }: AppRouteTreeProps = {})
                 <BrowseRoutePage />
               ) : route.key === "search" ? (
                 <SearchRoutePage />
+              ) : route.key === "labeling" ? (
+                <PeopleManagementRoutePage />
               ) : (
                 <PrimaryRoutePage route={route} />
               )

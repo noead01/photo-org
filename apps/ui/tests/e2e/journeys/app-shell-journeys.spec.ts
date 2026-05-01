@@ -118,19 +118,66 @@ test("JRN-P3-search-route-deep-link @journey @smoke", async ({ page }) => {
 });
 
 test("JRN-P2-shared-feedback-surfaces @journey @smoke", async ({ page }) => {
-  await page.goto("/labeling?demoState=loading");
+  let phase: "loading" | "error" | "success" = "loading";
+  let releaseFirstPeopleResponse: (() => void) | null = null;
+  const firstPeopleResponseGate = new Promise<void>((resolve) => {
+    releaseFirstPeopleResponse = resolve;
+  });
 
-  await expect(page.getByRole("status")).toContainText(/Loading labeling workflow/i);
+  await page.route("**/api/v1/people", async (route) => {
+    if (phase === "loading") {
+      await firstPeopleResponseGate;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([])
+      });
+      return;
+    }
 
-  await page.goto("/labeling?demoState=error");
+    if (phase === "error") {
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "Service unavailable" })
+      });
+      return;
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([
+        {
+          person_id: "person-1",
+          display_name: "Ana Gomez",
+          created_ts: "2026-04-20T12:00:00Z",
+          updated_ts: "2026-04-20T12:00:00Z"
+        }
+      ])
+    });
+  });
+
+  await page.goto("/labeling");
+  await expect(page.getByRole("status")).toContainText(/Loading people directory/i);
+  releaseFirstPeopleResponse?.();
+  await expect(
+    page.getByText("No people yet. Create the first person to start labeling.")
+  ).toBeVisible();
+
+  phase = "error";
+  await page.goto("/labeling");
+  await expect(
+    page.getByRole("heading", { name: "Could not load people directory", level: 2 })
+  ).toBeVisible();
 
   const retryButton = page.getByRole("button", { name: "Retry" });
   await expect(retryButton).toBeVisible();
 
+  phase = "success";
   await retryButton.click();
 
-  await expect(page.getByRole("heading", { name: "Labeling", level: 1 })).toBeVisible();
-  await expect(page.getByText("Labeling is ready.")).toBeVisible();
+  await expect(page.getByText("Ana Gomez")).toBeVisible();
   await expectShellRoute(page, "labeling");
   await expect(page).toHaveURL(/\/labeling(?:\?|$)/);
 });
