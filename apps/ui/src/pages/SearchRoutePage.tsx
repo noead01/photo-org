@@ -59,6 +59,30 @@ type SearchUrlState = {
   pathHintFilters: string[];
 };
 
+type SearchRequestSnapshot = {
+  chips: string[];
+  fromDate: string;
+  toDate: string;
+  personNames: string[];
+  locationRadius: { latitude: number; longitude: number; radius_km: number } | null;
+  hasFaces: boolean | null;
+  pathHints: string[];
+  sortDirection: SortDirection;
+  page: number;
+  cursorByPage: Record<number, string | null>;
+};
+
+function hasActiveSearchCriteria(snapshot: SearchRequestSnapshot): boolean {
+  return (
+    snapshot.chips.length > 0 ||
+    Boolean(snapshot.fromDate || snapshot.toDate) ||
+    snapshot.personNames.length > 0 ||
+    snapshot.locationRadius !== null ||
+    snapshot.hasFaces !== null ||
+    snapshot.pathHints.length > 0
+  );
+}
+
 function dedupeTrimmedValues(values: string[]): string[] {
   const seen = new Set<string>();
   const deduped: string[] = [];
@@ -344,6 +368,8 @@ export function SearchRoutePage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasRequested, setHasRequested] = useState(false);
+  const [lastFailedRequest, setLastFailedRequest] = useState<SearchRequestSnapshot | null>(null);
+  const [lastSuccessfulHadCriteria, setLastSuccessfulHadCriteria] = useState(false);
   const parsedUrlState = useMemo(() => parseSearchUrlState(location.search), [location.search]);
 
   const serializedQuery = useMemo(() => queryChips.join(" "), [queryChips]);
@@ -426,6 +452,8 @@ export function SearchRoutePage() {
     setIsLoading(false);
     setError(null);
     setHasRequested(false);
+    setLastFailedRequest(null);
+    setLastSuccessfulHadCriteria(false);
     setSortDirection(DEFAULT_SORT_DIRECTION);
     setPage(1);
     setCursorByPage({ 1: null });
@@ -486,19 +514,23 @@ export function SearchRoutePage() {
     toDate
   ]);
 
-  async function runSearch(
-    chips: string[],
-    activeFromDate: string,
-    activeToDate: string,
-    activePersonNames: string[],
-    activeLocationRadius: { latitude: number; longitude: number; radius_km: number } | null,
-    activeHasFaces: boolean | null,
-    activePathHints: string[],
-    activeSortDirection: SortDirection,
-    activePage: number,
-    activeCursorByPage: Record<number, string | null>
-  ) {
-    if (validateDateRange(activeFromDate, activeToDate)) {
+  function createSearchSnapshot(snapshot: SearchRequestSnapshot): SearchRequestSnapshot {
+    return {
+      chips: [...snapshot.chips],
+      fromDate: snapshot.fromDate,
+      toDate: snapshot.toDate,
+      personNames: [...snapshot.personNames],
+      locationRadius: snapshot.locationRadius ? { ...snapshot.locationRadius } : null,
+      hasFaces: snapshot.hasFaces,
+      pathHints: [...snapshot.pathHints],
+      sortDirection: snapshot.sortDirection,
+      page: snapshot.page,
+      cursorByPage: { ...snapshot.cursorByPage }
+    };
+  }
+
+  async function runSearch(snapshot: SearchRequestSnapshot) {
+    if (validateDateRange(snapshot.fromDate, snapshot.toDate)) {
       return;
     }
 
@@ -508,80 +540,95 @@ export function SearchRoutePage() {
     setPaginationMessage(null);
 
     try {
-      const cursor = activeCursorByPage[activePage];
-      if (activePage > 1 && cursor === undefined) {
+      const hadCriteria = hasActiveSearchCriteria(snapshot);
+      const cursor = snapshot.cursorByPage[snapshot.page];
+      if (snapshot.page > 1 && cursor === undefined) {
         setPaginationMessage(INVALID_PAGE_MESSAGE);
-        const resetCursors = { 1: null };
+        const resetSnapshot = createSearchSnapshot({
+          ...snapshot,
+          page: 1,
+          cursorByPage: { 1: null }
+        });
         setPage(1);
-        setCursorByPage(resetCursors);
+        setCursorByPage(resetSnapshot.cursorByPage);
         const resetPayload = await fetchSearchResults(
-          chips.join(" "),
-          activeFromDate,
-          activeToDate,
-          activePersonNames,
-          activeLocationRadius,
-          activeHasFaces,
-          activePathHints,
-          activeSortDirection,
+          resetSnapshot.chips.join(" "),
+          resetSnapshot.fromDate,
+          resetSnapshot.toDate,
+          resetSnapshot.personNames,
+          resetSnapshot.locationRadius,
+          resetSnapshot.hasFaces,
+          resetSnapshot.pathHints,
+          resetSnapshot.sortDirection,
           null
         );
         setResults(resetPayload.hits.items);
         setTotalCount(resetPayload.hits.total);
         setNextCursor(resetPayload.hits.cursor);
+        setLastFailedRequest(null);
+        setLastSuccessfulHadCriteria(hasActiveSearchCriteria(resetSnapshot));
         setFacetHasFacesCounts(parseHasFacesFacetCounts(resetPayload.facets));
-        setFacetPathHintCounts(toPathHintFacetCounts(resetPayload.facets, activePathHints));
+        setFacetPathHintCounts(toPathHintFacetCounts(resetPayload.facets, resetSnapshot.pathHints));
         setCursorByPage({ 1: null, ...(resetPayload.hits.cursor ? { 2: resetPayload.hits.cursor } : {}) });
         return;
       }
 
       const payload = await fetchSearchResults(
-        chips.join(" "),
-        activeFromDate,
-        activeToDate,
-        activePersonNames,
-        activeLocationRadius,
-        activeHasFaces,
-        activePathHints,
-        activeSortDirection,
+        snapshot.chips.join(" "),
+        snapshot.fromDate,
+        snapshot.toDate,
+        snapshot.personNames,
+        snapshot.locationRadius,
+        snapshot.hasFaces,
+        snapshot.pathHints,
+        snapshot.sortDirection,
         cursor ?? null
       );
-      if (activePage > 1 && payload.hits.items.length === 0) {
+      if (snapshot.page > 1 && payload.hits.items.length === 0) {
         setPaginationMessage(INVALID_PAGE_MESSAGE);
-        const resetCursors = { 1: null };
+        const resetSnapshot = createSearchSnapshot({
+          ...snapshot,
+          page: 1,
+          cursorByPage: { 1: null }
+        });
         setPage(1);
-        setCursorByPage(resetCursors);
+        setCursorByPage(resetSnapshot.cursorByPage);
         const resetPayload = await fetchSearchResults(
-          chips.join(" "),
-          activeFromDate,
-          activeToDate,
-          activePersonNames,
-          activeLocationRadius,
-          activeHasFaces,
-          activePathHints,
-          activeSortDirection,
+          resetSnapshot.chips.join(" "),
+          resetSnapshot.fromDate,
+          resetSnapshot.toDate,
+          resetSnapshot.personNames,
+          resetSnapshot.locationRadius,
+          resetSnapshot.hasFaces,
+          resetSnapshot.pathHints,
+          resetSnapshot.sortDirection,
           null
         );
         setResults(resetPayload.hits.items);
         setTotalCount(resetPayload.hits.total);
         setNextCursor(resetPayload.hits.cursor);
+        setLastFailedRequest(null);
+        setLastSuccessfulHadCriteria(hasActiveSearchCriteria(resetSnapshot));
         setFacetHasFacesCounts(parseHasFacesFacetCounts(resetPayload.facets));
-        setFacetPathHintCounts(toPathHintFacetCounts(resetPayload.facets, activePathHints));
+        setFacetPathHintCounts(toPathHintFacetCounts(resetPayload.facets, resetSnapshot.pathHints));
         setCursorByPage({ 1: null, ...(resetPayload.hits.cursor ? { 2: resetPayload.hits.cursor } : {}) });
         return;
       }
       setResults(payload.hits.items);
       setTotalCount(payload.hits.total);
-      setPage(activePage);
+      setPage(snapshot.page);
       setNextCursor(payload.hits.cursor);
+      setLastFailedRequest(null);
+      setLastSuccessfulHadCriteria(hadCriteria);
       setFacetHasFacesCounts(parseHasFacesFacetCounts(payload.facets));
-      setFacetPathHintCounts(toPathHintFacetCounts(payload.facets, activePathHints));
+      setFacetPathHintCounts(toPathHintFacetCounts(payload.facets, snapshot.pathHints));
       setCursorByPage((current) => {
-        const pageCursor = activeCursorByPage[activePage];
-        const next = { ...current, ...activeCursorByPage, [activePage]: pageCursor ?? null };
+        const pageCursor = snapshot.cursorByPage[snapshot.page];
+        const next = { ...current, ...snapshot.cursorByPage, [snapshot.page]: pageCursor ?? null };
         if (payload.hits.cursor === null) {
-          delete next[activePage + 1];
+          delete next[snapshot.page + 1];
         } else {
-          next[activePage + 1] = payload.hits.cursor;
+          next[snapshot.page + 1] = payload.hits.cursor;
         }
         return next;
       });
@@ -591,12 +638,13 @@ export function SearchRoutePage() {
           ? caughtError.message
           : "Could not load search results.";
       setError(message);
+      setLastFailedRequest(createSearchSnapshot(snapshot));
       setResults([]);
       setTotalCount(0);
       setNextCursor(null);
       setFacetHasFacesCounts({ true: 0, false: 0 });
       setFacetPathHintCounts(
-        activePathHints.map((value) => ({
+        snapshot.pathHints.map((value) => ({
           value,
           count: 0
         }))
@@ -631,18 +679,21 @@ export function SearchRoutePage() {
       setNextCursor(null);
     }
 
-    void runSearch(
-      overrides.chips ?? queryChips,
-      overrides.fromDate ?? fromDate,
-      overrides.toDate ?? toDate,
-      overrides.personNames ?? selectedPersonNames,
-      overrides.locationRadius === undefined ? locationRadiusFilter : overrides.locationRadius,
-      overrides.hasFaces === undefined ? hasFacesFilter : overrides.hasFaces,
-      overrides.pathHints ?? pathHintFilters,
-      overrides.sortDirection ?? sortDirection,
-      resolvedPage,
-      resolvedCursorByPage
-    );
+    const snapshot = createSearchSnapshot({
+      chips: overrides.chips ?? queryChips,
+      fromDate: overrides.fromDate ?? fromDate,
+      toDate: overrides.toDate ?? toDate,
+      personNames: overrides.personNames ?? selectedPersonNames,
+      locationRadius:
+        overrides.locationRadius === undefined ? locationRadiusFilter : overrides.locationRadius,
+      hasFaces: overrides.hasFaces === undefined ? hasFacesFilter : overrides.hasFaces,
+      pathHints: overrides.pathHints ?? pathHintFilters,
+      sortDirection: overrides.sortDirection ?? sortDirection,
+      page: resolvedPage,
+      cursorByPage: resolvedCursorByPage
+    });
+
+    void runSearch(snapshot);
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -822,8 +873,28 @@ export function SearchRoutePage() {
   }
 
   function handleRetry() {
+    if (lastFailedRequest) {
+      void runSearch(lastFailedRequest);
+      return;
+    }
     requestSearch();
   }
+
+  const resultViewState = useMemo(() => {
+    if (isLoading) {
+      return "loading";
+    }
+    if (error) {
+      return "error";
+    }
+    if (!hasRequested) {
+      return "idle";
+    }
+    if (results.length > 0) {
+      return "results";
+    }
+    return lastSuccessfulHadCriteria ? "no_match" : "empty";
+  }, [error, hasRequested, isLoading, lastSuccessfulHadCriteria, results.length]);
 
   const summaryLabel = useMemo(() => {
     if (isLoading) {
@@ -1142,13 +1213,13 @@ export function SearchRoutePage() {
         </p>
       ) : null}
 
-      {isLoading ? (
+      {resultViewState === "loading" ? (
         <div className="feedback-panel feedback-panel-loading" role="status" aria-live="polite">
           Loading search workflow.
         </div>
       ) : null}
 
-      {error ? (
+      {resultViewState === "error" ? (
         <div className="feedback-panel feedback-panel-error">
           <h2>Could not load Search</h2>
           <p>{error}</p>
@@ -1158,13 +1229,19 @@ export function SearchRoutePage() {
         </div>
       ) : null}
 
-      {!error && !isLoading && hasRequested && results.length === 0 ? (
+      {resultViewState === "empty" ? (
+        <div className="feedback-panel">
+          <p>No photos are available in the catalog yet.</p>
+        </div>
+      ) : null}
+
+      {resultViewState === "no_match" ? (
         <div className="feedback-panel">
           <p>No matching photos for the active query.</p>
         </div>
       ) : null}
 
-      {!error && !isLoading && results.length > 0 ? (
+      {resultViewState === "results" ? (
         <ol className="search-results" aria-label="Search results">
           {results.map((photo) => (
             <li key={photo.photo_id}>
