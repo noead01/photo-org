@@ -72,6 +72,14 @@ type SearchRequestSnapshot = {
   cursorByPage: Record<number, string | null>;
 };
 
+function buildFirstPageCursorMap(nextCursor: string | null): Record<number, string | null> {
+  const cursorMap: Record<number, string | null> = { 1: null };
+  if (nextCursor !== null) {
+    cursorMap[2] = nextCursor;
+  }
+  return cursorMap;
+}
+
 function hasActiveSearchCriteria(snapshot: SearchRequestSnapshot): boolean {
   return (
     snapshot.chips.length > 0 ||
@@ -569,7 +577,7 @@ export function SearchRoutePage() {
         setLastSuccessfulHadCriteria(hasActiveSearchCriteria(resetSnapshot));
         setFacetHasFacesCounts(parseHasFacesFacetCounts(resetPayload.facets));
         setFacetPathHintCounts(toPathHintFacetCounts(resetPayload.facets, resetSnapshot.pathHints));
-        setCursorByPage({ 1: null, ...(resetPayload.hits.cursor ? { 2: resetPayload.hits.cursor } : {}) });
+        setCursorByPage(buildFirstPageCursorMap(resetPayload.hits.cursor));
         return;
       }
 
@@ -611,7 +619,7 @@ export function SearchRoutePage() {
         setLastSuccessfulHadCriteria(hasActiveSearchCriteria(resetSnapshot));
         setFacetHasFacesCounts(parseHasFacesFacetCounts(resetPayload.facets));
         setFacetPathHintCounts(toPathHintFacetCounts(resetPayload.facets, resetSnapshot.pathHints));
-        setCursorByPage({ 1: null, ...(resetPayload.hits.cursor ? { 2: resetPayload.hits.cursor } : {}) });
+        setCursorByPage(buildFirstPageCursorMap(resetPayload.hits.cursor));
         return;
       }
       setResults(payload.hits.items);
