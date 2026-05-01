@@ -496,6 +496,46 @@ describe("SearchRoutePage", () => {
     expect(await screen.findByText("photo-1")).toBeInTheDocument();
   });
 
+  it("retries with the exact last failed request payload even after draft edits", async () => {
+    const user = userEvent.setup();
+    let searchRequestCount = 0;
+
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === PEOPLE_ENDPOINT) {
+        return {
+          ok: true,
+          json: async () => PEOPLE_FIXTURE
+        } as Response;
+      }
+
+      searchRequestCount += 1;
+      if (searchRequestCount === 1) {
+        return { ok: false, status: 503 } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-1"], 1)
+      } as Response;
+    });
+
+    renderSearchAt();
+
+    const queryInput = await screen.findByRole("textbox", { name: "Search query" });
+    await user.type(queryInput, "storm coast");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await screen.findByRole("heading", { name: "Could not load Search", level: 2 });
+
+    await user.type(queryInput, " replacement draft");
+    await user.type(screen.getByLabelText("From date"), "2026-04-01");
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    const body = lastSearchBody(fetchMock);
+    expect(body.q).toBe("storm coast");
+    expect(body.filters).toBeUndefined();
+  });
+
   it("adds a fuzzy-matched person filter and submits it as filters.person_names", async () => {
     const user = userEvent.setup();
     renderSearchAt();
@@ -547,6 +587,19 @@ describe("SearchRoutePage", () => {
     const body = lastSearchBody(fetchMock);
     expect(body.q).toBe("coast");
     expect(body.filters).toBeUndefined();
+  });
+
+  it("renders baseline empty state when zero hits are returned without active query filters", async () => {
+    const user = userEvent.setup();
+    renderSearchAt();
+
+    const input = await screen.findByRole("textbox", { name: "Search query" });
+    await user.type(input, "lake");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await user.click(screen.getByRole("button", { name: "Remove query lake" }));
+
+    expect(await screen.findByText("No photos are available in the catalog yet.")).toBeInTheDocument();
+    expect(screen.queryByText("No matching photos for the active query.")).not.toBeInTheDocument();
   });
 
   it("removes selected person chips and re-fetches without person_names filters", async () => {
