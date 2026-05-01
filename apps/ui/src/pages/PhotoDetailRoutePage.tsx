@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { deriveIngestStatus, INGEST_STATUS_LEGEND } from "../app/ingestStatus";
+import { FaceAssignmentControls } from "./FaceAssignmentControls";
 import {
   resolveDetailReturnState,
   setPendingBrowseFocusPhotoId
@@ -64,6 +65,13 @@ type FaceOverlayRegion = {
   topPercent: number;
   widthPercent: number;
   heightPercent: number;
+};
+
+type PersonRecord = {
+  person_id: string;
+  display_name: string;
+  created_ts: string;
+  updated_ts: string;
 };
 
 class PhotoDetailRequestError extends Error {
@@ -131,6 +139,39 @@ async function fetchPhotoDetail(photoId: string): Promise<PhotoDetailPayload> {
   return (await response.json()) as PhotoDetailPayload;
 }
 
+function sortPeopleDirectory(people: PersonRecord[]): PersonRecord[] {
+  return [...people].sort((left, right) => {
+    const displayComparison = left.display_name.localeCompare(right.display_name, "en-US");
+    if (displayComparison !== 0) {
+      return displayComparison;
+    }
+    return left.person_id.localeCompare(right.person_id, "en-US");
+  });
+}
+
+function applyFaceAssignment(
+  detail: PhotoDetailPayload,
+  faceId: string,
+  personId: string
+): PhotoDetailPayload {
+  const nextFaces = detail.faces.map((face) =>
+    face.face_id === faceId ? { ...face, person_id: personId } : face
+  );
+  const nextPeople = Array.from(
+    new Set(
+      nextFaces
+        .map((face) => face.person_id)
+        .filter((value): value is string => value !== null)
+    )
+  );
+
+  return {
+    ...detail,
+    faces: nextFaces,
+    people: nextPeople
+  };
+}
+
 export function PhotoDetailRoutePage() {
   const location = useLocation();
   const { photoId } = useParams<{ photoId: string }>();
@@ -142,6 +183,7 @@ export function PhotoDetailRoutePage() {
   const [isNotFound, setIsNotFound] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const [mediaMode, setMediaMode] = useState<MediaPresentationMode>("fit");
+  const [peopleDirectory, setPeopleDirectory] = useState<PersonRecord[]>([]);
 
   useEffect(() => {
     headingRef.current?.focus();
@@ -191,6 +233,29 @@ export function PhotoDetailRoutePage() {
       controller.abort();
     };
   }, [photoId, reloadToken]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    fetch("/api/v1/people", { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`People request failed (${response.status})`);
+        }
+
+        const payload = (await response.json()) as PersonRecord[];
+        setPeopleDirectory(sortPeopleDirectory(payload));
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setPeopleDirectory([]);
+        }
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [reloadToken]);
 
   const facesLabel = useMemo(() => {
     if (!detail) {
@@ -275,6 +340,10 @@ export function PhotoDetailRoutePage() {
   }, [detail]);
 
   const backLinkFocusPhotoId = detail?.photo_id ?? returnState.returnFocusPhotoId ?? photoId ?? null;
+
+  function handleFaceAssigned(faceId: string, personId: string) {
+    setDetail((current) => (current ? applyFaceAssignment(current, faceId, personId) : current));
+  }
 
   return (
     <section aria-labelledby="page-title" className="page detail-page">
@@ -380,6 +449,17 @@ export function PhotoDetailRoutePage() {
                   </div>
                 </div>
                 <p className="detail-face-state">{faceRegionState}</p>
+                <FaceAssignmentControls
+                  faces={detail.faces.map((face) => ({
+                    face_id: face.face_id,
+                    person_id: face.person_id
+                  }))}
+                  people={peopleDirectory.map((person) => ({
+                    person_id: person.person_id,
+                    display_name: person.display_name
+                  }))}
+                  onAssigned={handleFaceAssigned}
+                />
               </>
             ) : (
               <>
@@ -387,6 +467,17 @@ export function PhotoDetailRoutePage() {
                   No preview
                 </div>
                 <p className="detail-face-state">{faceRegionState}</p>
+                <FaceAssignmentControls
+                  faces={detail.faces.map((face) => ({
+                    face_id: face.face_id,
+                    person_id: face.person_id
+                  }))}
+                  people={peopleDirectory.map((person) => ({
+                    person_id: person.person_id,
+                    display_name: person.display_name
+                  }))}
+                  onAssigned={handleFaceAssigned}
+                />
               </>
             )}
           </article>

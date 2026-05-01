@@ -534,6 +534,33 @@ body {
   color: #334155;
 }
 
+.detail-face-assignment {
+  margin-top: 0.75rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.detail-face-assignment h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.detail-face-assignment select {
+  max-width: 18rem;
+}
+
+.detail-face-assignment-error {
+  margin: 0;
+  color: #8b1e1e;
+  font-size: 0.82rem;
+}
+
+.detail-face-assignment-complete {
+  margin: 0.75rem 0 0;
+  font-weight: 600;
+  color: #334155;
+}
+
 .ingest-status-badge {
   border-radius: 999px;
   border: 1px solid transparent;
