@@ -39,12 +39,13 @@ interface PersonPayload {
 function buildPayload(
   photoIds: string[],
   total = photoIds.length,
-  facets: SearchResponsePayload["facets"] = {}
+  facets: SearchResponsePayload["facets"] = {},
+  cursor: string | null = null
 ): SearchResponsePayload {
   return {
     hits: {
       total,
-      cursor: null,
+      cursor,
       items: photoIds.map((photoId, index) => ({
         photo_id: photoId,
         path: `/library/${photoId}.jpg`,
@@ -297,6 +298,160 @@ describe("SearchRoutePage", () => {
     } as Response);
 
     expect(await screen.findByText("No matching photos for the active query.")).toBeInTheDocument();
+  });
+
+  it("maps sort control selections to deterministic backend sort modes", async () => {
+    const user = userEvent.setup();
+    renderSearchAt();
+
+    await user.selectOptions(screen.getByLabelText("Sort order"), "asc");
+    await user.type(await screen.findByRole("textbox", { name: "Search query" }), "lake");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+
+    const body = lastSearchBody(fetchMock);
+    expect(body.sort).toEqual({ by: "shot_ts", dir: "asc" });
+    expect(body.page).toEqual({ limit: 24, cursor: null });
+  });
+
+  it("advances and returns pages using deterministic cursor boundaries", async () => {
+    const user = userEvent.setup();
+    let searchRequestCount = 0;
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === PEOPLE_ENDPOINT) {
+        return {
+          ok: true,
+          json: async () => PEOPLE_FIXTURE
+        } as Response;
+      }
+
+      searchRequestCount += 1;
+      if (searchRequestCount === 1) {
+        return {
+          ok: true,
+          json: async () => buildPayload(["photo-1"], 3, {}, "cursor-page-2")
+        } as Response;
+      }
+
+      if (searchRequestCount === 2) {
+        return {
+          ok: true,
+          json: async () => buildPayload(["photo-2"], 3, {}, "cursor-page-3")
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-1"], 3, {}, "cursor-page-2")
+      } as Response;
+    });
+
+    renderSearchAt();
+    await user.type(await screen.findByRole("textbox", { name: "Search query" }), "trip");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    expect(await screen.findByText("photo-1")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    expect(await screen.findByText("photo-2")).toBeInTheDocument();
+    expect(screen.getByText("Page 2")).toBeInTheDocument();
+
+    const secondRequest = searchCalls(fetchMock)[1]?.[1] as RequestInit;
+    expect(JSON.parse(String(secondRequest.body)).page).toEqual({
+      limit: 24,
+      cursor: "cursor-page-2"
+    });
+
+    await user.click(screen.getByRole("button", { name: "Previous page" }));
+    expect(await screen.findByText("photo-1")).toBeInTheDocument();
+    expect(screen.getByText("Page 1")).toBeInTheDocument();
+  });
+
+  it("resets pagination to page one when filter state changes", async () => {
+    const user = userEvent.setup();
+    let searchRequestCount = 0;
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === PEOPLE_ENDPOINT) {
+        return {
+          ok: true,
+          json: async () => PEOPLE_FIXTURE
+        } as Response;
+      }
+
+      searchRequestCount += 1;
+      if (searchRequestCount === 1) {
+        return {
+          ok: true,
+          json: async () =>
+            buildPayload(["photo-1"], 3, { has_faces: { true: 2, false: 1 } }, "cursor-page-2")
+        } as Response;
+      }
+      if (searchRequestCount === 2) {
+        return {
+          ok: true,
+          json: async () =>
+            buildPayload(["photo-2"], 3, { has_faces: { true: 2, false: 1 } }, "cursor-page-3")
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-3"], 2, { has_faces: { true: 1, false: 1 } }, null)
+      } as Response;
+    });
+
+    renderSearchAt();
+    await user.type(await screen.findByRole("textbox", { name: "Search query" }), "lake");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    expect(await screen.findByText("photo-2")).toBeInTheDocument();
+    expect(screen.getByText("Page 2")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "With faces (2)" }));
+    expect(await screen.findByText("photo-3")).toBeInTheDocument();
+    expect(screen.getByText("Page 1")).toBeInTheDocument();
+
+    const filterChangeRequest = searchCalls(fetchMock)[2]?.[1] as RequestInit;
+    expect(JSON.parse(String(filterChangeRequest.body)).page).toEqual({ limit: 24, cursor: null });
+  });
+
+  it("deterministically falls back to page one when a page boundary is invalid", async () => {
+    const user = userEvent.setup();
+    let searchRequestCount = 0;
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === PEOPLE_ENDPOINT) {
+        return {
+          ok: true,
+          json: async () => PEOPLE_FIXTURE
+        } as Response;
+      }
+
+      searchRequestCount += 1;
+      if (searchRequestCount === 1) {
+        return {
+          ok: true,
+          json: async () => buildPayload(["photo-1"], 1, {}, "cursor-page-2")
+        } as Response;
+      }
+      if (searchRequestCount === 2) {
+        return {
+          ok: true,
+          json: async () => buildPayload([], 1, {}, null)
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-1"], 1, {}, "cursor-page-2")
+      } as Response;
+    });
+
+    renderSearchAt();
+    await user.type(await screen.findByRole("textbox", { name: "Search query" }), "lake");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+
+    expect(await screen.findByText("Reset to page 1 because that page position is unavailable.")).toBeInTheDocument();
+    expect(screen.getByText("Page 1")).toBeInTheDocument();
+
+    const fallbackRequest = searchCalls(fetchMock)[2]?.[1] as RequestInit;
+    expect(JSON.parse(String(fallbackRequest.body)).page).toEqual({ limit: 24, cursor: null });
   });
 
   it("shows retry UI on failure and retries with active chips", async () => {

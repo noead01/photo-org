@@ -39,8 +39,11 @@ type PersonRecord = {
   display_name: string;
 };
 
-const DEFAULT_SORT = { by: "shot_ts", dir: "desc" } as const;
-const DEFAULT_PAGE = { limit: 24, cursor: null } as const;
+type SortDirection = "asc" | "desc";
+
+const DEFAULT_SORT_DIRECTION: SortDirection = "desc";
+const PAGE_LIMIT = 24;
+const INVALID_PAGE_MESSAGE = "Reset to page 1 because that page position is unavailable.";
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 type SearchUrlState = {
@@ -268,7 +271,9 @@ async function fetchSearchResults(
   selectedPersonNames: string[],
   locationRadius: { latitude: number; longitude: number; radius_km: number } | null,
   hasFaces: boolean | null,
-  pathHints: string[]
+  pathHints: string[],
+  sortDirection: SortDirection,
+  cursor: string | null
 ): Promise<SearchResponsePayload> {
   const searchFilters = buildSearchFilters(
     fromDate,
@@ -286,8 +291,14 @@ async function fetchSearchResults(
     body: JSON.stringify({
       q: query,
       ...(searchFilters ? { filters: searchFilters } : {}),
-      sort: DEFAULT_SORT,
-      page: DEFAULT_PAGE
+      sort: {
+        by: "shot_ts",
+        dir: sortDirection
+      },
+      page: {
+        limit: PAGE_LIMIT,
+        cursor
+      }
     })
   });
 
@@ -325,6 +336,11 @@ export function SearchRoutePage() {
   const [facetPathHintCounts, setFacetPathHintCounts] = useState<FacetCountEntry[]>([]);
   const [results, setResults] = useState<SearchPhoto[]>([]);
   const [totalCount, setTotalCount] = useState(0);
+  const [sortDirection, setSortDirection] = useState<SortDirection>(DEFAULT_SORT_DIRECTION);
+  const [page, setPage] = useState(1);
+  const [cursorByPage, setCursorByPage] = useState<Record<number, string | null>>({ 1: null });
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [paginationMessage, setPaginationMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasRequested, setHasRequested] = useState(false);
@@ -410,6 +426,11 @@ export function SearchRoutePage() {
     setIsLoading(false);
     setError(null);
     setHasRequested(false);
+    setSortDirection(DEFAULT_SORT_DIRECTION);
+    setPage(1);
+    setCursorByPage({ 1: null });
+    setNextCursor(null);
+    setPaginationMessage(null);
     setResults([]);
     setTotalCount(0);
     setFacetHasFacesCounts({ true: 0, false: 0 });
@@ -472,7 +493,10 @@ export function SearchRoutePage() {
     activePersonNames: string[],
     activeLocationRadius: { latitude: number; longitude: number; radius_km: number } | null,
     activeHasFaces: boolean | null,
-    activePathHints: string[]
+    activePathHints: string[],
+    activeSortDirection: SortDirection,
+    activePage: number,
+    activeCursorByPage: Record<number, string | null>
   ) {
     if (validateDateRange(activeFromDate, activeToDate)) {
       return;
@@ -481,8 +505,35 @@ export function SearchRoutePage() {
     setIsLoading(true);
     setError(null);
     setHasRequested(true);
+    setPaginationMessage(null);
 
     try {
+      const cursor = activeCursorByPage[activePage];
+      if (activePage > 1 && cursor === undefined) {
+        setPaginationMessage(INVALID_PAGE_MESSAGE);
+        const resetCursors = { 1: null };
+        setPage(1);
+        setCursorByPage(resetCursors);
+        const resetPayload = await fetchSearchResults(
+          chips.join(" "),
+          activeFromDate,
+          activeToDate,
+          activePersonNames,
+          activeLocationRadius,
+          activeHasFaces,
+          activePathHints,
+          activeSortDirection,
+          null
+        );
+        setResults(resetPayload.hits.items);
+        setTotalCount(resetPayload.hits.total);
+        setNextCursor(resetPayload.hits.cursor);
+        setFacetHasFacesCounts(parseHasFacesFacetCounts(resetPayload.facets));
+        setFacetPathHintCounts(toPathHintFacetCounts(resetPayload.facets, activePathHints));
+        setCursorByPage({ 1: null, ...(resetPayload.hits.cursor ? { 2: resetPayload.hits.cursor } : {}) });
+        return;
+      }
+
       const payload = await fetchSearchResults(
         chips.join(" "),
         activeFromDate,
@@ -490,12 +541,50 @@ export function SearchRoutePage() {
         activePersonNames,
         activeLocationRadius,
         activeHasFaces,
-        activePathHints
+        activePathHints,
+        activeSortDirection,
+        cursor ?? null
       );
+      if (activePage > 1 && payload.hits.items.length === 0) {
+        setPaginationMessage(INVALID_PAGE_MESSAGE);
+        const resetCursors = { 1: null };
+        setPage(1);
+        setCursorByPage(resetCursors);
+        const resetPayload = await fetchSearchResults(
+          chips.join(" "),
+          activeFromDate,
+          activeToDate,
+          activePersonNames,
+          activeLocationRadius,
+          activeHasFaces,
+          activePathHints,
+          activeSortDirection,
+          null
+        );
+        setResults(resetPayload.hits.items);
+        setTotalCount(resetPayload.hits.total);
+        setNextCursor(resetPayload.hits.cursor);
+        setFacetHasFacesCounts(parseHasFacesFacetCounts(resetPayload.facets));
+        setFacetPathHintCounts(toPathHintFacetCounts(resetPayload.facets, activePathHints));
+        setCursorByPage({ 1: null, ...(resetPayload.hits.cursor ? { 2: resetPayload.hits.cursor } : {}) });
+        return;
+      }
       setResults(payload.hits.items);
       setTotalCount(payload.hits.total);
+      setPage(activePage);
+      setNextCursor(payload.hits.cursor);
       setFacetHasFacesCounts(parseHasFacesFacetCounts(payload.facets));
       setFacetPathHintCounts(toPathHintFacetCounts(payload.facets, activePathHints));
+      setCursorByPage((current) => {
+        const pageCursor = activeCursorByPage[activePage];
+        const next = { ...current, ...activeCursorByPage, [activePage]: pageCursor ?? null };
+        if (payload.hits.cursor === null) {
+          delete next[activePage + 1];
+        } else {
+          next[activePage + 1] = payload.hits.cursor;
+        }
+        return next;
+      });
     } catch (caughtError: unknown) {
       const message =
         caughtError instanceof Error
@@ -504,6 +593,7 @@ export function SearchRoutePage() {
       setError(message);
       setResults([]);
       setTotalCount(0);
+      setNextCursor(null);
       setFacetHasFacesCounts({ true: 0, false: 0 });
       setFacetPathHintCounts(
         activePathHints.map((value) => ({
@@ -524,7 +614,23 @@ export function SearchRoutePage() {
     locationRadius?: { latitude: number; longitude: number; radius_km: number } | null;
     hasFaces?: boolean | null;
     pathHints?: string[];
+    sortDirection?: SortDirection;
+    page?: number;
+    cursorByPage?: Record<number, string | null>;
+    resetToFirstPage?: boolean;
   } = {}) {
+    const shouldResetToFirstPage = overrides.resetToFirstPage ?? false;
+    const resolvedPage = shouldResetToFirstPage ? 1 : (overrides.page ?? page);
+    const resolvedCursorByPage = shouldResetToFirstPage
+      ? { 1: null }
+      : (overrides.cursorByPage ?? cursorByPage);
+
+    if (shouldResetToFirstPage) {
+      setPage(1);
+      setCursorByPage({ 1: null });
+      setNextCursor(null);
+    }
+
     void runSearch(
       overrides.chips ?? queryChips,
       overrides.fromDate ?? fromDate,
@@ -532,7 +638,10 @@ export function SearchRoutePage() {
       overrides.personNames ?? selectedPersonNames,
       overrides.locationRadius === undefined ? locationRadiusFilter : overrides.locationRadius,
       overrides.hasFaces === undefined ? hasFacesFilter : overrides.hasFaces,
-      overrides.pathHints ?? pathHintFilters
+      overrides.pathHints ?? pathHintFilters,
+      overrides.sortDirection ?? sortDirection,
+      resolvedPage,
+      resolvedCursorByPage
     );
   }
 
@@ -561,23 +670,23 @@ export function SearchRoutePage() {
       setDraftQuery("");
     }
 
-    requestSearch({ chips: nextChips });
+    requestSearch({ chips: nextChips, resetToFirstPage: true });
   }
 
   function handleDismissChip(indexToRemove: number) {
     const nextChips = queryChips.filter((_, index) => index !== indexToRemove);
     setQueryChips(nextChips);
-    requestSearch({ chips: nextChips });
+    requestSearch({ chips: nextChips, resetToFirstPage: true });
   }
 
   function handleClearFromDate() {
     setFromDate("");
-    requestSearch({ fromDate: "" });
+    requestSearch({ fromDate: "", resetToFirstPage: true });
   }
 
   function handleClearToDate() {
     setToDate("");
-    requestSearch({ toDate: "" });
+    requestSearch({ toDate: "", resetToFirstPage: true });
   }
 
   function handleAddPersonByName(displayName: string) {
@@ -615,7 +724,7 @@ export function SearchRoutePage() {
     const nextNames = selectedPersonNames.filter((name) => name !== displayName);
     setSelectedPersonNames(nextNames);
     setPersonMessage(null);
-    requestSearch({ personNames: nextNames });
+    requestSearch({ personNames: nextNames, resetToFirstPage: true });
   }
 
   function handleMapLocationChange(location: LocationRadiusValue) {
@@ -629,13 +738,13 @@ export function SearchRoutePage() {
     setLatitudeDraft("");
     setLongitudeDraft("");
     setRadiusDraft("");
-    requestSearch({ locationRadius: null });
+    requestSearch({ locationRadius: null, resetToFirstPage: true });
   }
 
   function handleToggleHasFacesFilter(nextValue: boolean) {
     const resolvedValue = hasFacesFilter === nextValue ? null : nextValue;
     setHasFacesFilter(resolvedValue);
-    requestSearch({ hasFaces: resolvedValue });
+    requestSearch({ hasFaces: resolvedValue, resetToFirstPage: true });
   }
 
   function handleClearHasFacesFilter() {
@@ -644,7 +753,7 @@ export function SearchRoutePage() {
     }
 
     setHasFacesFilter(null);
-    requestSearch({ hasFaces: null });
+    requestSearch({ hasFaces: null, resetToFirstPage: true });
   }
 
   function handleTogglePathHintFilter(pathHint: string) {
@@ -653,7 +762,7 @@ export function SearchRoutePage() {
       : normalizePathHintFilters([...pathHintFilters, pathHint]);
 
     setPathHintFilters(nextHints);
-    requestSearch({ pathHints: nextHints });
+    requestSearch({ pathHints: nextHints, resetToFirstPage: true });
   }
 
   function handleClearPathHintFilter(pathHint: string) {
@@ -663,7 +772,7 @@ export function SearchRoutePage() {
     }
 
     setPathHintFilters(nextHints);
-    requestSearch({ pathHints: nextHints });
+    requestSearch({ pathHints: nextHints, resetToFirstPage: true });
   }
 
   function handleClearAllPathHints() {
@@ -672,7 +781,44 @@ export function SearchRoutePage() {
     }
 
     setPathHintFilters([]);
-    requestSearch({ pathHints: [] });
+    requestSearch({ pathHints: [], resetToFirstPage: true });
+  }
+
+  function handleSortDirectionChange(nextDirection: SortDirection) {
+    setSortDirection(nextDirection);
+    if (!hasRequested) {
+      return;
+    }
+
+    requestSearch({
+      sortDirection: nextDirection,
+      resetToFirstPage: true
+    });
+  }
+
+  function handlePreviousPage() {
+    if (isLoading || page <= 1) {
+      return;
+    }
+
+    requestSearch({
+      page: page - 1
+    });
+  }
+
+  function handleNextPage() {
+    if (isLoading || nextCursor === null) {
+      return;
+    }
+
+    const nextPage = page + 1;
+    requestSearch({
+      page: nextPage,
+      cursorByPage: {
+        ...cursorByPage,
+        [nextPage]: nextCursor
+      }
+    });
   }
 
   function handleRetry() {
@@ -681,7 +827,7 @@ export function SearchRoutePage() {
 
   const summaryLabel = useMemo(() => {
     if (isLoading) {
-      return "Loading search workflow.";
+      return `Loading page ${page}…`;
     }
 
     if (error) {
@@ -695,11 +841,50 @@ export function SearchRoutePage() {
     return `Showing ${results.length} of ${totalCount} photos`;
   }, [error, hasRequested, isLoading, results.length, totalCount]);
 
+  const canGoPrevious = hasRequested && page > 1 && !isLoading;
+  const canGoNext = hasRequested && nextCursor !== null && !isLoading;
+
   return (
     <section aria-labelledby="page-title" className="page search-page">
-      <div>
-        <h1 id="page-title">Search</h1>
-        <p>Tokenized phrase chips and inclusive date range filters with deterministic request state.</p>
+      <div className="search-header">
+        <div>
+          <h1 id="page-title">Search</h1>
+          <p>Tokenized phrase chips and inclusive date range filters with deterministic request state.</p>
+        </div>
+        <div className="search-controls" role="group" aria-label="Search controls">
+          <label className="search-sort-control">
+            Sort order
+            <select
+              aria-label="Sort order"
+              value={sortDirection}
+              onChange={(event) =>
+                handleSortDirectionChange(event.target.value === "asc" ? "asc" : "desc")
+              }
+            >
+              <option value="desc">Newest first</option>
+              <option value="asc">Oldest first</option>
+            </select>
+          </label>
+          <div className="search-pagination" aria-label="Pagination controls">
+            <button
+              type="button"
+              onClick={handlePreviousPage}
+              disabled={!canGoPrevious}
+              aria-label="Previous page"
+            >
+              Previous
+            </button>
+            <p className="search-page-indicator">Page {page}</p>
+            <button
+              type="button"
+              onClick={handleNextPage}
+              disabled={!canGoNext}
+              aria-label="Next page"
+            >
+              Next
+            </button>
+          </div>
+        </div>
       </div>
 
       <form className="search-query-form" onSubmit={handleSubmit}>
@@ -951,6 +1136,11 @@ export function SearchRoutePage() {
       <p id="search-query-summary" className="search-summary" aria-live="polite">
         {summaryLabel}
       </p>
+      {paginationMessage ? (
+        <p className="search-pagination-message" role="status">
+          {paginationMessage}
+        </p>
+      ) : null}
 
       {isLoading ? (
         <div className="feedback-panel feedback-panel-loading" role="status" aria-live="polite">
