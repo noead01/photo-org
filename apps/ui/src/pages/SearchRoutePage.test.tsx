@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { SearchRoutePage } from "./SearchRoutePage";
 
 vi.mock("./search/LocationRadiusPicker", () => ({
@@ -79,13 +79,26 @@ const PEOPLE_FIXTURE: PersonPayload[] = [
 ];
 
 function renderSearchAt(path = "/search") {
+  function SearchLocationProbe() {
+    const location = useLocation();
+    return <p data-testid="search-location-probe">{location.search}</p>;
+  }
+
   return render(
     <MemoryRouter
       initialEntries={[path]}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
       <Routes>
-        <Route path="/search" element={<SearchRoutePage />} />
+        <Route
+          path="/search"
+          element={
+            <>
+              <SearchRoutePage />
+              <SearchLocationProbe />
+            </>
+          }
+        />
       </Routes>
     </MemoryRouter>
   );
@@ -557,5 +570,78 @@ describe("SearchRoutePage", () => {
 
     await user.click(screen.getByRole("button", { name: "Clear path hints" }));
     expect(lastSearchBody(fetchMock).filters).toBeUndefined();
+  });
+
+  it("restores active query and filter state from URL params", async () => {
+    renderSearchAt(
+      "/search?query=lake%20weekend&query=sunset&from=2026-04-01&to=2026-04-30&person=Inez%20Alvarez&lat=37.7749&lng=-122.4194&radiusKm=12.5&hasFaces=true&pathHint=city-break&pathHint=lake-weekend"
+    );
+
+    expect(await screen.findByRole("button", { name: "Remove query lake weekend" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove query sunset" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove from date 2026-04-01" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove to date 2026-04-30" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove person Inez Alvarez" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Remove location: 37.7749, -122.4194 (12.5 km)" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Remove has faces filter with faces" })
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove path hint city-break" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove path hint lake-weekend" })).toBeInTheDocument();
+    expect(searchCalls(fetchMock)).toHaveLength(0);
+  });
+
+  it("drops malformed URL params and keeps only deterministic valid filter state", async () => {
+    renderSearchAt(
+      "/search?query=%20%20&from=2026-04-99&to=bad-date&person=%20&lat=999&lng=nope&radiusKm=0&hasFaces=maybe&pathHint=&pathHint=lake-weekend"
+    );
+
+    expect(await screen.findByRole("button", { name: "Remove path hint lake-weekend" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove has faces filter with faces" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove has faces filter without faces" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Remove from date/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Remove to date/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Remove location/i })).not.toBeInTheDocument();
+    expect(searchCalls(fetchMock)).toHaveLength(0);
+    expect(screen.getByTestId("search-location-probe")).toHaveTextContent("?pathHint=lake-weekend");
+  });
+
+  it("writes active state back to URL deterministically when query and facet filters change", async () => {
+    const user = userEvent.setup();
+    renderSearchAt("/search");
+
+    await user.type(await screen.findByRole("textbox", { name: "Search query" }), "harbor");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+
+    await user.click(screen.getByRole("button", { name: "With faces (0)" }));
+
+    expect(screen.getByTestId("search-location-probe")).toHaveTextContent(
+      "?query=harbor&hasFaces=true"
+    );
+  });
+
+  it("restores URL state without auto-requesting search on load", async () => {
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === PEOPLE_ENDPOINT) {
+        return {
+          ok: true,
+          json: async () => PEOPLE_FIXTURE
+        } as Response;
+      }
+
+      throw new TypeError("Failed to fetch");
+    });
+
+    renderSearchAt("/search?query=lake&from=2026-04-01&hasFaces=true");
+
+    expect(await screen.findByRole("button", { name: "Remove query lake" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove from date 2026-04-01" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Remove has faces filter with faces" })
+    ).toBeInTheDocument();
+    expect(searchCalls(fetchMock)).toHaveLength(0);
+    expect(screen.queryByRole("heading", { name: "Could not load Search" })).not.toBeInTheDocument();
   });
 });

@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { LocationRadiusPicker } from "./search/LocationRadiusPicker";
 import { FacetFilterPanel } from "./search/FacetFilterPanel";
 import {
@@ -40,6 +41,142 @@ type PersonRecord = {
 
 const DEFAULT_SORT = { by: "shot_ts", dir: "desc" } as const;
 const DEFAULT_PAGE = { limit: 24, cursor: null } as const;
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+type SearchUrlState = {
+  queryChips: string[];
+  fromDate: string;
+  toDate: string;
+  selectedPersonNames: string[];
+  latitudeDraft: string;
+  longitudeDraft: string;
+  radiusDraft: string;
+  locationRadius: { latitude: number; longitude: number; radius_km: number } | null;
+  hasFacesFilter: boolean | null;
+  pathHintFilters: string[];
+};
+
+function dedupeTrimmedValues(values: string[]): string[] {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    deduped.push(trimmed);
+  }
+
+  return deduped;
+}
+
+function isValidIsoDate(value: string): boolean {
+  if (!DATE_PATTERN.test(value)) {
+    return false;
+  }
+
+  const [yearRaw, monthRaw, dayRaw] = value.split("-");
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return false;
+  }
+
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+  );
+}
+
+function parseSearchUrlState(search: string): SearchUrlState {
+  const params = new URLSearchParams(search);
+  const queryChips = dedupeTrimmedValues(params.getAll("query"));
+
+  const fromCandidate = (params.get("from") ?? "").trim();
+  const toCandidate = (params.get("to") ?? "").trim();
+  const fromDate = isValidIsoDate(fromCandidate) ? fromCandidate : "";
+  const toDate = isValidIsoDate(toCandidate) ? toCandidate : "";
+
+  const selectedPersonNames = dedupeTrimmedValues(params.getAll("person"));
+  const pathHintFilters = normalizePathHintFilters(params.getAll("pathHint"));
+
+  const rawHasFaces = (params.get("hasFaces") ?? "").trim();
+  const hasFacesFilter =
+    rawHasFaces === "true" ? true : rawHasFaces === "false" ? false : null;
+
+  const latitudeCandidate = (params.get("lat") ?? "").trim();
+  const longitudeCandidate = (params.get("lng") ?? "").trim();
+  const radiusCandidate = (params.get("radiusKm") ?? "").trim();
+  const parsedLocation = parseLocationDraft(
+    latitudeCandidate,
+    longitudeCandidate,
+    radiusCandidate
+  );
+  const locationRadius = buildLocationRadiusFilter(parsedLocation);
+  const locationDrafts = locationRadius
+    ? {
+        latitudeDraft: String(locationRadius.latitude),
+        longitudeDraft: String(locationRadius.longitude),
+        radiusDraft: String(locationRadius.radius_km)
+      }
+    : { latitudeDraft: "", longitudeDraft: "", radiusDraft: "" };
+
+  return {
+    queryChips,
+    fromDate,
+    toDate,
+    selectedPersonNames,
+    latitudeDraft: locationDrafts.latitudeDraft,
+    longitudeDraft: locationDrafts.longitudeDraft,
+    radiusDraft: locationDrafts.radiusDraft,
+    locationRadius,
+    hasFacesFilter,
+    pathHintFilters
+  };
+}
+
+function buildSearchUrlQuery(state: {
+  queryChips: string[];
+  fromDate: string;
+  toDate: string;
+  selectedPersonNames: string[];
+  locationRadius: { latitude: number; longitude: number; radius_km: number } | null;
+  hasFacesFilter: boolean | null;
+  pathHintFilters: string[];
+}): string {
+  const params = new URLSearchParams();
+
+  for (const chip of state.queryChips) {
+    params.append("query", chip);
+  }
+  if (state.fromDate) {
+    params.set("from", state.fromDate);
+  }
+  if (state.toDate) {
+    params.set("to", state.toDate);
+  }
+  for (const personName of state.selectedPersonNames) {
+    params.append("person", personName);
+  }
+  if (state.locationRadius) {
+    params.set("lat", String(state.locationRadius.latitude));
+    params.set("lng", String(state.locationRadius.longitude));
+    params.set("radiusKm", String(state.locationRadius.radius_km));
+  }
+  if (state.hasFacesFilter !== null) {
+    params.set("hasFaces", state.hasFacesFilter ? "true" : "false");
+  }
+  for (const pathHint of state.pathHintFilters) {
+    params.append("pathHint", pathHint);
+  }
+
+  return params.toString();
+}
 
 function buildDateFilter(from: string, to: string): { from?: string; to?: string } | null {
   const trimmedFrom = from.trim();
@@ -162,6 +299,11 @@ async function fetchSearchResults(
 }
 
 export function SearchRoutePage() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const suppressNextUrlStateSyncRef = useRef(false);
+  const applyingParsedUrlStateRef = useRef(false);
+
   const [draftQuery, setDraftQuery] = useState("");
   const [queryChips, setQueryChips] = useState<string[]>([]);
   const [fromDate, setFromDate] = useState("");
@@ -186,6 +328,7 @@ export function SearchRoutePage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasRequested, setHasRequested] = useState(false);
+  const parsedUrlState = useMemo(() => parseSearchUrlState(location.search), [location.search]);
 
   const serializedQuery = useMemo(() => queryChips.join(" "), [queryChips]);
   const dateRangeError = useMemo(() => validateDateRange(fromDate, toDate), [fromDate, toDate]);
@@ -242,6 +385,85 @@ export function SearchRoutePage() {
       isCanceled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (suppressNextUrlStateSyncRef.current) {
+      suppressNextUrlStateSyncRef.current = false;
+      return;
+    }
+
+    applyingParsedUrlStateRef.current = true;
+    setQueryChips(parsedUrlState.queryChips);
+    setDraftQuery("");
+    setFromDate(parsedUrlState.fromDate);
+    setToDate(parsedUrlState.toDate);
+    setSelectedPersonNames(parsedUrlState.selectedPersonNames);
+    setPersonDraft("");
+    setPersonMessage(null);
+    setLatitudeDraft(parsedUrlState.latitudeDraft);
+    setLongitudeDraft(parsedUrlState.longitudeDraft);
+    setRadiusDraft(parsedUrlState.radiusDraft);
+    setMapMessage(null);
+    setHasFacesFilter(parsedUrlState.hasFacesFilter);
+    setPathHintFilters(parsedUrlState.pathHintFilters);
+
+    setIsLoading(false);
+    setError(null);
+    setHasRequested(false);
+    setResults([]);
+    setTotalCount(0);
+    setFacetHasFacesCounts({ true: 0, false: 0 });
+    setFacetPathHintCounts(
+      parsedUrlState.pathHintFilters.map((value) => ({
+        value,
+        count: 0
+      }))
+    );
+  }, [parsedUrlState]);
+
+  useEffect(() => {
+    if (applyingParsedUrlStateRef.current) {
+      applyingParsedUrlStateRef.current = false;
+      return;
+    }
+
+    const nextQuery = buildSearchUrlQuery({
+      queryChips,
+      fromDate,
+      toDate,
+      selectedPersonNames,
+      locationRadius: locationRadiusFilter,
+      hasFacesFilter,
+      pathHintFilters
+    });
+    const currentQuery = location.search.startsWith("?")
+      ? location.search.slice(1)
+      : location.search;
+
+    if (nextQuery === currentQuery) {
+      return;
+    }
+
+    suppressNextUrlStateSyncRef.current = true;
+    navigate(
+      {
+        pathname: location.pathname,
+        search: nextQuery ? `?${nextQuery}` : ""
+      },
+      { replace: true }
+    );
+  }, [
+    fromDate,
+    hasFacesFilter,
+    location.pathname,
+    location.search,
+    locationRadiusFilter,
+    navigate,
+    pathHintFilters,
+    queryChips,
+    selectedPersonNames,
+    toDate
+  ]);
 
   async function runSearch(
     chips: string[],
