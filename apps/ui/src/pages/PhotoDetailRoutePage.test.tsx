@@ -20,6 +20,11 @@ interface PhotoDetailPayload {
     bbox_y: number | null;
     bbox_w: number | null;
     bbox_h: number | null;
+    label_source: "human_confirmed" | "machine_applied" | "machine_suggested" | null;
+    confidence: number | null;
+    model_version: string | null;
+    provenance: Record<string, unknown> | null;
+    label_recorded_ts: string | null;
   }>;
   thumbnail: {
     mime_type: string;
@@ -68,7 +73,12 @@ function buildPayload(partial: Partial<PhotoDetailPayload> = {}): PhotoDetailPay
         bbox_x: 10,
         bbox_y: 20,
         bbox_w: 30,
-        bbox_h: 40
+        bbox_h: 40,
+        label_source: null,
+        confidence: null,
+        model_version: null,
+        provenance: null,
+        label_recorded_ts: null
       }
     ],
     thumbnail: {
@@ -252,7 +262,12 @@ describe("PhotoDetailRoutePage", () => {
                 bbox_x: 10,
                 bbox_y: 10,
                 bbox_w: 20,
-                bbox_h: 20
+                bbox_h: 20,
+                label_source: null,
+                confidence: null,
+                model_version: null,
+                provenance: null,
+                label_recorded_ts: null
               }
             ]
           })
@@ -303,7 +318,16 @@ describe("PhotoDetailRoutePage", () => {
                 bbox_x: 10,
                 bbox_y: 10,
                 bbox_w: 20,
-                bbox_h: 20
+                bbox_h: 20,
+                label_source: "human_confirmed",
+                confidence: null,
+                model_version: null,
+                provenance: {
+                  workflow: "face-labeling",
+                  surface: "api",
+                  action: "correction"
+                },
+                label_recorded_ts: "2026-03-28T19:33:00Z"
               }
             ]
           })
@@ -345,6 +369,57 @@ describe("PhotoDetailRoutePage", () => {
     expect(await screen.findByText("Correction recorded: Inez -> Mateo.")).toBeInTheDocument();
     expect(screen.getByText("Face 1: Mateo")).toBeInTheDocument();
     expect(screen.getByText("person-2")).toBeInTheDocument();
+  });
+
+  it("opens inline provenance details when overlay provenance badge is clicked", async () => {
+    const user = userEvent.setup();
+
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () =>
+          buildPayload({
+            faces: [
+              {
+                face_id: "face-1",
+                person_id: "person-1",
+                bbox_x: 10,
+                bbox_y: 10,
+                bbox_w: 20,
+                bbox_h: 20,
+                label_source: "human_confirmed",
+                confidence: null,
+                model_version: null,
+                provenance: {
+                  workflow: "face-labeling",
+                  surface: "api",
+                  action: "correction"
+                },
+                label_recorded_ts: "2026-03-28T19:33:00Z"
+              }
+            ]
+          })
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            person_id: "person-1",
+            display_name: "Inez",
+            created_ts: "2026-03-28T19:30:00Z",
+            updated_ts: "2026-03-28T19:30:00Z"
+          }
+        ]
+      } as Response);
+
+    renderDetail();
+
+    expect(await screen.findByLabelText("Face region 1 for person-1")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show provenance details for face region 1" }));
+
+    expect(await screen.findByLabelText("Provenance details for face 1")).toBeInTheDocument();
+    expect(screen.getByText("Human confirmed")).toBeInTheDocument();
+    expect(screen.getByText("correction")).toBeInTheDocument();
   });
 
   it("renders deterministic loading and error transitions", async () => {

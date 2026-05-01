@@ -24,6 +24,11 @@ type PhotoDetailPayload = {
     bbox_y: number | null;
     bbox_w: number | null;
     bbox_h: number | null;
+    label_source: "human_confirmed" | "machine_applied" | "machine_suggested" | null;
+    confidence: number | null;
+    model_version: string | null;
+    provenance: Record<string, unknown> | null;
+    label_recorded_ts: string | null;
   }>;
   thumbnail: {
     mime_type: string;
@@ -61,6 +66,7 @@ type MediaPresentationMode = "fit" | "actual";
 type FaceOverlayRegion = {
   faceId: string;
   personId: string | null;
+  labelSource: "human_confirmed" | "machine_applied" | "machine_suggested" | null;
   leftPercent: number;
   topPercent: number;
   widthPercent: number;
@@ -155,7 +161,17 @@ function applyFaceAssignment(
   personId: string
 ): PhotoDetailPayload {
   const nextFaces = detail.faces.map((face) =>
-    face.face_id === faceId ? { ...face, person_id: personId } : face
+    face.face_id === faceId
+      ? {
+          ...face,
+          person_id: personId,
+          label_source: null,
+          confidence: null,
+          model_version: null,
+          provenance: null,
+          label_recorded_ts: null,
+        }
+      : face
   );
   const nextPeople = Array.from(
     new Set(
@@ -172,6 +188,21 @@ function applyFaceAssignment(
   };
 }
 
+function provenanceBadgeIcon(
+  source: "human_confirmed" | "machine_applied" | "machine_suggested" | null
+): string {
+  if (source === "human_confirmed") {
+    return "👤";
+  }
+  if (source === "machine_applied") {
+    return "🤖";
+  }
+  if (source === "machine_suggested") {
+    return "💡";
+  }
+  return "❓";
+}
+
 export function PhotoDetailRoutePage() {
   const location = useLocation();
   const { photoId } = useParams<{ photoId: string }>();
@@ -184,6 +215,9 @@ export function PhotoDetailRoutePage() {
   const [reloadToken, setReloadToken] = useState(0);
   const [mediaMode, setMediaMode] = useState<MediaPresentationMode>("fit");
   const [peopleDirectory, setPeopleDirectory] = useState<PersonRecord[]>([]);
+  const [requestedExpandedProvenanceFaceId, setRequestedExpandedProvenanceFaceId] = useState<
+    string | null
+  >(null);
 
   useEffect(() => {
     headingRef.current?.focus();
@@ -300,6 +334,7 @@ export function PhotoDetailRoutePage() {
         return {
           faceId: face.face_id,
           personId: face.person_id,
+          labelSource: face.label_source,
           leftPercent: left,
           topPercent: top,
           widthPercent: width,
@@ -442,7 +477,18 @@ export function PhotoDetailRoutePage() {
                               width: `${region.widthPercent}%`,
                               height: `${region.heightPercent}%`
                             }}
-                          />
+                          >
+                            <button
+                              type="button"
+                              className="detail-face-overlay-provenance-button"
+                              aria-label={`Show provenance details for face region ${index + 1}`}
+                              onClick={() => {
+                                setRequestedExpandedProvenanceFaceId(region.faceId);
+                              }}
+                            >
+                              {provenanceBadgeIcon(region.labelSource)}
+                            </button>
+                          </li>
                         ))}
                       </ol>
                     ) : null}
@@ -450,16 +496,14 @@ export function PhotoDetailRoutePage() {
                 </div>
                 <p className="detail-face-state">{faceRegionState}</p>
                 <FaceAssignmentControls
-                  faces={detail.faces.map((face) => ({
-                    face_id: face.face_id,
-                    person_id: face.person_id
-                  }))}
+                  faces={detail.faces}
                   people={peopleDirectory.map((person) => ({
                     person_id: person.person_id,
                     display_name: person.display_name
                   }))}
                   onAssigned={handleFaceAssigned}
                   onCorrected={handleFaceAssigned}
+                  requestedExpandedProvenanceFaceId={requestedExpandedProvenanceFaceId}
                 />
               </>
             ) : (
@@ -469,16 +513,14 @@ export function PhotoDetailRoutePage() {
                 </div>
                 <p className="detail-face-state">{faceRegionState}</p>
                 <FaceAssignmentControls
-                  faces={detail.faces.map((face) => ({
-                    face_id: face.face_id,
-                    person_id: face.person_id
-                  }))}
+                  faces={detail.faces}
                   people={peopleDirectory.map((person) => ({
                     person_id: person.person_id,
                     display_name: person.display_name
                   }))}
                   onAssigned={handleFaceAssigned}
                   onCorrected={handleFaceAssigned}
+                  requestedExpandedProvenanceFaceId={requestedExpandedProvenanceFaceId}
                 />
               </>
             )}
