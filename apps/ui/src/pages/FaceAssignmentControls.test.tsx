@@ -79,6 +79,128 @@ describe("FaceAssignmentControls", () => {
     expect(await screen.findByText("You do not have permission to assign faces.")).toBeInTheDocument();
   });
 
+  it("shows API detail for 409 conflicts", async () => {
+    const user = userEvent.setup();
+
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      json: async () => ({ detail: "Face already assigned" })
+    } as Response);
+
+    render(
+      <FaceAssignmentControls
+        faces={[{ face_id: "face-1", person_id: null }]}
+        people={[{ person_id: "person-1", display_name: "Inez" }]}
+        onAssigned={vi.fn()}
+      />
+    );
+
+    await user.selectOptions(screen.getByLabelText("Assign face 1"), "person-1");
+
+    expect(await screen.findByText("Face already assigned")).toBeInTheDocument();
+  });
+
+  it("shows fallback message for 404 without detail", async () => {
+    const user = userEvent.setup();
+
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      json: async () => ({})
+    } as Response);
+
+    render(
+      <FaceAssignmentControls
+        faces={[{ face_id: "face-1", person_id: null }]}
+        people={[{ person_id: "person-1", display_name: "Inez" }]}
+        onAssigned={vi.fn()}
+      />
+    );
+
+    await user.selectOptions(screen.getByLabelText("Assign face 1"), "person-1");
+
+    expect(await screen.findByText("Face or person no longer exists.")).toBeInTheDocument();
+  });
+
+  it("shows fallback status message for non-mapped server failures", async () => {
+    const user = userEvent.setup();
+
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: async () => ({ detail: "server blew up" })
+    } as Response);
+
+    render(
+      <FaceAssignmentControls
+        faces={[{ face_id: "face-1", person_id: null }]}
+        people={[{ person_id: "person-1", display_name: "Inez" }]}
+        onAssigned={vi.fn()}
+      />
+    );
+
+    await user.selectOptions(screen.getByLabelText("Assign face 1"), "person-1");
+
+    expect(await screen.findByText("Assignment request failed (500).")).toBeInTheDocument();
+  });
+
+  it("shows network fallback message on fetch exception", async () => {
+    const user = userEvent.setup();
+
+    fetchMock.mockRejectedValueOnce(new Error("network"));
+
+    render(
+      <FaceAssignmentControls
+        faces={[{ face_id: "face-1", person_id: null }]}
+        people={[{ person_id: "person-1", display_name: "Inez" }]}
+        onAssigned={vi.fn()}
+      />
+    );
+
+    await user.selectOptions(screen.getByLabelText("Assign face 1"), "person-1");
+
+    expect(await screen.findByText("Could not assign face.")).toBeInTheDocument();
+  });
+
+  it("disables select while assignment request is in flight", async () => {
+    const user = userEvent.setup();
+    let resolveRequest: ((value: Response) => void) | null = null;
+
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveRequest = resolve;
+        })
+    );
+
+    render(
+      <FaceAssignmentControls
+        faces={[{ face_id: "face-1", person_id: null }]}
+        people={[{ person_id: "person-1", display_name: "Inez" }]}
+        onAssigned={vi.fn()}
+      />
+    );
+
+    const select = screen.getByLabelText("Assign face 1");
+    await user.selectOptions(select, "person-1");
+    expect(select).toBeDisabled();
+
+    resolveRequest?.({
+      ok: true,
+      status: 201,
+      json: async () => ({
+        face_id: "face-1",
+        photo_id: "photo-1",
+        person_id: "person-1"
+      })
+    } as Response);
+
+    await waitFor(() => {
+      expect(screen.getByText("All visible faces assigned.")).toBeInTheDocument();
+    });
+  });
+
   it("renders completion when no unlabeled faces remain", () => {
     render(
       <FaceAssignmentControls
