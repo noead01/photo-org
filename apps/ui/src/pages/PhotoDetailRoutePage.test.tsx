@@ -120,6 +120,19 @@ describe("PhotoDetailRoutePage", () => {
 
   beforeEach(() => {
     fetchMock.mockReset();
+    fetchMock.mockImplementation(async (input) => {
+      if (String(input) === "/api/v1/people") {
+        return {
+          ok: true,
+          json: async () => []
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 500
+      } as Response;
+    });
     vi.stubGlobal("fetch", fetchMock);
   });
 
@@ -146,8 +159,8 @@ describe("PhotoDetailRoutePage", () => {
     expect(screen.getByRole("list", { name: "Detected face regions" })).toBeInTheDocument();
     expect(screen.getByLabelText("Face region 1 for person-1")).toBeInTheDocument();
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/v1/photos/photo-1");
+    const photoDetailCalls = fetchMock.mock.calls.filter((call) => call[0] === "/api/v1/photos/photo-1");
+    expect(photoDetailCalls).toHaveLength(1);
   });
 
   it("shows explicit fallback UI for missing optional metadata fields", async () => {
@@ -223,6 +236,57 @@ describe("PhotoDetailRoutePage", () => {
     expect(await screen.findByLabelText("Face region 1 for person-1")).toBeInTheDocument();
   });
 
+  it("loads people options and updates local face state after assignment success", async () => {
+    const user = userEvent.setup();
+
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () =>
+          buildPayload({
+            people: [],
+            faces: [
+              {
+                face_id: "face-1",
+                person_id: null,
+                bbox_x: 10,
+                bbox_y: 10,
+                bbox_w: 20,
+                bbox_h: 20
+              }
+            ]
+          })
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            person_id: "person-1",
+            display_name: "Inez",
+            created_ts: "2026-03-28T19:30:00Z",
+            updated_ts: "2026-03-28T19:30:00Z"
+          }
+        ]
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        json: async () => ({
+          face_id: "face-1",
+          photo_id: "photo-1",
+          person_id: "person-1"
+        })
+      } as Response);
+
+    renderDetail();
+
+    expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
+    await user.selectOptions(await screen.findByLabelText("Assign face 1"), "person-1");
+
+    expect(await screen.findByText("All visible faces assigned.")).toBeInTheDocument();
+    expect(screen.getByText("person-1")).toBeInTheDocument();
+  });
+
   it("renders deterministic loading and error transitions", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: false,
@@ -257,7 +321,8 @@ describe("PhotoDetailRoutePage", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const photoDetailCalls = fetchMock.mock.calls.filter((call) => call[0] === "/api/v1/photos/photo-1");
+    expect(photoDetailCalls).toHaveLength(2);
   });
 
   it("renders pending ingest status when face detection is still in progress", async () => {
