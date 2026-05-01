@@ -528,6 +528,25 @@ body {
   box-shadow: 0 0 0 1px rgb(255 255 255 / 85%);
 }
 
+.detail-face-overlay-provenance-button {
+  pointer-events: auto;
+  position: absolute;
+  top: -0.55rem;
+  right: -0.55rem;
+  width: 1.45rem;
+  height: 1.45rem;
+  border-radius: 999px;
+  border: 1px solid #f97316;
+  background: #fff7ed;
+  font-size: 0.7rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
 .detail-face-state {
   margin: 0;
   font-size: 0.82rem;
@@ -591,6 +610,33 @@ body {
   color: #334155;
 }
 
+.detail-face-correction-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.detail-face-provenance-badge {
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 0.8rem;
+  line-height: 1;
+  width: 1.9rem;
+  height: 1.9rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.detail-face-provenance-badge[aria-expanded="true"] {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
 .detail-face-correction-controls {
   display: flex;
   flex-wrap: wrap;
@@ -606,6 +652,37 @@ body {
   margin: 0;
   font-size: 0.82rem;
   color: #1d4ed8;
+}
+
+.detail-face-provenance-details {
+  margin: 0;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.55rem;
+  background: #eff6ff;
+  padding: 0.55rem 0.65rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.detail-face-provenance-details div {
+  display: grid;
+  grid-template-columns: 8rem 1fr;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+}
+
+.detail-face-provenance-details dt,
+.detail-face-provenance-details dd {
+  margin: 0;
+}
+
+.detail-face-provenance-details dt {
+  color: #1e3a8a;
+  font-weight: 600;
+}
+
+.detail-face-provenance-details dd {
+  color: #1e293b;
 }
 
 .ingest-status-badge {

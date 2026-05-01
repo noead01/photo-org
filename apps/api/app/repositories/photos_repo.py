@@ -31,6 +31,7 @@ class PhotosRepository:
         self.faces: Table = Table("faces", md, autoload_with=bind)
         self.people: Table = Table("people", md, autoload_with=bind)
         self.photo_tags: Table = Table("photo_tags", md, autoload_with=bind)
+        self.face_labels: Table = Table("face_labels", md, autoload_with=bind)
         self.photo_files: Table = Table("photo_files", md, autoload_with=bind)
         self.watched_folders: Table = Table("watched_folders", md, autoload_with=bind)
         self.storage_sources: Table = Table("storage_sources", md, autoload_with=bind)
@@ -414,15 +415,76 @@ class PhotosRepository:
                 ]
             )
 
-        for r in self.db.execute(
+        face_rows = self.db.execute(
             select(*face_columns)
             .where(self.faces.c.photo_id.in_(pids))
             .order_by(self.faces.c.photo_id, self.faces.c.face_id)
-        ).all():
+        ).all()
+
+        provenance_map: Dict[tuple[str, str], Dict[str, Any]] = {}
+        if include_face_regions:
+            labeled_face_keys = {
+                (str(r.face_id), str(r.person_id))
+                for r in face_rows
+                if r.person_id is not None and r.face_id is not None
+            }
+            if labeled_face_keys:
+                face_ids = sorted({face_id for face_id, _ in labeled_face_keys})
+                label_rows = (
+                    self.db.execute(
+                        select(
+                            self.face_labels.c.face_id,
+                            self.face_labels.c.person_id,
+                            self.face_labels.c.label_source,
+                            self.face_labels.c.confidence,
+                            self.face_labels.c.model_version,
+                            self.face_labels.c.provenance,
+                            self.face_labels.c.created_ts,
+                            self.face_labels.c.updated_ts,
+                            self.face_labels.c.face_label_id,
+                        )
+                        .where(self.face_labels.c.face_id.in_(face_ids))
+                        .order_by(
+                            self.face_labels.c.face_id,
+                            self.face_labels.c.person_id,
+                            self.face_labels.c.updated_ts.desc(),
+                            self.face_labels.c.created_ts.desc(),
+                            self.face_labels.c.face_label_id.desc(),
+                        )
+                    )
+                    .mappings()
+                    .all()
+                )
+                for row in label_rows:
+                    person_id = row["person_id"]
+                    face_id = row["face_id"]
+                    if person_id is None or face_id is None:
+                        continue
+                    key = (str(face_id), str(person_id))
+                    if key not in labeled_face_keys or key in provenance_map:
+                        continue
+                    provenance_map[key] = {
+                        "label_source": row["label_source"],
+                        "confidence": row["confidence"],
+                        "model_version": row["model_version"],
+                        "provenance": row["provenance"],
+                        "label_recorded_ts": (
+                            iso_utc(row["updated_ts"])
+                            if row["updated_ts"] is not None
+                            else (iso_utc(row["created_ts"]) if row["created_ts"] is not None else None)
+                        ),
+                    }
+
+        for r in face_rows:
             if r.person_id:
                 ppl_map[r.photo_id].append(r.person_id)
             face_item = {"person_id": r.person_id}
             if include_face_regions:
+                provenance = (
+                    provenance_map.get((str(r.face_id), str(r.person_id)))
+                    if r.person_id is not None
+                    else None
+                )
                 face_item.update(
                     {
                         "face_id": r.face_id,
@@ -430,6 +492,11 @@ class PhotosRepository:
                         "bbox_y": r.bbox_y,
                         "bbox_w": r.bbox_w,
                         "bbox_h": r.bbox_h,
+                        "label_source": provenance["label_source"] if provenance else None,
+                        "confidence": provenance["confidence"] if provenance else None,
+                        "model_version": provenance["model_version"] if provenance else None,
+                        "provenance": provenance["provenance"] if provenance else None,
+                        "label_recorded_ts": provenance["label_recorded_ts"] if provenance else None,
                     }
                 )
             faces_map[r.photo_id].append(face_item)

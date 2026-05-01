@@ -338,4 +338,56 @@ describe("FaceAssignmentControls", () => {
       expect(onCorrected).toHaveBeenCalledWith("face-1", "person-2");
     });
   });
+
+  it("renders provenance badges and expands inline provenance details with fallback values", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <FaceAssignmentControls
+        faces={
+          [
+            {
+              face_id: "face-1",
+              person_id: "person-1",
+              label_source: "human_confirmed",
+              confidence: null,
+              model_version: null,
+              provenance: {
+                workflow: "face-labeling",
+                surface: "api",
+                action: "correction"
+              },
+              label_recorded_ts: "2026-03-28T19:33:00Z"
+            },
+            {
+              face_id: "face-2",
+              person_id: "person-2",
+              label_source: null,
+              confidence: null,
+              model_version: null,
+              provenance: null,
+              label_recorded_ts: null
+            }
+          ] as any
+        }
+        people={[
+          { person_id: "person-1", display_name: "Inez" },
+          { person_id: "person-2", display_name: "Mateo" }
+        ]}
+        onAssigned={vi.fn()}
+        onCorrected={onCorrected}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Show provenance details for face 1" })).toHaveTextContent("👤");
+    expect(screen.getByRole("button", { name: "Show provenance details for face 2" })).toHaveTextContent("❓");
+
+    await user.click(screen.getByRole("button", { name: "Show provenance details for face 1" }));
+
+    expect(await screen.findByText("Source")).toBeInTheDocument();
+    expect(screen.getByText("Human confirmed")).toBeInTheDocument();
+    expect(screen.getByText("correction")).toBeInTheDocument();
+    expect(screen.getByText("face-labeling")).toBeInTheDocument();
+    expect(screen.getAllByText("Not available").length).toBeGreaterThan(0);
+  });
 });

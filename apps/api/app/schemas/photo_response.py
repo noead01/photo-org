@@ -20,6 +20,26 @@ class PhotoDetailFace(BaseModel):
     bbox_y: int | None = Field(default=None, description="Bounding-box y coordinate.")
     bbox_w: int | None = Field(default=None, description="Bounding-box width in pixels.")
     bbox_h: int | None = Field(default=None, description="Bounding-box height in pixels.")
+    label_source: str | None = Field(
+        default=None,
+        description="Latest face-label source for the current assigned person, if available.",
+    )
+    confidence: float | None = Field(
+        default=None,
+        description="Confidence for machine-produced label records, if available.",
+    )
+    model_version: str | None = Field(
+        default=None,
+        description="Model version attached to latest label provenance, if available.",
+    )
+    provenance: dict[str, object] | None = Field(
+        default=None,
+        description="Raw provenance payload for the latest matching label record.",
+    )
+    label_recorded_ts: str | None = Field(
+        default=None,
+        description="Timestamp of the latest matching label record.",
+    )
 
 
 class PhotoMetadataProjection(BaseModel):
