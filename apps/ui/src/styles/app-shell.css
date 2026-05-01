@@ -561,6 +561,53 @@ body {
   color: #334155;
 }
 
+.detail-face-correction {
+  margin-top: 1rem;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.detail-face-correction h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.detail-face-correction ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.detail-face-correction li {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.detail-face-correction li p {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #334155;
+}
+
+.detail-face-correction-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.detail-face-correction-controls select {
+  min-width: 14rem;
+}
+
+.detail-face-correction-provenance {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #1d4ed8;
+}
+
 .ingest-status-badge {
   border-radius: 999px;
   border: 1px solid transparent;

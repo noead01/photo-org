@@ -459,6 +459,7 @@ export function PhotoDetailRoutePage() {
                     display_name: person.display_name
                   }))}
                   onAssigned={handleFaceAssigned}
+                  onCorrected={handleFaceAssigned}
                 />
               </>
             ) : (
@@ -477,6 +478,7 @@ export function PhotoDetailRoutePage() {
                     display_name: person.display_name
                   }))}
                   onAssigned={handleFaceAssigned}
+                  onCorrected={handleFaceAssigned}
                 />
               </>
             )}

@@ -4,9 +4,11 @@ import { FaceAssignmentControls } from "./FaceAssignmentControls";
 
 describe("FaceAssignmentControls", () => {
   const fetchMock = vi.fn();
+  const onCorrected = vi.fn();
 
   beforeEach(() => {
     fetchMock.mockReset();
+    onCorrected.mockReset();
     vi.stubGlobal("fetch", fetchMock);
   });
 
@@ -36,6 +38,7 @@ describe("FaceAssignmentControls", () => {
           { person_id: "person-2", display_name: "Mateo" }
         ]}
         onAssigned={onAssigned}
+        onCorrected={onCorrected}
       />
     );
 
@@ -71,6 +74,7 @@ describe("FaceAssignmentControls", () => {
         faces={[{ face_id: "face-1", person_id: null }]}
         people={[{ person_id: "person-1", display_name: "Inez" }]}
         onAssigned={vi.fn()}
+        onCorrected={onCorrected}
       />
     );
 
@@ -93,6 +97,7 @@ describe("FaceAssignmentControls", () => {
         faces={[{ face_id: "face-1", person_id: null }]}
         people={[{ person_id: "person-1", display_name: "Inez" }]}
         onAssigned={vi.fn()}
+        onCorrected={onCorrected}
       />
     );
 
@@ -115,6 +120,7 @@ describe("FaceAssignmentControls", () => {
         faces={[{ face_id: "face-1", person_id: null }]}
         people={[{ person_id: "person-1", display_name: "Inez" }]}
         onAssigned={vi.fn()}
+        onCorrected={onCorrected}
       />
     );
 
@@ -137,6 +143,7 @@ describe("FaceAssignmentControls", () => {
         faces={[{ face_id: "face-1", person_id: null }]}
         people={[{ person_id: "person-1", display_name: "Inez" }]}
         onAssigned={vi.fn()}
+        onCorrected={onCorrected}
       />
     );
 
@@ -155,6 +162,7 @@ describe("FaceAssignmentControls", () => {
         faces={[{ face_id: "face-1", person_id: null }]}
         people={[{ person_id: "person-1", display_name: "Inez" }]}
         onAssigned={vi.fn()}
+        onCorrected={onCorrected}
       />
     );
 
@@ -165,12 +173,12 @@ describe("FaceAssignmentControls", () => {
 
   it("disables select while assignment request is in flight", async () => {
     const user = userEvent.setup();
-    let resolveRequest: ((value: Response) => void) | null = null;
+    let resolveRequest: ((value: Response) => void) | undefined;
 
     fetchMock.mockImplementationOnce(
       () =>
         new Promise<Response>((resolve) => {
-          resolveRequest = resolve;
+          resolveRequest = resolve as (value: Response) => void;
         })
     );
 
@@ -179,6 +187,7 @@ describe("FaceAssignmentControls", () => {
         faces={[{ face_id: "face-1", person_id: null }]}
         people={[{ person_id: "person-1", display_name: "Inez" }]}
         onAssigned={vi.fn()}
+        onCorrected={onCorrected}
       />
     );
 
@@ -186,7 +195,8 @@ describe("FaceAssignmentControls", () => {
     await user.selectOptions(select, "person-1");
     expect(select).toBeDisabled();
 
-    resolveRequest?.({
+    expect(resolveRequest).toBeDefined();
+    resolveRequest!({
       ok: true,
       status: 201,
       json: async () => ({
@@ -207,9 +217,125 @@ describe("FaceAssignmentControls", () => {
         faces={[{ face_id: "face-1", person_id: "person-1" }]}
         people={[{ person_id: "person-1", display_name: "Inez" }]}
         onAssigned={vi.fn()}
+        onCorrected={onCorrected}
       />
     );
 
     expect(screen.getByText("All visible faces assigned.")).toBeInTheDocument();
+  });
+
+  it("corrects a labeled face and shows provenance feedback", async () => {
+    const user = userEvent.setup();
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        face_id: "face-1",
+        photo_id: "photo-1",
+        previous_person_id: "person-1",
+        person_id: "person-2"
+      })
+    } as Response);
+
+    render(
+      <FaceAssignmentControls
+        faces={[{ face_id: "face-1", person_id: "person-1" }]}
+        people={[
+          { person_id: "person-1", display_name: "Inez" },
+          { person_id: "person-2", display_name: "Mateo" }
+        ]}
+        onAssigned={vi.fn()}
+        onCorrected={onCorrected}
+      />
+    );
+
+    await user.selectOptions(screen.getByLabelText("Correct face 1"), "person-2");
+    await user.click(screen.getByRole("button", { name: "Confirm reassignment" }));
+
+    await waitFor(() => {
+      expect(onCorrected).toHaveBeenCalledWith("face-1", "person-2");
+    });
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/faces/face-1/corrections", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Face-Validation-Role": "contributor"
+      },
+      body: JSON.stringify({ person_id: "person-2" })
+    });
+    expect(await screen.findByText("Correction recorded: Inez -> Mateo.")).toBeInTheDocument();
+  });
+
+  it("shows deterministic correction permission error", async () => {
+    const user = userEvent.setup();
+
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      json: async () => ({ detail: "Face validation role required" })
+    } as Response);
+
+    render(
+      <FaceAssignmentControls
+        faces={[{ face_id: "face-1", person_id: "person-1" }]}
+        people={[
+          { person_id: "person-1", display_name: "Inez" },
+          { person_id: "person-2", display_name: "Mateo" }
+        ]}
+        onAssigned={vi.fn()}
+        onCorrected={onCorrected}
+      />
+    );
+
+    await user.selectOptions(screen.getByLabelText("Correct face 1"), "person-2");
+    await user.click(screen.getByRole("button", { name: "Confirm reassignment" }));
+
+    expect(await screen.findByText("You do not have permission to correct face assignments.")).toBeInTheDocument();
+  });
+
+  it("disables correction controls while correction request is in flight", async () => {
+    const user = userEvent.setup();
+    let resolveRequest: ((value: Response) => void) | undefined;
+
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveRequest = resolve as (value: Response) => void;
+        })
+    );
+
+    render(
+      <FaceAssignmentControls
+        faces={[{ face_id: "face-1", person_id: "person-1" }]}
+        people={[
+          { person_id: "person-1", display_name: "Inez" },
+          { person_id: "person-2", display_name: "Mateo" }
+        ]}
+        onAssigned={vi.fn()}
+        onCorrected={onCorrected}
+      />
+    );
+
+    await user.selectOptions(screen.getByLabelText("Correct face 1"), "person-2");
+    await user.click(screen.getByRole("button", { name: "Confirm reassignment" }));
+    expect(screen.getByLabelText("Correct face 1")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Confirm reassignment" })).toBeDisabled();
+
+    expect(resolveRequest).toBeDefined();
+    resolveRequest!({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        face_id: "face-1",
+        photo_id: "photo-1",
+        previous_person_id: "person-1",
+        person_id: "person-2"
+      })
+    } as Response);
+
+    await waitFor(() => {
+      expect(onCorrected).toHaveBeenCalledWith("face-1", "person-2");
+    });
   });
 });
