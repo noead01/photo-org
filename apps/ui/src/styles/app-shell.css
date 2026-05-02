@@ -309,6 +309,49 @@ body {
   cursor: not-allowed;
 }
 
+.library-action-bar {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.65rem;
+  background: #ffffff;
+  padding: 0.7rem 0.8rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.library-action-summary {
+  margin: 0;
+  color: #1e293b;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.library-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.8rem;
+  align-items: center;
+}
+
+.library-action-buttons button {
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 0.45rem;
+  padding: 0.35rem 0.55rem;
+  font: inherit;
+}
+
+.library-action-buttons button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.library-action-reason {
+  margin: 0;
+  color: #92400e;
+  font-size: 0.82rem;
+}
+
 .status-legend {
   border: 1px solid #cbd5e1;
   border-radius: 0.65rem;
@@ -1373,6 +1416,15 @@ body {
 
   .search-controls {
     justify-items: start;
+  }
+
+  .library-action-buttons {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .library-action-buttons button {
+    width: 100%;
   }
 
   .browse-card {
