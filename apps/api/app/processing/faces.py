@@ -45,13 +45,14 @@ class OpenCvFaceDetector:
 
     def detect(self, path: Path) -> list[dict]:
         import numpy as np  # type: ignore
-        from PIL import Image  # type: ignore
+        from PIL import Image, ImageOps  # type: ignore
         from pillow_heif import register_heif_opener  # type: ignore
 
         register_heif_opener()
 
         with Image.open(path) as image:
-            rgb_image = image.convert("RGB")
+            prepared = ImageOps.exif_transpose(image)
+            rgb_image = prepared.convert("RGB")
             width, height = rgb_image.size
             grayscale = self._cv2.cvtColor(np.array(rgb_image), self._cv2.COLOR_RGB2GRAY)
             boxes = self._classifier.detectMultiScale(
@@ -80,6 +81,8 @@ class OpenCvFaceDetector:
                             "scale_factor": self._scale_factor,
                             "min_neighbors": self._min_neighbors,
                             "min_size": list(self._min_size),
+                            "bbox_space_width": width,
+                            "bbox_space_height": height,
                         },
                     ).as_row()
                 )

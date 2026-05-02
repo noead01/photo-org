@@ -1,15 +1,21 @@
 import { useMemo, useState } from "react";
+import {
+  buildFaceOverlayRegions,
+  FaceBBoxOverlay,
+  type FaceLabelSource,
+  type FaceOverlayRegion
+} from "../FaceBBoxOverlay";
 import { FaceAssignmentControls } from "../FaceAssignmentControls";
 import type { FaceAssignmentFace, FaceAssignmentPerson } from "../FaceAssignmentControls";
 import type { LibraryPhoto } from "./libraryRouteTypes";
-
-type FaceLabelSource = "human_confirmed" | "machine_applied" | "machine_suggested" | null;
 
 type FaceRegion = FaceAssignmentFace & {
   bbox_x: number | null;
   bbox_y: number | null;
   bbox_w: number | null;
   bbox_h: number | null;
+  bbox_space_width?: number | null;
+  bbox_space_height?: number | null;
 };
 
 type PhotoDetailPayload = {
@@ -22,59 +28,6 @@ type PhotoDetailPayload = {
     data_base64: string;
   } | null;
 };
-
-type FaceOverlayRegion = {
-  faceId: string;
-  personId: string | null;
-  labelSource: FaceLabelSource;
-  leftPercent: number;
-  topPercent: number;
-  widthPercent: number;
-  heightPercent: number;
-};
-
-type FaceBBox = {
-  bbox_x: number | null;
-  bbox_y: number | null;
-  bbox_w: number | null;
-  bbox_h: number | null;
-};
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
-function inferFaceOverlayCoordinateSpace(
-  faces: FaceBBox[],
-  thumbnailWidth: number,
-  thumbnailHeight: number
-): { width: number; height: number } {
-  // Face coordinates are stored in source-image pixels; use detected extents when thumbnail space is smaller.
-  const coordinateSpace = faces.reduce(
-    (acc, face) => {
-      if (
-        face.bbox_x === null ||
-        face.bbox_y === null ||
-        face.bbox_w === null ||
-        face.bbox_h === null ||
-        face.bbox_w <= 0 ||
-        face.bbox_h <= 0
-      ) {
-        return acc;
-      }
-
-      acc.width = Math.max(acc.width, face.bbox_x + face.bbox_w);
-      acc.height = Math.max(acc.height, face.bbox_y + face.bbox_h);
-      return acc;
-    },
-    { width: thumbnailWidth, height: thumbnailHeight }
-  );
-
-  return {
-    width: Math.max(coordinateSpace.width, thumbnailWidth),
-    height: Math.max(coordinateSpace.height, thumbnailHeight)
-  };
-}
 
 function provenanceBadgeIcon(source: FaceLabelSource): string {
   if (source === "human_confirmed") {
@@ -151,45 +104,11 @@ function buildOverlayRegions(payload: PhotoDetailPayload | null): FaceOverlayReg
     return [];
   }
 
-  const thumbnailWidth = payload.thumbnail.width;
-  const thumbnailHeight = payload.thumbnail.height;
-  const coordinateSpace = inferFaceOverlayCoordinateSpace(payload.faces, thumbnailWidth, thumbnailHeight);
-
-  return payload.faces
-    .map((face) => {
-      if (
-        face.bbox_x === null ||
-        face.bbox_y === null ||
-        face.bbox_w === null ||
-        face.bbox_h === null ||
-        face.bbox_w <= 0 ||
-        face.bbox_h <= 0
-      ) {
-        return null;
-      }
-
-      const left = clamp((face.bbox_x / coordinateSpace.width) * 100, 0, 100);
-      const top = clamp((face.bbox_y / coordinateSpace.height) * 100, 0, 100);
-      const right = clamp(((face.bbox_x + face.bbox_w) / coordinateSpace.width) * 100, 0, 100);
-      const bottom = clamp(((face.bbox_y + face.bbox_h) / coordinateSpace.height) * 100, 0, 100);
-      const width = right - left;
-      const height = bottom - top;
-
-      if (width <= 0 || height <= 0) {
-        return null;
-      }
-
-      return {
-        faceId: face.face_id,
-        personId: face.person_id,
-        labelSource: face.label_source ?? null,
-        leftPercent: left,
-        topPercent: top,
-        widthPercent: width,
-        heightPercent: height
-      };
-    })
-    .filter((region): region is FaceOverlayRegion => region !== null);
+  return buildFaceOverlayRegions(
+    payload.faces,
+    payload.thumbnail.width,
+    payload.thumbnail.height
+  );
 }
 
 async function fetchPhotoDetail(photoId: string): Promise<PhotoDetailPayload> {
@@ -384,34 +303,22 @@ export function LibraryPhotoFacePanel({ photo }: LibraryPhotoFacePanelProps) {
                       height={detail.thumbnail.height}
                       alt={`Preview for ${detail.photo_id}`}
                     />
-                    {overlayRegions.length > 0 ? (
-                      <ol className="detail-face-overlay-list" aria-label="Detected face regions">
-                        {overlayRegions.map((region, index) => (
-                          <li
-                            key={region.faceId}
-                            className="detail-face-overlay"
-                            aria-label={`Face region ${index + 1}${region.personId ? ` for ${region.personId}` : ""}`}
-                            style={{
-                              left: `${region.leftPercent}%`,
-                              top: `${region.topPercent}%`,
-                              width: `${region.widthPercent}%`,
-                              height: `${region.heightPercent}%`
-                            }}
-                          >
-                            <button
-                              type="button"
-                              className="detail-face-overlay-provenance-button"
-                              aria-label={`Show provenance details for face region ${index + 1}`}
-                              onClick={() => {
-                                setRequestedExpandedProvenanceFaceId(region.faceId);
-                              }}
-                            >
-                              {provenanceBadgeIcon(region.labelSource)}
-                            </button>
-                          </li>
-                        ))}
-                      </ol>
-                    ) : null}
+                    <FaceBBoxOverlay
+                      regions={overlayRegions}
+                      ariaLabel="Detected face regions"
+                      renderRegionContent={(region, index) => (
+                        <button
+                          type="button"
+                          className="detail-face-overlay-provenance-button"
+                          aria-label={`Show provenance details for face region ${index + 1}`}
+                          onClick={() => {
+                            setRequestedExpandedProvenanceFaceId(region.faceId);
+                          }}
+                        >
+                          {provenanceBadgeIcon(region.labelSource)}
+                        </button>
+                      )}
+                    />
                   </div>
                 </div>
               ) : (

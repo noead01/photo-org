@@ -627,10 +627,24 @@ body {
   text-decoration: none;
 }
 
-.detail-layout {
+.detail-workspace {
+  position: relative;
+}
+
+.detail-preview-panel {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.7rem;
+  background: #ffffff;
+  padding: 0.75rem;
   display: grid;
-  gap: 0.85rem;
-  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  gap: 0.55rem;
+  min-height: 22rem;
+}
+
+.detail-preview-panel h2 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 1rem;
 }
 
 .detail-panel {
@@ -701,6 +715,27 @@ body {
   background: #dbeafe;
 }
 
+.detail-photo-scale {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #334155;
+  font-size: 0.8rem;
+}
+
+.detail-photo-scale input {
+  width: 9rem;
+}
+
+.detail-ingest-inline {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #334155;
+  font-size: 0.8rem;
+}
+
 .detail-media-frame {
   border: 1px solid #cbd5e1;
   border-radius: 0.55rem;
@@ -718,7 +753,7 @@ body {
 
 .detail-media-stage {
   position: relative;
-  width: 100%;
+  min-width: 5rem;
 }
 
 .detail-media-image {
@@ -727,16 +762,6 @@ body {
   height: auto;
   border-radius: 0.35rem;
   background: #e2e8f0;
-}
-
-.detail-media-frame[data-mode="actual"] .detail-media-stage {
-  width: fit-content;
-  max-width: none;
-}
-
-.detail-media-frame[data-mode="actual"] .detail-media-image {
-  width: auto;
-  max-width: none;
 }
 
 .detail-face-overlay-list {
@@ -787,6 +812,129 @@ body {
   gap: 0.35rem;
   color: #334155;
   font-size: 0.8rem;
+}
+
+.detail-flyout-backdrop {
+  display: none;
+}
+
+.detail-flyout {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: min(27rem, 92vw);
+  height: 100vh;
+  background: #ffffff;
+  border-left: 1px solid #cbd5e1;
+  box-shadow: -8px 0 24px rgb(15 23 42 / 14%);
+  z-index: 30;
+  transform: translateX(102%);
+  transition: transform 160ms ease;
+  padding: 0.8rem;
+  display: grid;
+  align-content: start;
+  gap: 0.7rem;
+  overflow-y: auto;
+}
+
+.detail-flyout.is-open {
+  transform: translateX(0);
+}
+
+.detail-flyout-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.55rem;
+}
+
+.detail-flyout-header h2 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 1rem;
+}
+
+.detail-flyout-header button {
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 0.45rem;
+  padding: 0.28rem 0.52rem;
+  font: inherit;
+}
+
+.detail-face-actions {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.7rem;
+  background: #ffffff;
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.detail-face-actions h3 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 0.96rem;
+}
+
+.detail-face-action-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.detail-face-action-list button {
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #334155;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.25rem 0.55rem;
+}
+
+.detail-face-action-list button.is-active {
+  border-color: #1d4ed8;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.detail-face-actions-body {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.detail-face-actions-body p {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #334155;
+}
+
+.detail-face-actions-body label {
+  color: #475569;
+  font-size: 0.78rem;
+}
+
+.detail-face-actions-body input,
+.detail-face-actions-body select {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.45rem;
+  padding: 0.36rem 0.5rem;
+  font: inherit;
+}
+
+.detail-face-actions-body button {
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 0.45rem;
+  padding: 0.38rem 0.62rem;
+  font: inherit;
+  width: fit-content;
 }
 
 .detail-face-assignment {
@@ -1670,5 +1818,20 @@ body {
 
   .search-location-row {
     grid-template-columns: auto minmax(8rem, 1fr);
+  }
+
+  .detail-flyout {
+    width: 100vw;
+  }
+
+  .detail-flyout-backdrop.is-open {
+    display: block;
+    position: fixed;
+    inset: 0;
+    border: 0;
+    background: rgb(15 23 42 / 35%);
+    z-index: 20;
+    padding: 0;
+    margin: 0;
   }
 }
