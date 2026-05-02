@@ -135,7 +135,7 @@ export function BrowseRoutePage() {
   const [notifications, setNotifications] = useState<NotificationEntry[]>([]);
   const [selectionState, dispatchSelection] = useReducer(
     librarySelectionReducer,
-    initialReturnState?.browseSelection ?? null,
+    initialReturnState?.librarySelection ?? null,
     createLibrarySelectionState
   );
   const {
