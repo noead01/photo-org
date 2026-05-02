@@ -232,6 +232,20 @@ describe("App shell", () => {
     expect(screen.getByRole("button", { name: "Search" })).toBeInTheDocument();
   });
 
+  it("renders only Library as the discovery workflow route", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ hits: { total: 0, cursor: null, items: [] }, facets: {} })
+    } as Response);
+
+    renderAtPath("/library");
+
+    expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Library" })).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByRole("link", { name: "Browse" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Search" })).not.toBeInTheDocument();
+  });
+
   it("renders people-management controls on the /labeling route", async () => {
     fetchMock.mockResolvedValue({
       ok: true,

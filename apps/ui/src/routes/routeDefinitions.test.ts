@@ -14,6 +14,19 @@ describe("Shell handoff expectations", () => {
 });
 
 describe("Navigation state", () => {
+  it("maps /library to the library primary route and uses it as fallback context", () => {
+    const libraryState = resolveNavigationState("/library");
+
+    expect(libraryState.activeRoute.key).toBe("library");
+    expect(libraryState.pageContext).toBe("Library");
+    expect(libraryState.usesFallback).toBe(false);
+
+    const unknownState = resolveNavigationState("/not-a-real-route");
+    expect(unknownState.activeRoute.key).toBe("library");
+    expect(unknownState.pageContext).toBe("Library");
+    expect(unknownState.usesFallback).toBe(true);
+  });
+
   it("maps an exact primary route pathname to matching nav and context", () => {
     const navigationState = resolveNavigationState("/search");
 
