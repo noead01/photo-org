@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { deriveIngestStatus, INGEST_STATUS_LEGEND } from "../../app/ingestStatus";
+import {
+  buildFaceOverlayRegions,
+  FaceBBoxOverlay,
+  type FaceBBoxOverlayFace
+} from "../FaceBBoxOverlay";
 import { LibraryPhotoFacePanel } from "./LibraryPhotoFacePanel";
 import { PhotoResultIdentity } from "./PhotoResultIdentity";
 import {
@@ -19,117 +24,14 @@ interface LibraryPhotoGridProps {
   onToggleSelection: (photoId: string) => void;
 }
 
-type FaceLabelSource = "human_confirmed" | "machine_applied" | "machine_suggested" | null;
-
-type FaceBBox = {
-  face_id: string;
-  person_id: string | null;
-  bbox_x: number | null;
-  bbox_y: number | null;
-  bbox_w: number | null;
-  bbox_h: number | null;
-  label_source?: FaceLabelSource;
-};
-
 type PhotoFaceDetailPayload = {
   photo_id: string;
-  faces: FaceBBox[];
-};
-
-type FaceOverlayRegion = {
-  faceId: string;
-  personId: string | null;
-  leftPercent: number;
-  topPercent: number;
-  widthPercent: number;
-  heightPercent: number;
+  faces: FaceBBoxOverlayFace[];
 };
 
 const INGEST_STATUS_LEGEND_TOOLTIP = INGEST_STATUS_LEGEND
   .map((entry) => `${entry.label}: ${entry.description}`)
   .join("\n");
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
-function inferFaceOverlayCoordinateSpace(
-  faces: FaceBBox[],
-  thumbnailWidth: number,
-  thumbnailHeight: number
-): { width: number; height: number } {
-  const coordinateSpace = faces.reduce(
-    (acc, face) => {
-      if (
-        face.bbox_x === null ||
-        face.bbox_y === null ||
-        face.bbox_w === null ||
-        face.bbox_h === null ||
-        face.bbox_w <= 0 ||
-        face.bbox_h <= 0
-      ) {
-        return acc;
-      }
-
-      acc.width = Math.max(acc.width, face.bbox_x + face.bbox_w);
-      acc.height = Math.max(acc.height, face.bbox_y + face.bbox_h);
-      return acc;
-    },
-    { width: thumbnailWidth, height: thumbnailHeight }
-  );
-
-  return {
-    width: Math.max(coordinateSpace.width, thumbnailWidth),
-    height: Math.max(coordinateSpace.height, thumbnailHeight)
-  };
-}
-
-function buildOverlayRegions(
-  faces: FaceBBox[],
-  thumbnailWidth: number,
-  thumbnailHeight: number
-): FaceOverlayRegion[] {
-  if (thumbnailWidth <= 0 || thumbnailHeight <= 0) {
-    return [];
-  }
-
-  const coordinateSpace = inferFaceOverlayCoordinateSpace(faces, thumbnailWidth, thumbnailHeight);
-
-  return faces
-    .map((face) => {
-      if (
-        face.bbox_x === null ||
-        face.bbox_y === null ||
-        face.bbox_w === null ||
-        face.bbox_h === null ||
-        face.bbox_w <= 0 ||
-        face.bbox_h <= 0
-      ) {
-        return null;
-      }
-
-      const left = clamp((face.bbox_x / coordinateSpace.width) * 100, 0, 100);
-      const top = clamp((face.bbox_y / coordinateSpace.height) * 100, 0, 100);
-      const right = clamp(((face.bbox_x + face.bbox_w) / coordinateSpace.width) * 100, 0, 100);
-      const bottom = clamp(((face.bbox_y + face.bbox_h) / coordinateSpace.height) * 100, 0, 100);
-      const width = right - left;
-      const height = bottom - top;
-
-      if (width <= 0 || height <= 0) {
-        return null;
-      }
-
-      return {
-        faceId: face.face_id,
-        personId: face.person_id,
-        leftPercent: left,
-        topPercent: top,
-        widthPercent: width,
-        heightPercent: height
-      };
-    })
-    .filter((region): region is FaceOverlayRegion => region !== null);
-}
 
 export function LibraryPhotoGrid({
   photos,
@@ -206,7 +108,7 @@ export function LibraryPhotoGrid({
         const detailPayload = photoFaceDetails[photo.photo_id] ?? null;
         const overlayRegions =
           showFaceBoxesForPhoto && photo.thumbnail && detailPayload
-            ? buildOverlayRegions(
+            ? buildFaceOverlayRegions(
                 detailPayload.faces,
                 photo.thumbnail.width,
                 photo.thumbnail.height
@@ -267,26 +169,10 @@ export function LibraryPhotoGrid({
                   height={photo.thumbnail.height}
                   alt={`Preview of ${photo.path}`}
                 />
-                {overlayRegions.length > 0 ? (
-                  <ol
-                    className="detail-face-overlay-list"
-                    aria-label={`Detected face regions for ${photo.photo_id}`}
-                  >
-                    {overlayRegions.map((region, index) => (
-                      <li
-                        key={region.faceId}
-                        className="detail-face-overlay"
-                        aria-label={`Face region ${index + 1}${region.personId ? ` for ${region.personId}` : ""}`}
-                        style={{
-                          left: `${region.leftPercent}%`,
-                          top: `${region.topPercent}%`,
-                          width: `${region.widthPercent}%`,
-                          height: `${region.heightPercent}%`
-                        }}
-                      />
-                    ))}
-                  </ol>
-                ) : null}
+                <FaceBBoxOverlay
+                  regions={overlayRegions}
+                  ariaLabel={`Detected face regions for ${photo.photo_id}`}
+                />
               </Link>
             ) : (
               <div className="browse-thumbnail browse-thumbnail-placeholder" aria-hidden="true">

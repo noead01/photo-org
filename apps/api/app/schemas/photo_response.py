@@ -20,6 +20,14 @@ class PhotoDetailFace(BaseModel):
     bbox_y: int | None = Field(default=None, description="Bounding-box y coordinate.")
     bbox_w: int | None = Field(default=None, description="Bounding-box width in pixels.")
     bbox_h: int | None = Field(default=None, description="Bounding-box height in pixels.")
+    bbox_space_width: int | None = Field(
+        default=None,
+        description="Width of the image coordinate space used to produce bounding-box coordinates.",
+    )
+    bbox_space_height: int | None = Field(
+        default=None,
+        description="Height of the image coordinate space used to produce bounding-box coordinates.",
+    )
     label_source: str | None = Field(
         default=None,
         description="Latest face-label source for the current assigned person, if available.",

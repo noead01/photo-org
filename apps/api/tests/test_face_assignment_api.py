@@ -1074,6 +1074,8 @@ def test_photo_detail_api_includes_face_id_for_assignment_workflow(tmp_path, mon
             "bbox_y": 20,
             "bbox_w": 30,
             "bbox_h": 40,
+            "bbox_space_width": None,
+            "bbox_space_height": None,
             "label_source": None,
             "confidence": None,
             "model_version": None,

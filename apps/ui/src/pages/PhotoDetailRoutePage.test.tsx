@@ -20,6 +20,8 @@ interface PhotoDetailPayload {
     bbox_y: number | null;
     bbox_w: number | null;
     bbox_h: number | null;
+    bbox_space_width?: number | null;
+    bbox_space_height?: number | null;
     label_source: "human_confirmed" | "machine_applied" | "machine_suggested" | null;
     confidence: number | null;
     model_version: string | null;
@@ -74,6 +76,8 @@ function buildPayload(partial: Partial<PhotoDetailPayload> = {}): PhotoDetailPay
         bbox_y: 20,
         bbox_w: 30,
         bbox_h: 40,
+        bbox_space_width: null,
+        bbox_space_height: null,
         label_source: null,
         confidence: null,
         model_version: null,
@@ -241,6 +245,8 @@ describe("PhotoDetailRoutePage", () => {
               bbox_y: 160,
               bbox_w: 120,
               bbox_h: 140,
+              bbox_space_width: null,
+              bbox_space_height: null,
               label_source: null,
               confidence: null,
               model_version: null,
@@ -265,6 +271,48 @@ describe("PhotoDetailRoutePage", () => {
     expect(
       screen.queryByText("Face regions are present but could not be rendered on this preview.")
     ).not.toBeInTheDocument();
+  });
+
+  it("maps face overlays using explicit bbox coordinate-space dimensions when provided", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () =>
+        buildPayload({
+          faces: [
+            {
+              face_id: "face-1",
+              person_id: "person-1",
+              bbox_x: 1000,
+              bbox_y: 300,
+              bbox_w: 800,
+              bbox_h: 600,
+              bbox_space_width: 4000,
+              bbox_space_height: 3000,
+              label_source: null,
+              confidence: null,
+              model_version: null,
+              provenance: null,
+              label_recorded_ts: null
+            }
+          ],
+          thumbnail: {
+            mime_type: "image/jpeg",
+            width: 100,
+            height: 75,
+            data_base64: "dGh1bWI="
+          }
+        })
+    } as Response);
+
+    renderDetail();
+
+    const region = await screen.findByLabelText("Face region 1 for person-1");
+    expect(region).toHaveStyle({
+      left: "25%",
+      top: "10%",
+      width: "20%",
+      height: "20%"
+    });
   });
 
   it("keeps face overlays coherent when switching image presentation mode", async () => {
@@ -315,7 +363,7 @@ describe("PhotoDetailRoutePage", () => {
     expect(await screen.findByLabelText("Face region 1 for person-1")).toBeInTheDocument();
   });
 
-  it("loads people options and updates local face state after assignment success", async () => {
+  it("opens face actions from the overlay badge and assigns a person from suggestions", async () => {
     const user = userEvent.setup();
 
     fetchMock
@@ -365,10 +413,15 @@ describe("PhotoDetailRoutePage", () => {
     renderDetail();
 
     expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
-    await user.selectOptions(await screen.findByLabelText("Assign face 1"), "person-1");
+    await user.click(
+      await screen.findByRole("button", { name: "Open face actions for face region 1" })
+    );
+    await user.type(screen.getByLabelText("Person name"), "ine");
+    await user.selectOptions(screen.getByLabelText("Person suggestions"), "person-1");
+    await user.click(screen.getByRole("button", { name: "Assign selected person" }));
 
-    expect(await screen.findByText("All visible faces assigned.")).toBeInTheDocument();
-    expect(screen.getByText("person-1")).toBeInTheDocument();
+    expect(await screen.findByText("Face assignment saved for face 1.")).toBeInTheDocument();
+    expect(screen.getByText("Current label: Inez")).toBeInTheDocument();
   });
 
   it("updates local face state after correction success and shows correction provenance", async () => {
@@ -432,15 +485,19 @@ describe("PhotoDetailRoutePage", () => {
     renderDetail();
 
     expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
-    await user.selectOptions(await screen.findByLabelText("Correct face 1"), "person-2");
-    await user.click(screen.getByRole("button", { name: "Confirm reassignment" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Open face actions for face region 1" })
+    );
+    await user.type(screen.getByLabelText("Person name"), "mat");
+    await user.selectOptions(screen.getByLabelText("Person suggestions"), "person-2");
+    await user.click(screen.getByRole("button", { name: "Assign selected person" }));
 
     expect(await screen.findByText("Correction recorded: Inez -> Mateo.")).toBeInTheDocument();
-    expect(screen.getByText("Face 1: Mateo")).toBeInTheDocument();
+    expect(screen.getByText("Current label: Mateo")).toBeInTheDocument();
     expect(screen.getByText("person-2")).toBeInTheDocument();
   });
 
-  it("opens inline provenance details when overlay provenance badge is clicked", async () => {
+  it("creates a new person name from typed input when no exact match exists", async () => {
     const user = userEvent.setup();
 
     fetchMock
@@ -451,20 +508,16 @@ describe("PhotoDetailRoutePage", () => {
             faces: [
               {
                 face_id: "face-1",
-                person_id: "person-1",
+                person_id: null,
                 bbox_x: 10,
                 bbox_y: 10,
                 bbox_w: 20,
                 bbox_h: 20,
-                label_source: "human_confirmed",
+                label_source: null,
                 confidence: null,
                 model_version: null,
-                provenance: {
-                  workflow: "face-labeling",
-                  surface: "api",
-                  action: "correction"
-                },
-                label_recorded_ts: "2026-03-28T19:33:00Z"
+                provenance: null,
+                label_recorded_ts: null
               }
             ]
           })
@@ -479,16 +532,37 @@ describe("PhotoDetailRoutePage", () => {
             updated_ts: "2026-03-28T19:30:00Z"
           }
         ]
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        json: async () => ({
+          person_id: "person-2",
+          display_name: "Nova",
+          created_ts: "2026-03-28T19:31:00Z",
+          updated_ts: "2026-03-28T19:31:00Z"
+        })
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        json: async () => ({
+          face_id: "face-1",
+          photo_id: "photo-1",
+          person_id: "person-2"
+        })
       } as Response);
 
     renderDetail();
 
-    expect(await screen.findByLabelText("Face region 1 for person-1")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Show provenance details for face region 1" }));
+    expect(await screen.findByLabelText("Face region 1")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Open face actions for face region 1" }));
+    await user.clear(screen.getByLabelText("Person name"));
+    await user.type(screen.getByLabelText("Person name"), "Nova");
+    await user.click(screen.getByRole("button", { name: 'Create and assign "Nova"' }));
 
-    expect(await screen.findByLabelText("Provenance details for face 1")).toBeInTheDocument();
-    expect(screen.getByText("Human confirmed")).toBeInTheDocument();
-    expect(screen.getByText("correction")).toBeInTheDocument();
+    expect(await screen.findByText("Face assignment saved for face 1.")).toBeInTheDocument();
+    expect(screen.getByText("Current label: Nova")).toBeInTheDocument();
   });
 
   it("renders deterministic loading and error transitions", async () => {
@@ -529,7 +603,7 @@ describe("PhotoDetailRoutePage", () => {
     expect(photoDetailCalls).toHaveLength(2);
   });
 
-  it("renders pending ingest status when face detection is still in progress", async () => {
+  it("renders pending ingest status without an ingest legend section", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () =>
@@ -549,7 +623,7 @@ describe("PhotoDetailRoutePage", () => {
     renderDetail();
 
     expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
-    expect(screen.getByText("Ingest status legend")).toBeInTheDocument();
+    expect(screen.queryByText("Ingest status legend")).not.toBeInTheDocument();
     expect(screen.getAllByText("Pending").length).toBeGreaterThan(0);
   });
 

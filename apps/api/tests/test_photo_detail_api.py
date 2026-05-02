@@ -75,6 +75,8 @@ def test_photo_detail_api_returns_projected_metadata_and_related_fields(tmp_path
             "bbox_y": 20,
             "bbox_w": 30,
             "bbox_h": 40,
+            "bbox_space_width": None,
+            "bbox_space_height": None,
             "label_source": None,
             "confidence": None,
             "model_version": None,
@@ -101,6 +103,52 @@ def test_photo_detail_api_returns_404_for_missing_photo(tmp_path, monkeypatch):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Photo not found"
+
+
+def test_photo_detail_api_exposes_bbox_coordinate_space_dimensions(tmp_path, monkeypatch):
+    database_url = f"sqlite:///{tmp_path / 'photo-detail-api-bbox-space.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 3, 28, 19, 30, tzinfo=UTC)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(photos).values(
+                photo_id="photo-1",
+                sha256="sha-1",
+                created_ts=now,
+                updated_ts=now,
+                path="/photos/photo-1.jpg",
+                filesize=1024,
+                ext="jpg",
+                faces_count=1,
+            )
+        )
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id=None,
+                bbox_x=1000,
+                bbox_y=300,
+                bbox_w=800,
+                bbox_h=600,
+                provenance={
+                    "bbox_space_width": 4000,
+                    "bbox_space_height": 3000,
+                },
+            )
+        )
+
+    client = TestClient(app)
+    response = client.get("/api/v1/photos/photo-1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["faces"][0]["bbox_space_width"] == 4000
+    assert payload["faces"][0]["bbox_space_height"] == 3000
 
 
 def test_photo_detail_api_allows_missing_shot_timestamp(tmp_path, monkeypatch):
@@ -241,6 +289,8 @@ def test_photo_detail_api_returns_latest_matching_face_label_provenance(tmp_path
             "bbox_y": 20,
             "bbox_w": 30,
             "bbox_h": 40,
+            "bbox_space_width": None,
+            "bbox_space_height": None,
             "label_source": "human_confirmed",
             "confidence": None,
             "model_version": None,

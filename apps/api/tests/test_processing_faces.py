@@ -121,7 +121,8 @@ def test_detector_detect_returns_serialized_face_rows(monkeypatch, tmp_path):
     fake_numpy = SimpleNamespace(array=lambda image: image.__array__())
     fake_rgb_image = _FakeRgbImage()
     fake_image_module = SimpleNamespace(open=lambda _path: _FakeImageContext(fake_rgb_image))
-    fake_pil = SimpleNamespace(Image=fake_image_module)
+    fake_image_ops = SimpleNamespace(exif_transpose=lambda image: image)
+    fake_pil = SimpleNamespace(Image=fake_image_module, ImageOps=fake_image_ops)
     register_calls = []
     fake_heif = SimpleNamespace(register_heif_opener=lambda: register_calls.append(True))
 
@@ -129,6 +130,7 @@ def test_detector_detect_returns_serialized_face_rows(monkeypatch, tmp_path):
     monkeypatch.setitem(__import__("sys").modules, "numpy", fake_numpy)
     monkeypatch.setitem(__import__("sys").modules, "PIL", fake_pil)
     monkeypatch.setitem(__import__("sys").modules, "PIL.Image", fake_image_module)
+    monkeypatch.setitem(__import__("sys").modules, "PIL.ImageOps", fake_image_ops)
     monkeypatch.setitem(__import__("sys").modules, "pillow_heif", fake_heif)
 
     detector = OpenCvFaceDetector(scale_factor=1.2, min_neighbors=7, min_size=(48, 48))
@@ -151,4 +153,6 @@ def test_detector_detect_returns_serialized_face_rows(monkeypatch, tmp_path):
         "scale_factor": 1.2,
         "min_neighbors": 7,
         "min_size": [48, 48],
+        "bbox_space_width": 200,
+        "bbox_space_height": 100,
     }

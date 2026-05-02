@@ -39,6 +39,8 @@ type PhotoDetailPayload = {
     bbox_y: number | null;
     bbox_w: number | null;
     bbox_h: number | null;
+    bbox_space_width?: number | null;
+    bbox_space_height?: number | null;
     label_source: "human_confirmed" | "machine_applied" | "machine_suggested" | null;
     confidence: number | null;
     model_version: string | null;
@@ -590,6 +592,73 @@ describe("LibraryRoutePage", () => {
     expect(
       screen.queryByText("Face regions are present but could not be rendered on this preview.")
     ).not.toBeInTheDocument();
+  });
+
+  it("maps quick-panel overlays using explicit bbox coordinate-space dimensions", async () => {
+    const user = userEvent.setup();
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+
+      if (url === "/api/v1/search") {
+        return {
+          ok: true,
+          json: async () => buildPayload(["photo-a"], 1, true)
+        } as Response;
+      }
+
+      if (url === "/api/v1/people") {
+        return {
+          ok: true,
+          json: async () => [{ person_id: "person-1", display_name: "Inez" }]
+        } as Response;
+      }
+
+      if (url === "/api/v1/photos/photo-a") {
+        return {
+          ok: true,
+          json: async () =>
+            buildDetailPayload([
+              {
+                face_id: "face-1",
+                person_id: "person-1",
+                bbox_x: 1000,
+                bbox_y: 300,
+                bbox_w: 800,
+                bbox_h: 600,
+                bbox_space_width: 4000,
+                bbox_space_height: 3000,
+                label_source: null,
+                confidence: null,
+                model_version: null,
+                provenance: null,
+                label_recorded_ts: null
+              }
+            ])
+        } as Response;
+      }
+
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    renderLibraryAt("/library");
+    expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Review faces" }));
+
+    const region = await screen.findByLabelText("Face region 1 for person-1");
+    expect(region).toHaveStyle({
+      left: "25%",
+      top: "10%",
+      width: "20%",
+      height: "20%"
+    });
   });
 
   it("supports in-context correction and machine-label confirmation from the library quick panel", async () => {

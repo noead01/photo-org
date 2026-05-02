@@ -1,7 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
-import { deriveIngestStatus, INGEST_STATUS_LEGEND } from "../app/ingestStatus";
-import { FaceAssignmentControls } from "./FaceAssignmentControls";
+import { deriveIngestStatus } from "../app/ingestStatus";
+import {
+  buildFaceOverlayRegions,
+  FaceBBoxOverlay,
+  type FaceOverlayRegion
+} from "./FaceBBoxOverlay";
+import { PhotoFaceActionFlyout } from "./PhotoFaceActionFlyout";
 import {
   resolveDetailReturnState,
   setPendingBrowseFocusPhotoId
@@ -24,6 +29,8 @@ type PhotoDetailPayload = {
     bbox_y: number | null;
     bbox_w: number | null;
     bbox_h: number | null;
+    bbox_space_width?: number | null;
+    bbox_space_height?: number | null;
     label_source: "human_confirmed" | "machine_applied" | "machine_suggested" | null;
     confidence: number | null;
     model_version: string | null;
@@ -62,23 +69,6 @@ type PhotoDetailPayload = {
 const MISSING_VALUE = "Not available";
 
 type MediaPresentationMode = "fit" | "actual";
-
-type FaceOverlayRegion = {
-  faceId: string;
-  personId: string | null;
-  labelSource: "human_confirmed" | "machine_applied" | "machine_suggested" | null;
-  leftPercent: number;
-  topPercent: number;
-  widthPercent: number;
-  heightPercent: number;
-};
-
-type FaceBBox = {
-  bbox_x: number | null;
-  bbox_y: number | null;
-  bbox_w: number | null;
-  bbox_h: number | null;
-};
 
 type PersonRecord = {
   person_id: string;
@@ -138,42 +128,6 @@ function formatGps(lat: number | null, lon: number | null): string {
 
 function formatOptionalText(value: string | null): string {
   return value && value.trim().length > 0 ? value : MISSING_VALUE;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
-function inferFaceOverlayCoordinateSpace(
-  faces: FaceBBox[],
-  thumbnailWidth: number,
-  thumbnailHeight: number
-): { width: number; height: number } {
-  // Face coordinates are stored in source-image pixels; use detected extents when thumbnail space is smaller.
-  const coordinateSpace = faces.reduce(
-    (acc, face) => {
-      if (
-        face.bbox_x === null ||
-        face.bbox_y === null ||
-        face.bbox_w === null ||
-        face.bbox_h === null ||
-        face.bbox_w <= 0 ||
-        face.bbox_h <= 0
-      ) {
-        return acc;
-      }
-
-      acc.width = Math.max(acc.width, face.bbox_x + face.bbox_w);
-      acc.height = Math.max(acc.height, face.bbox_y + face.bbox_h);
-      return acc;
-    },
-    { width: thumbnailWidth, height: thumbnailHeight }
-  );
-
-  return {
-    width: Math.max(coordinateSpace.width, thumbnailWidth),
-    height: Math.max(coordinateSpace.height, thumbnailHeight)
-  };
 }
 
 async function fetchPhotoDetail(photoId: string): Promise<PhotoDetailPayload> {
@@ -253,11 +207,11 @@ export function PhotoDetailRoutePage() {
   const [isNotFound, setIsNotFound] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const [mediaMode, setMediaMode] = useState<MediaPresentationMode>("actual");
+  const [imageScalePercent, setImageScalePercent] = useState(100);
   const [showFaceBoxes, setShowFaceBoxes] = useState(true);
+  const [isDetailFlyoutOpen, setIsDetailFlyoutOpen] = useState(false);
+  const [requestedFaceActionFaceId, setRequestedFaceActionFaceId] = useState<string | null>(null);
   const [peopleDirectory, setPeopleDirectory] = useState<PersonRecord[]>([]);
-  const [requestedExpandedProvenanceFaceId, setRequestedExpandedProvenanceFaceId] = useState<
-    string | null
-  >(null);
 
   useEffect(() => {
     headingRef.current?.focus();
@@ -344,45 +298,7 @@ export function PhotoDetailRoutePage() {
       return [];
     }
 
-    const thumbnailWidth = detail.thumbnail.width;
-    const thumbnailHeight = detail.thumbnail.height;
-    const coordinateSpace = inferFaceOverlayCoordinateSpace(detail.faces, thumbnailWidth, thumbnailHeight);
-
-    return detail.faces
-      .map((face) => {
-        if (
-          face.bbox_x === null ||
-          face.bbox_y === null ||
-          face.bbox_w === null ||
-          face.bbox_h === null ||
-          face.bbox_w <= 0 ||
-          face.bbox_h <= 0
-        ) {
-          return null;
-        }
-
-        const left = clamp((face.bbox_x / coordinateSpace.width) * 100, 0, 100);
-        const top = clamp((face.bbox_y / coordinateSpace.height) * 100, 0, 100);
-        const right = clamp(((face.bbox_x + face.bbox_w) / coordinateSpace.width) * 100, 0, 100);
-        const bottom = clamp(((face.bbox_y + face.bbox_h) / coordinateSpace.height) * 100, 0, 100);
-        const width = right - left;
-        const height = bottom - top;
-
-        if (width <= 0 || height <= 0) {
-          return null;
-        }
-
-        return {
-          faceId: face.face_id,
-          personId: face.person_id,
-          labelSource: face.label_source,
-          leftPercent: left,
-          topPercent: top,
-          widthPercent: width,
-          heightPercent: height
-        };
-      })
-      .filter((region): region is FaceOverlayRegion => region !== null);
+    return buildFaceOverlayRegions(detail.faces, detail.thumbnail.width, detail.thumbnail.height);
   }, [detail]);
 
   const faceRegionState = useMemo(() => {
@@ -420,9 +336,35 @@ export function PhotoDetailRoutePage() {
   }, [detail]);
 
   const backLinkFocusPhotoId = detail?.photo_id ?? returnState.returnFocusPhotoId ?? photoId ?? null;
+  const mediaScale = imageScalePercent / 100;
+  const mediaStageStyle: CSSProperties = mediaMode === "fit"
+    ? { width: `${Math.max(25, imageScalePercent)}%` }
+    : { width: detail?.thumbnail ? `${Math.max(80, Math.round(detail.thumbnail.width * mediaScale))}px` : "auto" };
 
   function handleFaceAssigned(faceId: string, personId: string) {
     setDetail((current) => (current ? applyFaceAssignment(current, faceId, personId) : current));
+  }
+
+  function handlePersonCreated(person: {
+    person_id: string;
+    display_name: string;
+    created_ts?: string;
+    updated_ts?: string;
+  }) {
+    setPeopleDirectory((current) => {
+      if (current.some((candidate) => candidate.person_id === person.person_id)) {
+        return current;
+      }
+      return sortPeopleDirectory([
+        ...current,
+        {
+          person_id: person.person_id,
+          display_name: person.display_name,
+          created_ts: person.created_ts ?? new Date().toISOString(),
+          updated_ts: person.updated_ts ?? new Date().toISOString()
+        }
+      ]);
+    });
   }
 
   return (
@@ -457,18 +399,6 @@ export function PhotoDetailRoutePage() {
           Back to library
         </Link>
       </div>
-      <section className="status-legend" aria-label="Ingest status legend">
-        <h2>Ingest status legend</h2>
-        <ul>
-          {INGEST_STATUS_LEGEND.map((entry) => (
-            <li key={entry.tone}>
-              <span className={`ingest-status-badge is-${entry.tone}`}>{entry.label}</span>
-              <span>{entry.description}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
-
       {isLoading ? (
         <div className="feedback-panel feedback-panel-loading" role="status" aria-live="polite">
           Loading photo detail.
@@ -486,216 +416,241 @@ export function PhotoDetailRoutePage() {
       ) : null}
 
       {!isLoading && !error && detail ? (
-        <div className="detail-layout">
-          <article className="detail-panel">
+        <div className="detail-workspace">
+          <article className="detail-preview-panel">
             <h2>Preview</h2>
+            <div className="detail-media-controls" role="group" aria-label="Preview display mode">
+              <button
+                type="button"
+                className={mediaMode === "fit" ? "is-active" : undefined}
+                onClick={() => setMediaMode("fit")}
+              >
+                Fit to panel
+              </button>
+              <button
+                type="button"
+                className={mediaMode === "actual" ? "is-active" : undefined}
+                onClick={() => setMediaMode("actual")}
+              >
+                Actual pixels
+              </button>
+              <label className="detail-face-box-toggle">
+                <input
+                  type="checkbox"
+                  aria-label="Show face boxes"
+                  checked={showFaceBoxes}
+                  onChange={(event) => setShowFaceBoxes(event.currentTarget.checked)}
+                />
+                Show face boxes
+              </label>
+              <label className="detail-photo-scale">
+                <span>Photo size</span>
+                <input
+                  type="range"
+                  min={25}
+                  max={225}
+                  step={5}
+                  value={imageScalePercent}
+                  aria-label="Photo size"
+                  onChange={(event) => setImageScalePercent(Number(event.currentTarget.value))}
+                />
+                <span>{imageScalePercent}%</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsDetailFlyoutOpen((current) => !current);
+                }}
+              >
+                {isDetailFlyoutOpen ? "Hide details" : "Show details"}
+              </button>
+            </div>
+            {ingestStatus ? (
+              <p className="detail-ingest-inline">
+                <span className={`ingest-status-badge is-${ingestStatus.tone}`}>{ingestStatus.label}</span>
+                <span>{ingestStatus.description}</span>
+              </p>
+            ) : null}
             {detail.thumbnail ? (
-              <>
-                <div className="detail-media-controls" role="group" aria-label="Preview display mode">
-                  <button
-                    type="button"
-                    className={mediaMode === "fit" ? "is-active" : undefined}
-                    onClick={() => setMediaMode("fit")}
-                  >
-                    Fit to panel
-                  </button>
-                  <button
-                    type="button"
-                    className={mediaMode === "actual" ? "is-active" : undefined}
-                    onClick={() => setMediaMode("actual")}
-                  >
-                    Actual pixels
-                  </button>
-                  <label className="detail-face-box-toggle">
-                    <input
-                      type="checkbox"
-                      aria-label="Show face boxes"
-                      checked={showFaceBoxes}
-                      onChange={(event) => setShowFaceBoxes(event.currentTarget.checked)}
+              <div className="detail-media-frame" data-mode={mediaMode}>
+                <div className="detail-media-stage" style={mediaStageStyle}>
+                  <img
+                    className="detail-media-image"
+                    src={`data:${detail.thumbnail.mime_type};base64,${detail.thumbnail.data_base64}`}
+                    width={detail.thumbnail.width}
+                    height={detail.thumbnail.height}
+                    alt={`Preview for ${detail.photo_id}`}
+                  />
+                  {showFaceBoxes ? (
+                    <FaceBBoxOverlay
+                      regions={faceOverlayRegions}
+                      ariaLabel="Detected face regions"
+                      renderRegionContent={(region, index) => (
+                        <button
+                          type="button"
+                          className="detail-face-overlay-provenance-button"
+                          aria-label={`Open face actions for face region ${index + 1}`}
+                          onClick={() => {
+                            setRequestedFaceActionFaceId(region.faceId);
+                            setIsDetailFlyoutOpen(true);
+                          }}
+                        >
+                          {provenanceBadgeIcon(region.labelSource)}
+                        </button>
+                      )}
                     />
-                    Show face boxes
-                  </label>
+                  ) : null}
                 </div>
-                <div className="detail-media-frame" data-mode={mediaMode}>
-                  <div className="detail-media-stage">
-                    <img
-                      className="detail-media-image"
-                      src={`data:${detail.thumbnail.mime_type};base64,${detail.thumbnail.data_base64}`}
-                      width={detail.thumbnail.width}
-                      height={detail.thumbnail.height}
-                      alt={`Preview for ${detail.photo_id}`}
-                    />
-                    {showFaceBoxes && faceOverlayRegions.length > 0 ? (
-                      <ol className="detail-face-overlay-list" aria-label="Detected face regions">
-                        {faceOverlayRegions.map((region, index) => (
-                          <li
-                            key={region.faceId}
-                            className="detail-face-overlay"
-                            aria-label={`Face region ${index + 1}${region.personId ? ` for ${region.personId}` : ""}`}
-                            style={{
-                              left: `${region.leftPercent}%`,
-                              top: `${region.topPercent}%`,
-                              width: `${region.widthPercent}%`,
-                              height: `${region.heightPercent}%`
-                            }}
-                          >
-                            <button
-                              type="button"
-                              className="detail-face-overlay-provenance-button"
-                              aria-label={`Show provenance details for face region ${index + 1}`}
-                              onClick={() => {
-                                setRequestedExpandedProvenanceFaceId(region.faceId);
-                              }}
-                            >
-                              {provenanceBadgeIcon(region.labelSource)}
-                            </button>
-                          </li>
-                        ))}
-                      </ol>
-                    ) : null}
-                  </div>
-                </div>
-                <p className="detail-face-state">{faceRegionState}</p>
-                <FaceAssignmentControls
-                  faces={detail.faces}
-                  people={peopleDirectory.map((person) => ({
-                    person_id: person.person_id,
-                    display_name: person.display_name
-                  }))}
-                  onAssigned={handleFaceAssigned}
-                  onCorrected={handleFaceAssigned}
-                  requestedExpandedProvenanceFaceId={requestedExpandedProvenanceFaceId}
-                />
-              </>
+              </div>
             ) : (
-              <>
-                <div className="browse-thumbnail browse-thumbnail-placeholder" aria-hidden="true">
-                  No preview
-                </div>
-                <p className="detail-face-state">{faceRegionState}</p>
-                <FaceAssignmentControls
-                  faces={detail.faces}
-                  people={peopleDirectory.map((person) => ({
-                    person_id: person.person_id,
-                    display_name: person.display_name
-                  }))}
-                  onAssigned={handleFaceAssigned}
-                  onCorrected={handleFaceAssigned}
-                  requestedExpandedProvenanceFaceId={requestedExpandedProvenanceFaceId}
-                />
-              </>
+              <div className="browse-thumbnail browse-thumbnail-placeholder" aria-hidden="true">
+                No preview
+              </div>
             )}
+            <p className="detail-face-state">{faceRegionState}</p>
           </article>
 
-          <article className="detail-panel">
-            <h2>{detail.photo_id}</h2>
+          <button
+            type="button"
+            className={`detail-flyout-backdrop${isDetailFlyoutOpen ? " is-open" : ""}`}
+            aria-label="Hide details flyout"
+            onClick={() => setIsDetailFlyoutOpen(false)}
+          />
+
+          <aside
+            className={`detail-flyout${isDetailFlyoutOpen ? " is-open" : ""}`}
+            aria-label="Photo details flyout"
+          >
+            <div className="detail-flyout-header">
+              <h2>{detail.photo_id}</h2>
+              <button type="button" onClick={() => setIsDetailFlyoutOpen(false)}>
+                Close
+              </button>
+            </div>
             <p className="detail-path">{detail.path}</p>
-            <dl>
-              <div>
-                <dt>Captured</dt>
-                <dd>{formatTimestamp(detail.shot_ts)}</dd>
-              </div>
-              <div>
-                <dt>File size</dt>
-                <dd>{formatFilesize(detail.filesize)}</dd>
-              </div>
-              <div>
-                <dt>Camera make</dt>
-                <dd>{formatOptionalText(detail.camera_make)}</dd>
-              </div>
-              <div>
-                <dt>Orientation</dt>
-                <dd>{formatOptionalText(detail.orientation)}</dd>
-              </div>
-              <div>
-                <dt>Availability</dt>
-                <dd>{detail.original?.availability_state ?? "Unknown availability"}</dd>
-              </div>
-              <div>
-                <dt>Ingest status</dt>
-                <dd>
-                  {ingestStatus ? (
-                    <span className={`ingest-status-badge is-${ingestStatus.tone}`}>{ingestStatus.label}</span>
-                  ) : (
-                    "Unknown"
-                  )}
-                </dd>
-              </div>
-            </dl>
-            {ingestStatus ? <p className="detail-ingest-status-detail">{ingestStatus.description}</p> : null}
-          </article>
 
-          <article className="detail-panel">
-            <h2>Metadata</h2>
-            <dl>
-              <div>
-                <dt>SHA-256</dt>
-                <dd>{detail.metadata.sha256}</dd>
-              </div>
-              <div>
-                <dt>Perceptual hash</dt>
-                <dd>{formatOptionalText(detail.metadata.phash)}</dd>
-              </div>
-              <div>
-                <dt>Timestamp source</dt>
-                <dd>{formatOptionalText(detail.metadata.shot_ts_source)}</dd>
-              </div>
-              <div>
-                <dt>Camera model</dt>
-                <dd>{formatOptionalText(detail.metadata.camera_model)}</dd>
-              </div>
-              <div>
-                <dt>Software</dt>
-                <dd>{formatOptionalText(detail.metadata.software)}</dd>
-              </div>
-              <div>
-                <dt>GPS</dt>
-                <dd>{formatGps(detail.metadata.gps_latitude, detail.metadata.gps_longitude)}</dd>
-              </div>
-              <div>
-                <dt>GPS altitude</dt>
-                <dd>
-                  {detail.metadata.gps_altitude === null
-                    ? MISSING_VALUE
-                    : `${detail.metadata.gps_altitude.toFixed(1)} m`}
-                </dd>
-              </div>
-              <div>
-                <dt>Faces</dt>
-                <dd>{facesLabel}</dd>
-              </div>
-              <div>
-                <dt>Face detection run</dt>
-                <dd>{formatTimestamp(detail.metadata.faces_detected_ts)}</dd>
-              </div>
-              <div>
-                <dt>Created</dt>
-                <dd>{formatTimestamp(detail.metadata.created_ts)}</dd>
-              </div>
-              <div>
-                <dt>Updated</dt>
-                <dd>{formatTimestamp(detail.metadata.updated_ts)}</dd>
-              </div>
-              <div>
-                <dt>Modified</dt>
-                <dd>{formatTimestamp(detail.metadata.modified_ts)}</dd>
-              </div>
-            </dl>
-          </article>
+            <article className="detail-panel">
+              <h2>Summary</h2>
+              <dl>
+                <div>
+                  <dt>Captured</dt>
+                  <dd>{formatTimestamp(detail.shot_ts)}</dd>
+                </div>
+                <div>
+                  <dt>File size</dt>
+                  <dd>{formatFilesize(detail.filesize)}</dd>
+                </div>
+                <div>
+                  <dt>Camera make</dt>
+                  <dd>{formatOptionalText(detail.camera_make)}</dd>
+                </div>
+                <div>
+                  <dt>Orientation</dt>
+                  <dd>{formatOptionalText(detail.orientation)}</dd>
+                </div>
+                <div>
+                  <dt>Availability</dt>
+                  <dd>{detail.original?.availability_state ?? "Unknown availability"}</dd>
+                </div>
+                <div>
+                  <dt>Ingest status</dt>
+                  <dd>
+                    {ingestStatus ? (
+                      <span className={`ingest-status-badge is-${ingestStatus.tone}`}>{ingestStatus.label}</span>
+                    ) : (
+                      "Unknown"
+                    )}
+                  </dd>
+                </div>
+              </dl>
+              {ingestStatus ? <p className="detail-ingest-status-detail">{ingestStatus.description}</p> : null}
+            </article>
 
-          <article className="detail-panel">
-            <h2>Classification</h2>
-            <dl>
-              <div>
-                <dt>Tags</dt>
-                <dd>{detail.tags.length > 0 ? detail.tags.join(", ") : "No tags"}</dd>
-              </div>
-              <div>
-                <dt>People</dt>
-                <dd>{detail.people.length > 0 ? detail.people.join(", ") : "No recognized people"}</dd>
-              </div>
-            </dl>
-          </article>
+            <PhotoFaceActionFlyout
+              faces={detail.faces}
+              people={peopleDirectory.map((person) => ({
+                person_id: person.person_id,
+                display_name: person.display_name,
+                created_ts: person.created_ts,
+                updated_ts: person.updated_ts
+              }))}
+              requestedFaceActionFaceId={requestedFaceActionFaceId}
+              onFaceUpdated={handleFaceAssigned}
+              onPersonCreated={handlePersonCreated}
+            />
+
+            <article className="detail-panel">
+              <h2>Metadata</h2>
+              <dl>
+                <div>
+                  <dt>SHA-256</dt>
+                  <dd>{detail.metadata.sha256}</dd>
+                </div>
+                <div>
+                  <dt>Perceptual hash</dt>
+                  <dd>{formatOptionalText(detail.metadata.phash)}</dd>
+                </div>
+                <div>
+                  <dt>Timestamp source</dt>
+                  <dd>{formatOptionalText(detail.metadata.shot_ts_source)}</dd>
+                </div>
+                <div>
+                  <dt>Camera model</dt>
+                  <dd>{formatOptionalText(detail.metadata.camera_model)}</dd>
+                </div>
+                <div>
+                  <dt>Software</dt>
+                  <dd>{formatOptionalText(detail.metadata.software)}</dd>
+                </div>
+                <div>
+                  <dt>GPS</dt>
+                  <dd>{formatGps(detail.metadata.gps_latitude, detail.metadata.gps_longitude)}</dd>
+                </div>
+                <div>
+                  <dt>GPS altitude</dt>
+                  <dd>
+                    {detail.metadata.gps_altitude === null
+                      ? MISSING_VALUE
+                      : `${detail.metadata.gps_altitude.toFixed(1)} m`}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Faces</dt>
+                  <dd>{facesLabel}</dd>
+                </div>
+                <div>
+                  <dt>Face detection run</dt>
+                  <dd>{formatTimestamp(detail.metadata.faces_detected_ts)}</dd>
+                </div>
+                <div>
+                  <dt>Created</dt>
+                  <dd>{formatTimestamp(detail.metadata.created_ts)}</dd>
+                </div>
+                <div>
+                  <dt>Updated</dt>
+                  <dd>{formatTimestamp(detail.metadata.updated_ts)}</dd>
+                </div>
+                <div>
+                  <dt>Modified</dt>
+                  <dd>{formatTimestamp(detail.metadata.modified_ts)}</dd>
+                </div>
+              </dl>
+            </article>
+
+            <article className="detail-panel">
+              <h2>Classification</h2>
+              <dl>
+                <div>
+                  <dt>Tags</dt>
+                  <dd>{detail.tags.length > 0 ? detail.tags.join(", ") : "No tags"}</dd>
+                </div>
+                <div>
+                  <dt>People</dt>
+                  <dd>{detail.people.length > 0 ? detail.people.join(", ") : "No recognized people"}</dd>
+                </div>
+              </dl>
+            </article>
+          </aside>
         </div>
       ) : null}
 

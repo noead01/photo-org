@@ -21,6 +21,35 @@ from app.domain.facets import (
 from app.core.pagination import iso_utc
 
 
+def _coerce_positive_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, float) and value.is_integer():
+        parsed = int(value)
+        return parsed if parsed > 0 else None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            parsed = int(text)
+        except ValueError:
+            return None
+        return parsed if parsed > 0 else None
+    return None
+
+
+def _extract_bbox_space_dimensions(face_provenance: object) -> tuple[int | None, int | None]:
+    if not isinstance(face_provenance, dict):
+        return (None, None)
+
+    width = _coerce_positive_int(face_provenance.get("bbox_space_width"))
+    height = _coerce_positive_int(face_provenance.get("bbox_space_height"))
+    return (width, height)
+
+
 class PhotosRepository:
     def __init__(self, db: Session):
         self.db = db
@@ -412,6 +441,7 @@ class PhotosRepository:
                     self.faces.c.bbox_y,
                     self.faces.c.bbox_w,
                     self.faces.c.bbox_h,
+                    self.faces.c.provenance,
                 ]
             )
 
@@ -480,6 +510,7 @@ class PhotosRepository:
                 ppl_map[r.photo_id].append(r.person_id)
             face_item = {"person_id": r.person_id}
             if include_face_regions:
+                bbox_space_width, bbox_space_height = _extract_bbox_space_dimensions(r.provenance)
                 provenance = (
                     provenance_map.get((str(r.face_id), str(r.person_id)))
                     if r.person_id is not None
@@ -492,6 +523,8 @@ class PhotosRepository:
                         "bbox_y": r.bbox_y,
                         "bbox_w": r.bbox_w,
                         "bbox_h": r.bbox_h,
+                        "bbox_space_width": bbox_space_width,
+                        "bbox_space_height": bbox_space_height,
                         "label_source": provenance["label_source"] if provenance else None,
                         "confidence": provenance["confidence"] if provenance else None,
                         "model_version": provenance["model_version"] if provenance else None,
