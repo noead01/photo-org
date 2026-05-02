@@ -33,8 +33,47 @@ type FaceOverlayRegion = {
   heightPercent: number;
 };
 
+type FaceBBox = {
+  bbox_x: number | null;
+  bbox_y: number | null;
+  bbox_w: number | null;
+  bbox_h: number | null;
+};
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function inferFaceOverlayCoordinateSpace(
+  faces: FaceBBox[],
+  thumbnailWidth: number,
+  thumbnailHeight: number
+): { width: number; height: number } {
+  // Face coordinates are stored in source-image pixels; use detected extents when thumbnail space is smaller.
+  const coordinateSpace = faces.reduce(
+    (acc, face) => {
+      if (
+        face.bbox_x === null ||
+        face.bbox_y === null ||
+        face.bbox_w === null ||
+        face.bbox_h === null ||
+        face.bbox_w <= 0 ||
+        face.bbox_h <= 0
+      ) {
+        return acc;
+      }
+
+      acc.width = Math.max(acc.width, face.bbox_x + face.bbox_w);
+      acc.height = Math.max(acc.height, face.bbox_y + face.bbox_h);
+      return acc;
+    },
+    { width: thumbnailWidth, height: thumbnailHeight }
+  );
+
+  return {
+    width: Math.max(coordinateSpace.width, thumbnailWidth),
+    height: Math.max(coordinateSpace.height, thumbnailHeight)
+  };
 }
 
 function provenanceBadgeIcon(source: FaceLabelSource): string {
@@ -114,6 +153,7 @@ function buildOverlayRegions(payload: PhotoDetailPayload | null): FaceOverlayReg
 
   const thumbnailWidth = payload.thumbnail.width;
   const thumbnailHeight = payload.thumbnail.height;
+  const coordinateSpace = inferFaceOverlayCoordinateSpace(payload.faces, thumbnailWidth, thumbnailHeight);
 
   return payload.faces
     .map((face) => {
@@ -128,10 +168,10 @@ function buildOverlayRegions(payload: PhotoDetailPayload | null): FaceOverlayReg
         return null;
       }
 
-      const left = clamp((face.bbox_x / thumbnailWidth) * 100, 0, 100);
-      const top = clamp((face.bbox_y / thumbnailHeight) * 100, 0, 100);
-      const right = clamp(((face.bbox_x + face.bbox_w) / thumbnailWidth) * 100, 0, 100);
-      const bottom = clamp(((face.bbox_y + face.bbox_h) / thumbnailHeight) * 100, 0, 100);
+      const left = clamp((face.bbox_x / coordinateSpace.width) * 100, 0, 100);
+      const top = clamp((face.bbox_y / coordinateSpace.height) * 100, 0, 100);
+      const right = clamp(((face.bbox_x + face.bbox_w) / coordinateSpace.width) * 100, 0, 100);
+      const bottom = clamp(((face.bbox_y + face.bbox_h) / coordinateSpace.height) * 100, 0, 100);
       const width = right - left;
       const height = bottom - top;
 
@@ -173,6 +213,7 @@ interface LibraryPhotoFacePanelProps {
 }
 
 export function LibraryPhotoFacePanel({ photo }: LibraryPhotoFacePanelProps) {
+  const hasDetectedFaces = (photo.faces?.length ?? 0) > 0;
   const panelId = `library-face-panel-${photo.photo_id}`;
   const [isExpanded, setIsExpanded] = useState(false);
   const [detail, setDetail] = useState<PhotoDetailPayload | null>(null);
@@ -288,6 +329,10 @@ export function LibraryPhotoFacePanel({ photo }: LibraryPhotoFacePanelProps) {
     }
   }
 
+  if (!hasDetectedFaces) {
+    return null;
+  }
+
   return (
     <section className="library-face-panel">
       <button
@@ -303,7 +348,7 @@ export function LibraryPhotoFacePanel({ photo }: LibraryPhotoFacePanelProps) {
           }
         }}
       >
-        {isExpanded ? "Hide face workflow" : "Show face workflow"}
+        {isExpanded ? "Hide face review" : "Review faces"}
       </button>
 
       {isExpanded ? (

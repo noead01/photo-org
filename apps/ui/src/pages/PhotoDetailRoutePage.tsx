@@ -73,6 +73,13 @@ type FaceOverlayRegion = {
   heightPercent: number;
 };
 
+type FaceBBox = {
+  bbox_x: number | null;
+  bbox_y: number | null;
+  bbox_w: number | null;
+  bbox_h: number | null;
+};
+
 type PersonRecord = {
   person_id: string;
   display_name: string;
@@ -135,6 +142,38 @@ function formatOptionalText(value: string | null): string {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function inferFaceOverlayCoordinateSpace(
+  faces: FaceBBox[],
+  thumbnailWidth: number,
+  thumbnailHeight: number
+): { width: number; height: number } {
+  // Face coordinates are stored in source-image pixels; use detected extents when thumbnail space is smaller.
+  const coordinateSpace = faces.reduce(
+    (acc, face) => {
+      if (
+        face.bbox_x === null ||
+        face.bbox_y === null ||
+        face.bbox_w === null ||
+        face.bbox_h === null ||
+        face.bbox_w <= 0 ||
+        face.bbox_h <= 0
+      ) {
+        return acc;
+      }
+
+      acc.width = Math.max(acc.width, face.bbox_x + face.bbox_w);
+      acc.height = Math.max(acc.height, face.bbox_y + face.bbox_h);
+      return acc;
+    },
+    { width: thumbnailWidth, height: thumbnailHeight }
+  );
+
+  return {
+    width: Math.max(coordinateSpace.width, thumbnailWidth),
+    height: Math.max(coordinateSpace.height, thumbnailHeight)
+  };
 }
 
 async function fetchPhotoDetail(photoId: string): Promise<PhotoDetailPayload> {
@@ -213,7 +252,8 @@ export function PhotoDetailRoutePage() {
   const [error, setError] = useState<string | null>(null);
   const [isNotFound, setIsNotFound] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
-  const [mediaMode, setMediaMode] = useState<MediaPresentationMode>("fit");
+  const [mediaMode, setMediaMode] = useState<MediaPresentationMode>("actual");
+  const [showFaceBoxes, setShowFaceBoxes] = useState(true);
   const [peopleDirectory, setPeopleDirectory] = useState<PersonRecord[]>([]);
   const [requestedExpandedProvenanceFaceId, setRequestedExpandedProvenanceFaceId] = useState<
     string | null
@@ -306,6 +346,7 @@ export function PhotoDetailRoutePage() {
 
     const thumbnailWidth = detail.thumbnail.width;
     const thumbnailHeight = detail.thumbnail.height;
+    const coordinateSpace = inferFaceOverlayCoordinateSpace(detail.faces, thumbnailWidth, thumbnailHeight);
 
     return detail.faces
       .map((face) => {
@@ -320,10 +361,10 @@ export function PhotoDetailRoutePage() {
           return null;
         }
 
-        const left = clamp((face.bbox_x / thumbnailWidth) * 100, 0, 100);
-        const top = clamp((face.bbox_y / thumbnailHeight) * 100, 0, 100);
-        const right = clamp(((face.bbox_x + face.bbox_w) / thumbnailWidth) * 100, 0, 100);
-        const bottom = clamp(((face.bbox_y + face.bbox_h) / thumbnailHeight) * 100, 0, 100);
+        const left = clamp((face.bbox_x / coordinateSpace.width) * 100, 0, 100);
+        const top = clamp((face.bbox_y / coordinateSpace.height) * 100, 0, 100);
+        const right = clamp(((face.bbox_x + face.bbox_w) / coordinateSpace.width) * 100, 0, 100);
+        const bottom = clamp(((face.bbox_y + face.bbox_h) / coordinateSpace.height) * 100, 0, 100);
         const width = right - left;
         const height = bottom - top;
 
@@ -353,12 +394,16 @@ export function PhotoDetailRoutePage() {
       return "No face regions detected for this photo.";
     }
 
+    if (!showFaceBoxes) {
+      return "Face boxes are hidden for this preview.";
+    }
+
     if (faceOverlayRegions.length === 0) {
       return "Face regions are present but could not be rendered on this preview.";
     }
 
     return `${faceOverlayRegions.length} face region${faceOverlayRegions.length === 1 ? "" : "s"} rendered.`;
-  }, [detail, faceOverlayRegions.length]);
+  }, [detail, faceOverlayRegions.length, showFaceBoxes]);
 
   const ingestStatus = useMemo(() => {
     if (!detail) {
@@ -461,6 +506,15 @@ export function PhotoDetailRoutePage() {
                   >
                     Actual pixels
                   </button>
+                  <label className="detail-face-box-toggle">
+                    <input
+                      type="checkbox"
+                      aria-label="Show face boxes"
+                      checked={showFaceBoxes}
+                      onChange={(event) => setShowFaceBoxes(event.currentTarget.checked)}
+                    />
+                    Show face boxes
+                  </label>
                 </div>
                 <div className="detail-media-frame" data-mode={mediaMode}>
                   <div className="detail-media-stage">
@@ -471,7 +525,7 @@ export function PhotoDetailRoutePage() {
                       height={detail.thumbnail.height}
                       alt={`Preview for ${detail.photo_id}`}
                     />
-                    {faceOverlayRegions.length > 0 ? (
+                    {showFaceBoxes && faceOverlayRegions.length > 0 ? (
                       <ol className="detail-face-overlay-list" aria-label="Detected face regions">
                         {faceOverlayRegions.map((region, index) => (
                           <li

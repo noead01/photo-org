@@ -15,7 +15,12 @@ type SearchResponsePayload = {
       filesize: number;
       people: string[];
       faces: Array<{ person_id: string | null }>;
-      thumbnail: null;
+      thumbnail: {
+        mime_type: string;
+        width: number;
+        height: number;
+        data_base64: string;
+      } | null;
       original: {
         is_available: boolean;
         availability_state: string;
@@ -48,7 +53,11 @@ type PhotoDetailPayload = {
   } | null;
 };
 
-function buildPayload(photoIds: string[], total = photoIds.length): SearchResponsePayload {
+function buildPayload(
+  photoIds: string[],
+  total = photoIds.length,
+  includeDetectedFaces = false
+): SearchResponsePayload {
   return {
     hits: {
       total,
@@ -60,7 +69,7 @@ function buildPayload(photoIds: string[], total = photoIds.length): SearchRespon
         shot_ts: `2026-04-${String(index + 1).padStart(2, "0")}T12:00:00Z`,
         filesize: 1024 + index,
         people: [],
-        faces: [],
+        faces: includeDetectedFaces ? [{ person_id: null }] : [],
         thumbnail: null,
         original: {
           is_available: true,
@@ -157,6 +166,237 @@ describe("LibraryRoutePage", () => {
     expect(screen.getByTitle(/Complete: Assets are ready for normal browse\/detail viewing\./)).toBeInTheDocument();
   });
 
+  it("links thumbnail previews to photo detail", async () => {
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+
+      const payload = buildPayload(["photo-a"]);
+      payload.hits.items[0].thumbnail = {
+        mime_type: "image/jpeg",
+        width: 120,
+        height: 80,
+        data_base64: "dGh1bWI="
+      };
+
+      return {
+        ok: true,
+        json: async () => payload
+      } as Response;
+    });
+
+    renderLibraryAt("/library");
+    const thumbnailLink = await screen.findByRole("link", {
+      name: "View details for /library/photo-a.jpg"
+    });
+
+    expect(thumbnailLink).toHaveAttribute("href", "/library/photo-a");
+  });
+
+  it("loads and toggles face bbox overlays for an individual grid photo", async () => {
+    const user = userEvent.setup();
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+
+      if (url === "/api/v1/search") {
+        const payload = buildPayload(["photo-a"], 1, true);
+        payload.hits.items[0].thumbnail = {
+          mime_type: "image/jpeg",
+          width: 120,
+          height: 80,
+          data_base64: "dGh1bWI="
+        };
+        return {
+          ok: true,
+          json: async () => payload
+        } as Response;
+      }
+
+      if (url === "/api/v1/photos/photo-a") {
+        return {
+          ok: true,
+          json: async () =>
+            buildDetailPayload([
+              {
+                face_id: "face-1",
+                person_id: "person-1",
+                bbox_x: 10,
+                bbox_y: 10,
+                bbox_w: 20,
+                bbox_h: 20,
+                label_source: null,
+                confidence: null,
+                model_version: null,
+                provenance: null,
+                label_recorded_ts: null
+              }
+            ])
+        } as Response;
+      }
+
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    renderLibraryAt("/library");
+    expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Detected face regions for photo-a" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "Show face boxes for photo-a" }));
+    expect(await screen.findByRole("list", { name: "Detected face regions for photo-a" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "Show face boxes for photo-a" }));
+    expect(screen.queryByRole("list", { name: "Detected face regions for photo-a" })).not.toBeInTheDocument();
+  });
+
+  it("supports a global face bbox toggle for all grid photos", async () => {
+    const user = userEvent.setup();
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+
+      if (url === "/api/v1/search") {
+        const payload = buildPayload(["photo-a"], 1, true);
+        payload.hits.items[0].thumbnail = {
+          mime_type: "image/jpeg",
+          width: 120,
+          height: 80,
+          data_base64: "dGh1bWI="
+        };
+        return {
+          ok: true,
+          json: async () => payload
+        } as Response;
+      }
+
+      if (url === "/api/v1/photos/photo-a") {
+        return {
+          ok: true,
+          json: async () =>
+            buildDetailPayload([
+              {
+                face_id: "face-1",
+                person_id: "person-1",
+                bbox_x: 10,
+                bbox_y: 10,
+                bbox_w: 20,
+                bbox_h: 20,
+                label_source: null,
+                confidence: null,
+                model_version: null,
+                provenance: null,
+                label_recorded_ts: null
+              }
+            ])
+        } as Response;
+      }
+
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    renderLibraryAt("/library");
+    expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Detected face regions for photo-a" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "Show face boxes on all photos" }));
+    expect(await screen.findByRole("list", { name: "Detected face regions for photo-a" })).toBeInTheDocument();
+  });
+
+  it("advances to the next cursor-backed page when Next is clicked", async () => {
+    const user = userEvent.setup();
+
+    const pageOneIds = Array.from({ length: 24 }, (_, index) => `photo-${index + 1}`);
+    const pageTwoIds = Array.from({ length: 24 }, (_, index) => `photo-${index + 25}`);
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+
+      if (url === "/api/v1/people") {
+        return {
+          ok: true,
+          json: async () => []
+        } as Response;
+      }
+
+      if (url !== "/api/v1/search") {
+        throw new Error(`Unhandled fetch: ${url}`);
+      }
+
+      const requestBody = JSON.parse((init?.body as string | undefined) ?? "{}") as {
+        page?: { cursor?: string | null };
+      };
+      const requestCursor = requestBody.page?.cursor ?? null;
+
+      if (requestCursor === "cursor-page-2") {
+        return {
+          ok: true,
+          json: async () => ({
+            hits: {
+              total: 99,
+              cursor: "cursor-page-3",
+              items: buildPayload(pageTwoIds, 99).hits.items
+            }
+          })
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          hits: {
+            total: 99,
+            cursor: "cursor-page-2",
+            items: buildPayload(pageOneIds, 99).hits.items
+          }
+        })
+      } as Response;
+    });
+
+    renderLibraryAt("/library");
+
+    expect(await screen.findByText("Showing 24 of 99 photos")).toBeInTheDocument();
+    expect(screen.getByText("Page 1")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+
+    expect(await screen.findByText("Page 2")).toBeInTheDocument();
+    const detailLinks = await screen.findAllByRole("link", { name: "View details" });
+    expect(detailLinks.length).toBeGreaterThan(0);
+
+    const searchRequestCursors = fetchMock.mock.calls
+      .filter(([input]) => String(input) === "/api/v1/search")
+      .map(([, init]) => {
+        const parsedBody = JSON.parse((init?.body as string | undefined) ?? "{}") as {
+          page?: { cursor?: string | null };
+        };
+        return parsedBody.page?.cursor ?? null;
+      });
+
+    expect(searchRequestCursors).toContain("cursor-page-2");
+  });
+
   it("shows action bar only when active selection scope count is positive", async () => {
     const user = userEvent.setup();
     fetchMock.mockImplementation(async (input: string) => {
@@ -228,7 +468,7 @@ describe("LibraryRoutePage", () => {
       if (url === "/api/v1/search") {
         return {
           ok: true,
-          json: async () => buildPayload(["photo-a"])
+          json: async () => buildPayload(["photo-a"], 1, true)
         } as Response;
       }
 
@@ -275,7 +515,7 @@ describe("LibraryRoutePage", () => {
     renderLibraryAt("/library");
     expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Show face workflow" }));
+    await user.click(screen.getByRole("button", { name: "Review faces" }));
     await user.selectOptions(await screen.findByLabelText("Assign face 1"), "person-1");
 
     expect(await screen.findByText("All visible faces assigned.")).toBeInTheDocument();
@@ -287,6 +527,69 @@ describe("LibraryRoutePage", () => {
       },
       body: JSON.stringify({ person_id: "person-1" })
     });
+  });
+
+  it("renders quick-panel overlays when bbox coordinates are larger than thumbnail dimensions", async () => {
+    const user = userEvent.setup();
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+
+      if (url === "/api/v1/search") {
+        return {
+          ok: true,
+          json: async () => buildPayload(["photo-a"], 1, true)
+        } as Response;
+      }
+
+      if (url === "/api/v1/people") {
+        return {
+          ok: true,
+          json: async () => [{ person_id: "person-1", display_name: "Inez" }]
+        } as Response;
+      }
+
+      if (url === "/api/v1/photos/photo-a") {
+        return {
+          ok: true,
+          json: async () =>
+            buildDetailPayload([
+              {
+                face_id: "face-1",
+                person_id: "person-1",
+                bbox_x: 320,
+                bbox_y: 160,
+                bbox_w: 120,
+                bbox_h: 140,
+                label_source: null,
+                confidence: null,
+                model_version: null,
+                provenance: null,
+                label_recorded_ts: null
+              }
+            ])
+        } as Response;
+      }
+
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    renderLibraryAt("/library");
+    expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Review faces" }));
+
+    expect(await screen.findByText("1 face region rendered.")).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Detected face regions" })).toBeInTheDocument();
+    expect(
+      screen.queryByText("Face regions are present but could not be rendered on this preview.")
+    ).not.toBeInTheDocument();
   });
 
   it("supports in-context correction and machine-label confirmation from the library quick panel", async () => {
@@ -304,7 +607,7 @@ describe("LibraryRoutePage", () => {
       if (url === "/api/v1/search") {
         return {
           ok: true,
-          json: async () => buildPayload(["photo-a"])
+          json: async () => buildPayload(["photo-a"], 1, true)
         } as Response;
       }
 
@@ -371,7 +674,7 @@ describe("LibraryRoutePage", () => {
     renderLibraryAt("/library");
     expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Show face workflow" }));
+    await user.click(screen.getByRole("button", { name: "Review faces" }));
 
     await user.click(await screen.findByRole("button", { name: "Confirm label" }));
     expect(await screen.findByText("Confirmed face 1 for Inez.")).toBeInTheDocument();
@@ -387,5 +690,25 @@ describe("LibraryRoutePage", () => {
     await user.selectOptions(screen.getByLabelText("Correct face 1"), "person-2");
     await user.click(screen.getByRole("button", { name: "Confirm reassignment" }));
     expect(await screen.findByText("Correction recorded: Inez -> Mateo.")).toBeInTheDocument();
+  });
+
+  it("shows the Review faces action only when faces are detected", async () => {
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-a"])
+      } as Response;
+    });
+
+    renderLibraryAt("/library");
+    expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Review faces" })).not.toBeInTheDocument();
   });
 });

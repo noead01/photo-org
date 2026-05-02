@@ -826,9 +826,7 @@ def test_process_pending_rows_requeues_completed_extracted_photo_row_when_payloa
     assert pending_rows[0].last_error is None
 
 
-def test_process_pending_rows_refreshes_pending_extracted_photo_row_when_payload_refreshes(
-    tmp_path, monkeypatch
-):
+def test_process_pending_rows_prioritizes_pending_extracted_photo_rows_over_candidates(tmp_path):
     database_url = f"sqlite:///{tmp_path / 'queue-processor-ingest-candidate-refresh-pending.db'}"
     upgrade_database(database_url)
     queue_store = IngestQueueStore(database_url)
@@ -874,48 +872,6 @@ def test_process_pending_rows_refreshes_pending_extracted_photo_row_when_payload
         enqueued_ts=base_time + timedelta(seconds=1),
     )
 
-    refreshed_payload = build_payload(
-        photo_id="shared-photo-id",
-        path="/library/candidate-refresh-pending.jpg",
-        thumbnail_jpeg="dGh1bWI=",
-        thumbnail_mime_type="image/jpeg",
-        thumbnail_width=128,
-        thumbnail_height=128,
-        detections=[
-            {
-                "face_id": "face-1",
-                "bbox_x": 1,
-                "bbox_y": 2,
-                "bbox_w": 3,
-                "bbox_h": 4,
-                "bitmap": "ZmFjZS1iaXRtYXA=",
-                "embedding": None,
-                "provenance": {"detector": "fresh"},
-            }
-        ],
-        warnings=[],
-        payload_version=1,
-        storage_source_id="source-1",
-        watched_folder_id="wf-1",
-        relative_path="candidate-refresh-pending.jpg",
-    )
-
-    def fake_process_candidate_payload(database_url_arg, *, payload, face_detector=None):
-        assert database_url_arg == database_url
-        assert payload == candidate_payload
-        return ExtractionResult(
-            extracted_payload=refreshed_payload,
-            reused_existing_artifacts=False,
-            analysis_performed=True,
-        )
-
-    monkeypatch.setattr(
-        ingest_queue_processor,
-        "process_candidate_payload",
-        fake_process_candidate_payload,
-        raising=False,
-    )
-
     result = process_pending_ingest_queue(database_url, limit=1)
 
     completed_rows = queue_store.list_by_status("completed")
@@ -924,12 +880,11 @@ def test_process_pending_rows_refreshes_pending_extracted_photo_row_when_payload
     assert result.failed == 0
     assert result.retryable_errors == 0
     assert len(completed_rows) == 1
-    assert completed_rows[0].payload_type == "ingest_candidate"
+    assert completed_rows[0].payload_type == "extracted_photo"
     assert len(pending_rows) == 1
-    assert pending_rows[0].ingest_queue_id == extracted_queue_id
-    assert pending_rows[0].payload_type == "extracted_photo"
-    assert pending_rows[0].payload_json == refreshed_payload
-    assert pending_rows[0].last_error is None
+    assert pending_rows[0].ingest_queue_id == candidate_queue_id
+    assert pending_rows[0].payload_type == "ingest_candidate"
+    assert pending_rows[0].payload_json == candidate_payload
 
 
 def test_process_pending_rows_retries_candidate_when_collided_extracted_row_is_processing(

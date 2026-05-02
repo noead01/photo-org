@@ -252,6 +252,14 @@ body {
   color: #475569;
 }
 
+.browse-global-face-box-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #1e293b;
+  font-size: 0.85rem;
+}
+
 .browse-selection-panel {
   border: 1px solid #cbd5e1;
   border-radius: 0.65rem;
@@ -425,6 +433,20 @@ body {
   padding: 0 0.75rem 0.55rem;
   font-size: 0.82rem;
   color: #1e293b;
+}
+
+.browse-card-face-box-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0 0.75rem 0.55rem;
+  font-size: 0.8rem;
+  color: #334155;
+}
+
+.browse-thumbnail-link {
+  position: relative;
+  display: block;
 }
 
 .browse-thumbnail {
@@ -662,6 +684,7 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
+  align-items: center;
 }
 
 .detail-media-controls button {
@@ -683,6 +706,10 @@ body {
   border-radius: 0.55rem;
   background: #f8fafc;
   padding: 0.5rem;
+  resize: both;
+  overflow: auto;
+  min-width: 14rem;
+  min-height: 10rem;
 }
 
 .detail-media-frame[data-mode="actual"] {
@@ -752,6 +779,14 @@ body {
   margin: 0;
   font-size: 0.82rem;
   color: #334155;
+}
+
+.detail-face-box-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #334155;
+  font-size: 0.8rem;
 }
 
 .detail-face-assignment {
