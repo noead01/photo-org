@@ -1,5 +1,18 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { FeedbackSurface } from "../app/feedback/FeedbackSurface";
+import type { FeedbackViewState } from "../app/feedback/feedbackTypes";
+import { PhotoResultIdentity } from "./library/PhotoResultIdentity";
+import {
+  buildFirstPageCursorMap,
+  INVALID_PAGE_MESSAGE,
+  updateCursorByPage
+} from "./library/pagination";
+import { useRouteRequestState } from "./library/requestLifecycle";
+import {
+  dedupeTrimmedValues,
+  parseNullableBooleanParam
+} from "./library/urlSerialization";
 import { LocationRadiusPicker } from "./search/LocationRadiusPicker";
 import { FacetFilterPanel } from "./search/FacetFilterPanel";
 import {
@@ -43,7 +56,6 @@ type SortDirection = "asc" | "desc";
 
 const DEFAULT_SORT_DIRECTION: SortDirection = "desc";
 const PAGE_LIMIT = 24;
-const INVALID_PAGE_MESSAGE = "Reset to page 1 because that page position is unavailable.";
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 type SearchUrlState = {
@@ -72,14 +84,6 @@ type SearchRequestSnapshot = {
   cursorByPage: Record<number, string | null>;
 };
 
-function buildFirstPageCursorMap(nextCursor: string | null): Record<number, string | null> {
-  const cursorMap: Record<number, string | null> = { 1: null };
-  if (nextCursor !== null) {
-    cursorMap[2] = nextCursor;
-  }
-  return cursorMap;
-}
-
 function hasActiveSearchCriteria(snapshot: SearchRequestSnapshot): boolean {
   return (
     snapshot.chips.length > 0 ||
@@ -89,22 +93,6 @@ function hasActiveSearchCriteria(snapshot: SearchRequestSnapshot): boolean {
     snapshot.hasFaces !== null ||
     snapshot.pathHints.length > 0
   );
-}
-
-function dedupeTrimmedValues(values: string[]): string[] {
-  const seen = new Set<string>();
-  const deduped: string[] = [];
-
-  for (const value of values) {
-    const trimmed = value.trim();
-    if (!trimmed || seen.has(trimmed)) {
-      continue;
-    }
-    seen.add(trimmed);
-    deduped.push(trimmed);
-  }
-
-  return deduped;
 }
 
 function isValidIsoDate(value: string): boolean {
@@ -140,9 +128,7 @@ function parseSearchUrlState(search: string): SearchUrlState {
   const selectedPersonNames = dedupeTrimmedValues(params.getAll("person"));
   const pathHintFilters = normalizePathHintFilters(params.getAll("pathHint"));
 
-  const rawHasFaces = (params.get("hasFaces") ?? "").trim();
-  const hasFacesFilter =
-    rawHasFaces === "true" ? true : rawHasFaces === "false" ? false : null;
+  const hasFacesFilter = parseNullableBooleanParam(params.get("hasFaces"));
 
   const latitudeCandidate = (params.get("lat") ?? "").trim();
   const longitudeCandidate = (params.get("lng") ?? "").trim();
@@ -373,8 +359,8 @@ export function SearchRoutePage() {
   const [cursorByPage, setCursorByPage] = useState<Record<number, string | null>>({ 1: null });
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [paginationMessage, setPaginationMessage] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { isLoading, error, beginRequest, completeRequest, failRequest, clearRequestState } =
+    useRouteRequestState();
   const [hasRequested, setHasRequested] = useState(false);
   const [lastFailedRequest, setLastFailedRequest] = useState<SearchRequestSnapshot | null>(null);
   const [lastSuccessfulHadCriteria, setLastSuccessfulHadCriteria] = useState(false);
@@ -457,8 +443,7 @@ export function SearchRoutePage() {
     setHasFacesFilter(parsedUrlState.hasFacesFilter);
     setPathHintFilters(parsedUrlState.pathHintFilters);
 
-    setIsLoading(false);
-    setError(null);
+    clearRequestState();
     setHasRequested(false);
     setLastFailedRequest(null);
     setLastSuccessfulHadCriteria(false);
@@ -476,7 +461,7 @@ export function SearchRoutePage() {
         count: 0
       }))
     );
-  }, [parsedUrlState]);
+  }, [clearRequestState, parsedUrlState]);
 
   useEffect(() => {
     if (applyingParsedUrlStateRef.current) {
@@ -542,8 +527,7 @@ export function SearchRoutePage() {
       return;
     }
 
-    setIsLoading(true);
-    setError(null);
+    beginRequest();
     setHasRequested(true);
     setPaginationMessage(null);
 
@@ -632,20 +616,15 @@ export function SearchRoutePage() {
       setFacetPathHintCounts(toPathHintFacetCounts(payload.facets, snapshot.pathHints));
       setCursorByPage((current) => {
         const pageCursor = snapshot.cursorByPage[snapshot.page];
-        const next = { ...current, ...snapshot.cursorByPage, [snapshot.page]: pageCursor ?? null };
-        if (payload.hits.cursor === null) {
-          delete next[snapshot.page + 1];
-        } else {
-          next[snapshot.page + 1] = payload.hits.cursor;
-        }
-        return next;
+        return updateCursorByPage(
+          { ...current, ...snapshot.cursorByPage },
+          snapshot.page,
+          pageCursor ?? null,
+          payload.hits.cursor
+        );
       });
     } catch (caughtError: unknown) {
-      const message =
-        caughtError instanceof Error
-          ? caughtError.message
-          : "Could not load search results.";
-      setError(message);
+      failRequest(caughtError, "Could not load search results.");
       setLastFailedRequest(createSearchSnapshot(snapshot));
       setResults([]);
       setTotalCount(0);
@@ -658,7 +637,7 @@ export function SearchRoutePage() {
         }))
       );
     } finally {
-      setIsLoading(false);
+      completeRequest();
     }
   }
 
@@ -922,6 +901,11 @@ export function SearchRoutePage() {
 
   const canGoPrevious = hasRequested && page > 1 && !isLoading;
   const canGoNext = hasRequested && nextCursor !== null && !isLoading;
+  const feedbackViewState: FeedbackViewState = isLoading
+    ? "loading"
+    : error
+      ? "error"
+      : "ready";
 
   return (
     <section aria-labelledby="page-title" className="page search-page">
@@ -1221,46 +1205,40 @@ export function SearchRoutePage() {
         </p>
       ) : null}
 
-      {resultViewState === "loading" ? (
-        <div className="feedback-panel feedback-panel-loading" role="status" aria-live="polite">
-          Loading search workflow.
-        </div>
-      ) : null}
+      <FeedbackSurface
+        viewState={feedbackViewState}
+        loadingLabel="Loading search workflow."
+        error={error ? { title: "Could not load Search", message: error } : null}
+        onRetry={handleRetry}
+        notifications={[]}
+        onDismissNotification={() => {}}
+      >
+        {resultViewState === "empty" ? (
+          <div className="feedback-panel">
+            <p>No photos are available in the catalog yet.</p>
+          </div>
+        ) : null}
 
-      {resultViewState === "error" ? (
-        <div className="feedback-panel feedback-panel-error">
-          <h2>Could not load Search</h2>
-          <p>{error}</p>
-          <button type="button" onClick={handleRetry}>
-            Retry
-          </button>
-        </div>
-      ) : null}
+        {resultViewState === "no_match" ? (
+          <div className="feedback-panel">
+            <p>No matching photos for the active query.</p>
+          </div>
+        ) : null}
 
-      {resultViewState === "empty" ? (
-        <div className="feedback-panel">
-          <p>No photos are available in the catalog yet.</p>
-        </div>
-      ) : null}
-
-      {resultViewState === "no_match" ? (
-        <div className="feedback-panel">
-          <p>No matching photos for the active query.</p>
-        </div>
-      ) : null}
-
-      {resultViewState === "results" ? (
-        <ol className="search-results" aria-label="Search results">
-          {results.map((photo) => (
-            <li key={photo.photo_id}>
-              <h2>{photo.photo_id}</h2>
-              <p className="search-result-path" title={photo.path}>
-                {photo.path}
-              </p>
-            </li>
-          ))}
-        </ol>
-      ) : null}
+        {resultViewState === "results" ? (
+          <ol className="search-results" aria-label="Search results">
+            {results.map((photo) => (
+              <li key={photo.photo_id}>
+                <PhotoResultIdentity
+                  title={photo.photo_id}
+                  path={photo.path}
+                  pathClassName="search-result-path"
+                />
+              </li>
+            ))}
+          </ol>
+        ) : null}
+      </FeedbackSurface>
 
       <p className="search-serialized-query" aria-live="off">
         Active query: {serializedQuery || "(none)"} | Date range:{" "}
