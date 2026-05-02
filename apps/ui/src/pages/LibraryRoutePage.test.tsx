@@ -124,7 +124,8 @@ describe("LibraryRoutePage", () => {
     expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
     expect(screen.queryByLabelText("Library actions")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("checkbox", { name: "Select photo" }));
+    const selectionCheckbox = await screen.findByRole("checkbox", { name: "Select photo" });
+    await user.click(selectionCheckbox);
     expect(screen.getByLabelText("Library actions")).toBeInTheDocument();
   });
 
@@ -147,7 +148,8 @@ describe("LibraryRoutePage", () => {
     renderLibraryAt("/library");
     expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("checkbox", { name: "Select photo" }));
+    const selectionCheckbox = await screen.findByRole("checkbox", { name: "Select photo" });
+    await user.click(selectionCheckbox);
 
     expect(screen.getByRole("button", { name: "Add to album" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Export" })).toBeDisabled();
