@@ -228,6 +228,45 @@ describe("PhotoDetailRoutePage", () => {
     expect(screen.queryByRole("list", { name: "Detected face regions" })).not.toBeInTheDocument();
   });
 
+  it("renders face overlays when bbox coordinates use a larger source-image space", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () =>
+        buildPayload({
+          faces: [
+            {
+              face_id: "face-1",
+              person_id: "person-1",
+              bbox_x: 320,
+              bbox_y: 160,
+              bbox_w: 120,
+              bbox_h: 140,
+              label_source: null,
+              confidence: null,
+              model_version: null,
+              provenance: null,
+              label_recorded_ts: null
+            }
+          ],
+          thumbnail: {
+            mime_type: "image/jpeg",
+            width: 100,
+            height: 100,
+            data_base64: "dGh1bWI="
+          }
+        })
+    } as Response);
+
+    renderDetail();
+
+    expect(await screen.findByText("1 face region rendered.")).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Detected face regions" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Face region 1 for person-1")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Face regions are present but could not be rendered on this preview.")
+    ).not.toBeInTheDocument();
+  });
+
   it("keeps face overlays coherent when switching image presentation mode", async () => {
     const user = userEvent.setup();
 
@@ -241,8 +280,38 @@ describe("PhotoDetailRoutePage", () => {
     expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
     expect(await screen.findByLabelText("Face region 1 for person-1")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Actual pixels" }));
+    await user.click(screen.getByRole("button", { name: "Fit to panel" }));
 
+    expect(await screen.findByLabelText("Face region 1 for person-1")).toBeInTheDocument();
+  });
+
+  it("defaults preview mode to actual pixels", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => buildPayload()
+    } as Response);
+
+    renderDetail();
+
+    expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Actual pixels" })).toHaveClass("is-active");
+    expect(screen.getByRole("button", { name: "Fit to panel" })).not.toHaveClass("is-active");
+  });
+
+  it("allows toggling face bbox overlays in the preview", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => buildPayload()
+    } as Response);
+
+    renderDetail();
+
+    expect(await screen.findByLabelText("Face region 1 for person-1")).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: "Show face boxes" }));
+    expect(screen.queryByRole("list", { name: "Detected face regions" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "Show face boxes" }));
     expect(await screen.findByLabelText("Face region 1 for person-1")).toBeInTheDocument();
   });
 

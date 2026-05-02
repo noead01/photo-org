@@ -47,7 +47,23 @@ export function LibraryRoutePage() {
   const requestedPage = parsePositiveIntParam(location.search, "page");
   const suppressNextUrlStateSyncRef = useRef(false);
   const applyingParsedUrlStateRef = useRef(false);
+  const lastAppliedParsedUrlStateSignatureRef = useRef<string | null>(null);
   const parsedUrlState = useMemo(() => parseLibraryUrlState(location.search), [location.search]);
+  const parsedUrlStateSignature = useMemo(
+    () =>
+      JSON.stringify({
+        queryChips: parsedUrlState.queryChips,
+        fromDate: parsedUrlState.fromDate,
+        toDate: parsedUrlState.toDate,
+        selectedPersonNames: parsedUrlState.selectedPersonNames,
+        latitudeDraft: parsedUrlState.latitudeDraft,
+        longitudeDraft: parsedUrlState.longitudeDraft,
+        radiusDraft: parsedUrlState.radiusDraft,
+        hasFacesFilter: parsedUrlState.hasFacesFilter,
+        pathHintFilters: parsedUrlState.pathHintFilters
+      }),
+    [parsedUrlState]
+  );
 
   const headingRef = useRef<HTMLHeadingElement | null>(null);
 
@@ -74,6 +90,7 @@ export function LibraryRoutePage() {
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [cursorByPage, setCursorByPage] = useState<Record<number, string | null>>({ 1: null });
   const [photos, setPhotos] = useState<LibraryPhoto[]>([]);
+  const [showGridFaceBoxes, setShowGridFaceBoxes] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<NotificationEntry[]>([]);
@@ -182,10 +199,15 @@ export function LibraryRoutePage() {
   useEffect(() => {
     if (suppressNextUrlStateSyncRef.current) {
       suppressNextUrlStateSyncRef.current = false;
+      lastAppliedParsedUrlStateSignatureRef.current = parsedUrlStateSignature;
+      return;
+    }
+    if (lastAppliedParsedUrlStateSignatureRef.current === parsedUrlStateSignature) {
       return;
     }
 
     applyingParsedUrlStateRef.current = true;
+    lastAppliedParsedUrlStateSignatureRef.current = parsedUrlStateSignature;
     const parsedQuery = parsedUrlState.queryChips.join(" ");
     setQueryInput(parsedQuery);
     setCommittedQuery(parsedQuery);
@@ -212,7 +234,7 @@ export function LibraryRoutePage() {
     setNextCursor(null);
     setPhotos([]);
     setTotalCount(0);
-  }, [parsedUrlState]);
+  }, [parsedUrlState, parsedUrlStateSignature]);
 
   useEffect(() => {
     if (applyingParsedUrlStateRef.current) {
@@ -653,6 +675,15 @@ export function LibraryRoutePage() {
       />
 
       <p className="browse-summary" aria-live="polite">{summaryLabel}</p>
+      <label className="browse-global-face-box-toggle">
+        <input
+          type="checkbox"
+          aria-label="Show face boxes on all photos"
+          checked={showGridFaceBoxes}
+          onChange={(event) => setShowGridFaceBoxes(event.currentTarget.checked)}
+        />
+        Show face boxes on all photos
+      </label>
 
       <LibrarySelectionPanel
         selectionState={selectionState}
@@ -701,6 +732,7 @@ export function LibraryRoutePage() {
         {!error && !isLoading && photos.length > 0 ? (
           <LibraryPhotoGrid
             photos={photos}
+            showAllFaceBoxes={showGridFaceBoxes}
             selectedPhotoIds={selectionState.selectedPhotoIds}
             locationSearch={location.search}
             selectionRouteState={selectionRouteState}
