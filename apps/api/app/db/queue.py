@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy import select, update
+from sqlalchemy import case, select, update
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 
@@ -184,6 +184,11 @@ class IngestQueueStore:
 
     def list_processable(self, *, limit: int) -> list[QueueRow]:
         reclaim_before = _processing_lease_cutoff()
+        payload_type_priority = case(
+            (ingest_queue.c.payload_type == "extracted_photo", 0),
+            (ingest_queue.c.payload_type == "ingest_candidate", 1),
+            else_=2,
+        )
         with self._session_factory() as session:
             rows = session.execute(
                 select(ingest_queue)
@@ -195,7 +200,11 @@ class IngestQueueStore:
                         & (ingest_queue.c.last_attempt_ts <= reclaim_before)
                     )
                 )
-                .order_by(ingest_queue.c.enqueued_ts, ingest_queue.c.ingest_queue_id)
+                .order_by(
+                    payload_type_priority,
+                    ingest_queue.c.enqueued_ts,
+                    ingest_queue.c.ingest_queue_id,
+                )
                 .limit(limit)
             ).mappings()
             return [QueueRow(**row) for row in rows]

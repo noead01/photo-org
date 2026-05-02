@@ -34,6 +34,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz').read()\"",
+        ]
+      interval: 3s
+      timeout: 5s
+      retries: 20
     ports:
       - "${PHOTO_ORG_API_HOST_PORT:-8000}:8000"
 
@@ -43,9 +52,10 @@ services:
       dockerfile: apps/ui/Dockerfile
     environment:
       VITE_API_BASE_URL: ${PHOTO_ORG_UI_API_BASE_URL:-http://127.0.0.1:8000}
+      VITE_API_PROXY_TARGET: ${PHOTO_ORG_UI_PROXY_TARGET:-http://db-service:8000}
     depends_on:
       db-service:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "${PHOTO_ORG_UI_HOST_PORT:-5173}:5173"
 

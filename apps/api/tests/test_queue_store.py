@@ -1,8 +1,12 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
+from sqlalchemy import create_engine, update
 from sqlalchemy.exc import IntegrityError
 
 from app.db.queue import IngestQueueStore
 from app.migrations import upgrade_database
+from photoorg_db_schema import ingest_queue
 
 
 def test_enqueue_submission_stores_pending_queue_row(tmp_path):
@@ -90,3 +94,41 @@ def test_enqueue_reraises_invalid_submission_for_existing_idempotency_key(tmp_pa
     assert [row.ingest_queue_id for row in rows] == [queue_id]
     assert rows[0].payload_type == "photo_metadata"
     assert rows[0].payload_json == {"path": "a.heic"}
+
+
+def test_list_processable_prioritizes_extracted_payloads_over_candidates(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'queue-store-priority.db'}"
+    upgrade_database(database_url)
+
+    store = IngestQueueStore(database_url)
+
+    candidate_id = store.enqueue(
+        payload_type="ingest_candidate",
+        payload={"path": "candidate.jpg"},
+        idempotency_key="candidate-key",
+    )
+    extracted_id = store.enqueue(
+        payload_type="extracted_photo",
+        payload={"path": "extracted.jpg"},
+        idempotency_key="extracted-key",
+    )
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        base_time = datetime(2024, 1, 1, tzinfo=UTC)
+        connection.execute(
+            update(ingest_queue)
+            .where(ingest_queue.c.ingest_queue_id == candidate_id)
+            .values(enqueued_ts=base_time)
+        )
+        connection.execute(
+            update(ingest_queue)
+            .where(ingest_queue.c.ingest_queue_id == extracted_id)
+            .values(enqueued_ts=base_time + timedelta(seconds=1))
+        )
+
+    processable_rows = store.list_processable(limit=1)
+
+    assert len(processable_rows) == 1
+    assert processable_rows[0].ingest_queue_id == extracted_id
+    assert processable_rows[0].payload_type == "extracted_photo"
+    assert processable_rows[0].ingest_queue_id != candidate_id
