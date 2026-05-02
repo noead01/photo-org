@@ -1,8 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import type { NotificationEntry } from "../app/feedback/feedbackTypes";
-import { ToastStack } from "../app/feedback/ToastStack";
+import { FeedbackSurface } from "../app/feedback/FeedbackSurface";
+import type { FeedbackViewState, NotificationEntry } from "../app/feedback/feedbackTypes";
 import { deriveIngestStatus, INGEST_STATUS_LEGEND } from "../app/ingestStatus";
+import { PhotoResultIdentity } from "./library/PhotoResultIdentity";
+import {
+  INVALID_PAGE_MESSAGE,
+  updateCursorByPage
+} from "./library/pagination";
+import { useRouteRequestState } from "./library/requestLifecycle";
+import { parsePositiveIntParam } from "./library/urlSerialization";
 import {
   consumePendingBrowseFocusPhotoId,
   resolveBrowseReturnState,
@@ -45,7 +52,6 @@ type SearchResponsePayload = {
 };
 
 const PAGE_LIMIT = 24;
-const INVALID_PAGE_MESSAGE = "Reset to page 1 because that page position is unavailable.";
 
 function formatShotTimestamp(shotTs: string | null): string {
   if (!shotTs) {
@@ -106,24 +112,10 @@ async function fetchBrowsePage(
   return (await response.json()) as SearchResponsePayload;
 }
 
-function parseRequestedPage(search: string): number {
-  const rawPage = new URLSearchParams(search).get("page");
-  if (!rawPage) {
-    return 1;
-  }
-
-  const parsedPage = Number.parseInt(rawPage, 10);
-  if (!Number.isFinite(parsedPage) || parsedPage < 1) {
-    return 1;
-  }
-
-  return parsedPage;
-}
-
 export function BrowseRoutePage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const requestedPage = parseRequestedPage(location.search);
+  const requestedPage = parsePositiveIntParam(location.search, "page");
   const initialReturnState = resolveBrowseReturnState(location.state);
 
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
@@ -131,10 +123,16 @@ export function BrowseRoutePage() {
   const [photos, setPhotos] = useState<BrowsePhoto[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [reloadToken, setReloadToken] = useState(0);
   const [notifications, setNotifications] = useState<NotificationEntry[]>([]);
+  const {
+    isLoading,
+    error,
+    reloadToken,
+    beginRequest,
+    completeRequest,
+    failRequest,
+    requestRetry
+  } = useRouteRequestState();
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   const pendingReturnFocusPhotoIdRef = useRef<string | null>(
     initialReturnState?.restoreFocusPhotoId ?? consumePendingBrowseFocusPhotoId()
@@ -179,8 +177,7 @@ export function BrowseRoutePage() {
 
     const controller = new AbortController();
 
-    setIsLoading(true);
-    setError(null);
+    beginRequest();
 
     fetchBrowsePage(sortDirection, cursorForPage ?? null)
       .then((payload) => {
@@ -198,27 +195,21 @@ export function BrowseRoutePage() {
         setTotalCount(payload.hits.total);
         setNextCursor(payload.hits.cursor);
         setCursorByPage((current) => {
-          const next = { ...current, [requestedPage]: cursorForPage ?? null };
-          if (payload.hits.cursor === null) {
-            delete next[requestedPage + 1];
-          } else {
-            next[requestedPage + 1] = payload.hits.cursor;
-          }
-          return next;
+          return updateCursorByPage(
+            current,
+            requestedPage,
+            cursorForPage ?? null,
+            payload.hits.cursor
+          );
         });
-        setIsLoading(false);
+        completeRequest();
       })
       .catch((caughtError: unknown) => {
         if (controller.signal.aborted) {
           return;
         }
 
-        const message =
-          caughtError instanceof Error
-            ? caughtError.message
-            : "Could not load browse results.";
-        setError(message);
-        setIsLoading(false);
+        failRequest(caughtError, "Could not load browse results.");
       });
 
     return () => {
@@ -259,6 +250,11 @@ export function BrowseRoutePage() {
 
   const canGoPrevious = requestedPage > 1 && !isLoading;
   const canGoNext = nextCursor !== null && !isLoading;
+  const feedbackViewState: FeedbackViewState = isLoading
+    ? "loading"
+    : error
+      ? "error"
+      : "ready";
 
   const summaryLabel = useMemo(() => {
     if (isLoading) {
@@ -331,105 +327,96 @@ export function BrowseRoutePage() {
         </ul>
       </section>
 
-      {error ? (
-        <div className="feedback-panel feedback-panel-error">
-          <h2>Could not load Browse</h2>
-          <p>{error}</p>
-          <button type="button" onClick={() => setReloadToken((current) => current + 1)}>
-            Retry
-          </button>
-        </div>
-      ) : null}
-
-      {!error && isLoading ? (
-        <div className="feedback-panel feedback-panel-loading" role="status" aria-live="polite">
-          Loading browse workflow.
-        </div>
-      ) : null}
-
-      {!error && !isLoading && photos.length === 0 ? (
-        <div className="feedback-panel">
-          <p>No photos available for this page.</p>
-        </div>
-      ) : null}
-
-      {!error && !isLoading && photos.length > 0 ? (
-        <ol className="browse-grid" aria-label="Photo gallery">
-          {photos.map((photo) => {
-            const ingestStatus = deriveIngestStatus({
-              availabilityState: photo.original?.availability_state ?? null,
-              isAvailable: photo.original?.is_available ?? null,
-              lastFailureReason: photo.original?.last_failure_reason ?? null,
-              hasThumbnail: Boolean(photo.thumbnail)
-            });
-
-            return (
-              <li key={photo.photo_id} className="browse-card">
-                <p className="browse-ingest-status">
-                  <span className={`ingest-status-badge is-${ingestStatus.tone}`}>{ingestStatus.label}</span>
-                  <span className="browse-ingest-status-detail">{ingestStatus.description}</span>
-                </p>
-                {photo.thumbnail ? (
-                  <img
-                    className="browse-thumbnail"
-                    src={`data:${photo.thumbnail.mime_type};base64,${photo.thumbnail.data_base64}`}
-                    width={photo.thumbnail.width}
-                    height={photo.thumbnail.height}
-                    alt={`Thumbnail for ${photo.photo_id}`}
-                  />
-                ) : (
-                  <div className="browse-thumbnail browse-thumbnail-placeholder" aria-hidden="true">
-                    No preview
-                  </div>
-                )}
-
-                <div className="browse-card-body">
-                  <h2>
-                    <Link
-                      className="browse-photo-link"
-                      data-photo-id={photo.photo_id}
-                      to={`/browse/${photo.photo_id}`}
-                      state={{
-                        returnToBrowseSearch: location.search,
-                        returnFocusPhotoId: photo.photo_id
-                      }}
-                      onClick={() => setPendingBrowseFocusPhotoId(photo.photo_id)}
-                    >
-                      {photo.photo_id}
-                    </Link>
-                  </h2>
-                  <p className="browse-path" title={photo.path}>{photo.path}</p>
-                  <dl>
-                    <div>
-                      <dt>Captured</dt>
-                      <dd>{formatShotTimestamp(photo.shot_ts)}</dd>
-                    </div>
-                    <div>
-                      <dt>Size</dt>
-                      <dd>{formatFilesize(photo.filesize)}</dd>
-                    </div>
-                    <div>
-                      <dt>People</dt>
-                      <dd>{photo.people.length}</dd>
-                    </div>
-                    <div>
-                      <dt>Original</dt>
-                      <dd>{photo.original?.availability_state ?? "unknown"}</dd>
-                    </div>
-                  </dl>
-                </div>
-              </li>
-            );
-          })}
-        </ol>
-      ) : null}
-
-      <ToastStack
+      <FeedbackSurface
+        viewState={feedbackViewState}
+        loadingLabel="Loading browse workflow."
+        error={error ? { title: "Could not load Browse", message: error } : null}
+        onRetry={requestRetry}
         notifications={notifications}
-        onDismiss={(id) => {
+        onDismissNotification={(id) => {
           setNotifications((current) => current.filter((entry) => entry.id !== id));
         }}
-      />
+      >
+        {!error && !isLoading && photos.length === 0 ? (
+          <div className="feedback-panel">
+            <p>No photos available for this page.</p>
+          </div>
+        ) : null}
+
+        {!error && !isLoading && photos.length > 0 ? (
+          <ol className="browse-grid" aria-label="Photo gallery">
+            {photos.map((photo) => {
+              const ingestStatus = deriveIngestStatus({
+                availabilityState: photo.original?.availability_state ?? null,
+                isAvailable: photo.original?.is_available ?? null,
+                lastFailureReason: photo.original?.last_failure_reason ?? null,
+                hasThumbnail: Boolean(photo.thumbnail)
+              });
+
+              return (
+                <li key={photo.photo_id} className="browse-card">
+                  <p className="browse-ingest-status">
+                    <span className={`ingest-status-badge is-${ingestStatus.tone}`}>{ingestStatus.label}</span>
+                    <span className="browse-ingest-status-detail">{ingestStatus.description}</span>
+                  </p>
+                  {photo.thumbnail ? (
+                    <img
+                      className="browse-thumbnail"
+                      src={`data:${photo.thumbnail.mime_type};base64,${photo.thumbnail.data_base64}`}
+                      width={photo.thumbnail.width}
+                      height={photo.thumbnail.height}
+                      alt={`Thumbnail for ${photo.photo_id}`}
+                    />
+                  ) : (
+                    <div className="browse-thumbnail browse-thumbnail-placeholder" aria-hidden="true">
+                      No preview
+                    </div>
+                  )}
+
+                  <div className="browse-card-body">
+                    <PhotoResultIdentity
+                      title={
+                        <Link
+                          className="browse-photo-link"
+                          data-photo-id={photo.photo_id}
+                          to={`/browse/${photo.photo_id}`}
+                          state={{
+                            returnToBrowseSearch: location.search,
+                            returnFocusPhotoId: photo.photo_id
+                          }}
+                          onClick={() => setPendingBrowseFocusPhotoId(photo.photo_id)}
+                        >
+                          {photo.photo_id}
+                        </Link>
+                      }
+                      path={photo.path}
+                      pathClassName="browse-path"
+                    />
+                    <dl>
+                      <div>
+                        <dt>Captured</dt>
+                        <dd>{formatShotTimestamp(photo.shot_ts)}</dd>
+                      </div>
+                      <div>
+                        <dt>Size</dt>
+                        <dd>{formatFilesize(photo.filesize)}</dd>
+                      </div>
+                      <div>
+                        <dt>People</dt>
+                        <dd>{photo.people.length}</dd>
+                      </div>
+                      <div>
+                        <dt>Original</dt>
+                        <dd>{photo.original?.availability_state ?? "unknown"}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        ) : null}
+      </FeedbackSurface>
     </section>
   );
 }
