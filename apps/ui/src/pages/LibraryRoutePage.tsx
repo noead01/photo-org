@@ -5,7 +5,6 @@ import type {
   FeedbackViewState,
   NotificationEntry
 } from "../app/feedback/feedbackTypes";
-import { INGEST_STATUS_LEGEND } from "../app/ingestStatus";
 import { resolveInitialSessionIdentity } from "../session/sessionIdentity";
 import { LibraryActionBar } from "./library/LibraryActionBar";
 import { LibraryActiveFilterChips } from "./library/LibraryActiveFilterChips";
@@ -571,6 +570,7 @@ export function LibraryRoutePage() {
         fromDate={fromDate}
         toDate={toDate}
         personDraft={personDraft}
+        selectedPersonNames={selectedPersonNames}
         latitudeDraft={latitudeDraft}
         longitudeDraft={longitudeDraft}
         radiusDraft={radiusDraft}
@@ -681,18 +681,6 @@ export function LibraryRoutePage() {
           ]);
         }}
       />
-
-      <section className="status-legend" aria-label="Ingest status legend">
-        <h2>Ingest status legend</h2>
-        <ul>
-          {INGEST_STATUS_LEGEND.map((entry) => (
-            <li key={entry.tone}>
-              <span className={`ingest-status-badge is-${entry.tone}`}>{entry.label}</span>
-              <span>{entry.description}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
 
       <FeedbackSurface
         viewState={feedbackViewState}

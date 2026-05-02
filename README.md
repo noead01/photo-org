@@ -158,7 +158,7 @@ The current Phase 0 development path now uses an API-owned persistence boundary 
 - queued workers hash content and, when needed, run metadata extraction, thumbnail generation, and face detection before persistence
 - duplicate-content files reuse existing extracted artifacts by SHA instead of re-running full analysis
 - the API owns queue processing and domain-table mutation
-- internal queue processing can be triggered through a bounded API endpoint for worker use
+- internal polling and queue processing can be triggered through bounded API endpoints for worker use
 
 The API publishes its code-defined OpenAPI contract as JSON at `/openapi.json`, YAML at `/openapi.yaml`, and Swagger UI at `/docs`.
 

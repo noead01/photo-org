@@ -126,8 +126,8 @@ Current high-value targets:
   - validate the checked-in `seed-corpus/` inventory and manifest
 - `make seed-corpus-load`
   - migrate and load the checked-in `seed-corpus/` into the local development database
-- `uv run python -m app.cli poll-storage-sources --database-url <url>`
-  - poll enabled registered storage sources, validate each source marker, and reconcile watched folders through the central polling loop
+- `curl -sS -X POST http://127.0.0.1:<api-port>/api/v1/internal/storage-sources/poll -H 'Content-Type: application/json' -H 'X-Worker-Role: ingest-processor' -d '{"queue_process_limit":100}'`
+  - trigger the central polling loop and drain queued ingest work through the internal worker endpoint
 - `uv run python apps/api/scripts/generate_openapi.py`
   - regenerate the generated OpenAPI YAML artifact at `apps/api/.generated/openapi.yaml` from the current FastAPI app
   - the API also serves the same runtime schema at `GET /openapi.yaml` and the Swagger UI docs at `GET /docs`
@@ -241,8 +241,8 @@ Synthetic fixtures remain preferred for unit tests and BDD scenarios. The checke
 For missing-file reconciliation verification, run `uv run python -m pytest apps/api/tests/test_ingest.py -q`.
 That targeted suite exercises a temporary watched-folder fixture and simulated time so contributors can verify `active`, `missing`, `deleted`, and recovery transitions without bringing up the full worker stack.
 
-For the source-aware central polling loop, register a storage source plus watched folder first, then run `uv run python -m app.cli poll-storage-sources --database-url <url>`.
-That command validates the source marker before scanning, surfaces source-aware failures in its exit code and stdout, reconciles only enabled watched folders attached to registered storage sources, and enqueues candidate work for downstream extraction instead of performing inline media analysis.
+For the source-aware central polling loop, register a storage source plus watched folder first, then call `POST /api/v1/internal/storage-sources/poll` with `X-Worker-Role: ingest-processor`.
+That endpoint validates source markers before scanning, reconciles only enabled watched folders attached to registered storage sources, enqueues candidate work for downstream extraction, and drains the ingest queue to persistence-ready completion for that trigger request.
 
 ### Automated Version Updates
 

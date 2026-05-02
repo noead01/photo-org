@@ -121,6 +121,7 @@ describe("LibraryRoutePage", () => {
   });
 
   it("renders library query controls and results scaffold on /library", async () => {
+    const user = userEvent.setup();
     fetchMock.mockImplementation(async (input: string) => {
       if (input === "/api/v1/operations/activity") {
         return {
@@ -139,6 +140,11 @@ describe("LibraryRoutePage", () => {
 
     expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Search query" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Filter labels" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("From date")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Filter labels" }));
+
     expect(screen.getByLabelText("From date")).toBeInTheDocument();
     expect(screen.getByLabelText("To date")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Person filter" })).toBeInTheDocument();
@@ -147,6 +153,8 @@ describe("LibraryRoutePage", () => {
     expect(screen.getByLabelText("Radius (km)")).toBeInTheDocument();
     expect(screen.getByLabelText("Facet filters")).toBeInTheDocument();
     expect(await screen.findByRole("list", { name: "Photo gallery" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Ingest status legend" })).not.toBeInTheDocument();
+    expect(screen.getByTitle(/Complete: Assets are ready for normal browse\/detail viewing\./)).toBeInTheDocument();
   });
 
   it("shows action bar only when active selection scope count is positive", async () => {
