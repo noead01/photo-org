@@ -28,10 +28,10 @@ describe("Navigation state", () => {
   });
 
   it("maps an exact primary route pathname to matching nav and context", () => {
-    const navigationState = resolveNavigationState("/search");
+    const navigationState = resolveNavigationState("/library");
 
-    expect(navigationState.activeRoute.key).toBe("search");
-    expect(navigationState.pageContext).toBe("Search");
+    expect(navigationState.activeRoute.key).toBe("library");
+    expect(navigationState.pageContext).toBe("Library");
     expect(navigationState.usesFallback).toBe(false);
   });
 
@@ -46,8 +46,8 @@ describe("Navigation state", () => {
   it("falls back deterministically when pathname is unknown", () => {
     const navigationState = resolveNavigationState("/not-a-real-route");
 
-    expect(navigationState.activeRoute.key).toBe("browse");
-    expect(navigationState.pageContext).toBe("Browse");
+    expect(navigationState.activeRoute.key).toBe("library");
+    expect(navigationState.pageContext).toBe("Library");
     expect(navigationState.usesFallback).toBe(true);
   });
 });

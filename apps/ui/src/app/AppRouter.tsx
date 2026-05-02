@@ -15,8 +15,7 @@ import {
   type PrimaryRouteDefinition
 } from "../routes/routeDefinitions";
 import { PrimaryRoutePage } from "../pages/PrimaryRoutePage";
-import { BrowseRoutePage } from "../pages/BrowseRoutePage";
-import { SearchRoutePage } from "../pages/SearchRoutePage";
+import { LibraryRoutePage } from "../pages/LibraryRoutePage";
 import { PhotoDetailRoutePage } from "../pages/PhotoDetailRoutePage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import { PeopleManagementRoutePage } from "../pages/PeopleManagementRoutePage";
@@ -37,7 +36,7 @@ function AppShellLayout({ sessionIdentity, onSignOut }: AppShellLayoutProps) {
 
   function handleSignOut() {
     onSignOut();
-    navigate("/browse", { replace: true });
+    navigate("/library", { replace: true });
   }
 
   return (
@@ -78,17 +77,15 @@ export function AppRouteTree({ initialSessionIdentity }: AppRouteTreeProps = {})
           />
         }
       >
-        <Route path="/" element={<Navigate to="/browse" replace />} />
-        <Route path="browse/:photoId" element={<PhotoDetailRoutePage />} />
+        <Route path="/" element={<Navigate to="/library" replace />} />
+        <Route path="library/:photoId" element={<PhotoDetailRoutePage />} />
         {PRIMARY_ROUTE_DEFINITIONS.map((route) => (
           <Route
             key={route.key}
             path={routePath(route)}
             element={
-              route.key === "browse" ? (
-                <BrowseRoutePage />
-              ) : route.key === "search" ? (
-                <SearchRoutePage />
+              route.key === "library" ? (
+                <LibraryRoutePage />
               ) : route.key === "labeling" ? (
                 <PeopleManagementRoutePage />
               ) : (
