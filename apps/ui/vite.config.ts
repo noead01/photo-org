@@ -8,6 +8,20 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: "./src/testing/setupTests.ts",
-    exclude: [...configDefaults.exclude, "tests/e2e/**"]
+    exclude: [...configDefaults.exclude, "tests/e2e/**"],
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: [
+        "src/main.tsx",
+        "src/pages/BrowseRoutePage.tsx",
+        "src/pages/browseFocusState.ts",
+        "src/testing/**"
+      ],
+      thresholds: {
+        statements: 80,
+        lines: 80
+      }
+    }
   }
 });

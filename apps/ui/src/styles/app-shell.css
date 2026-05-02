@@ -491,6 +491,94 @@ body {
   text-align: right;
 }
 
+.library-face-panel {
+  border-top: 1px solid #e2e8f0;
+  padding: 0.55rem 0.75rem 0.75rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.library-face-panel-toggle {
+  justify-self: start;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 0.45rem;
+  padding: 0.28rem 0.5rem;
+  font: inherit;
+}
+
+.library-face-panel-body {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.55rem;
+  background: #f8fafc;
+  padding: 0.55rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.library-face-panel-status {
+  margin: 0;
+  color: #334155;
+  font-size: 0.82rem;
+}
+
+.library-face-panel-error {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.library-face-panel-error p {
+  margin: 0;
+  color: #7f1d1d;
+  font-size: 0.82rem;
+}
+
+.library-face-panel-error button {
+  justify-self: start;
+}
+
+.library-face-panel-content {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.library-face-confirmation {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.2rem;
+}
+
+.library-face-confirmation h3 {
+  margin: 0;
+  font-size: 0.92rem;
+  color: #0f172a;
+}
+
+.library-face-confirmation ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.library-face-confirmation li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  font-size: 0.8rem;
+  color: #334155;
+}
+
+.library-face-confirmation-success {
+  margin: 0;
+  color: #1d4ed8;
+  font-size: 0.82rem;
+}
+
 .detail-page {
   display: grid;
   gap: 0.9rem;

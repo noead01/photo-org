@@ -21,5 +21,6 @@ apps/api/.generated/
 apps/ui/node_modules/
 apps/ui/dist/
 apps/ui/*.tsbuildinfo
+apps/ui/coverage/
 apps/ui/playwright-report/
 apps/ui/test-results/

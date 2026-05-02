@@ -36,6 +36,10 @@ class FaceAlreadyAssignedToPersonError(RuntimeError):
     pass
 
 
+class FaceAssignedToDifferentPersonError(RuntimeError):
+    pass
+
+
 def assign_face_to_person(
     connection: Connection,
     *,
@@ -129,6 +133,39 @@ def reassign_face_to_person(
         "face_id": row["face_id"],
         "photo_id": row["photo_id"],
         "previous_person_id": previous_person_id,
+        "person_id": person_id,
+    }
+
+
+def confirm_face_assignment(
+    connection: Connection,
+    *,
+    face_id: str,
+    person_id: str,
+) -> dict[str, str]:
+    row = _face_row(connection, face_id)
+    if row is None:
+        raise FaceNotFoundError("Face not found")
+
+    assigned_person_id = row["person_id"]
+    if assigned_person_id is None:
+        raise FaceNotAssignedError("Face is not assigned")
+
+    if not _person_exists(connection, person_id):
+        raise PersonNotFoundError("Person not found")
+
+    if assigned_person_id != person_id:
+        raise FaceAssignedToDifferentPersonError("Face is assigned to a different person")
+
+    _persist_face_label_event(
+        connection,
+        face_id=face_id,
+        person_id=person_id,
+        action="confirmation",
+    )
+    return {
+        "face_id": row["face_id"],
+        "photo_id": row["photo_id"],
         "person_id": person_id,
     }
 
