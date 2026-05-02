@@ -395,7 +395,14 @@ export function PhotoDetailRoutePage() {
             pathname: "/browse",
             search: returnState.returnToBrowseSearch ?? ""
           }}
-          state={backLinkFocusPhotoId ? { restoreFocusPhotoId: backLinkFocusPhotoId } : undefined}
+          state={
+            backLinkFocusPhotoId || returnState.browseSelection
+              ? {
+                  restoreFocusPhotoId: backLinkFocusPhotoId ?? undefined,
+                  browseSelection: returnState.browseSelection
+                }
+              : undefined
+          }
           onClick={() => {
             if (backLinkFocusPhotoId) {
               setPendingBrowseFocusPhotoId(backLinkFocusPhotoId);

@@ -113,6 +113,7 @@ describe("BrowseRoutePage", () => {
     expect(parsedBody.sort).toEqual({ by: "shot_ts", dir: "desc" });
     expect(parsedBody.page).toEqual({ limit: 24, cursor: null });
     expect(screen.getByText("Page 1")).toBeInTheDocument();
+    expect(screen.getByText("Selected scope: 0 photos")).toBeInTheDocument();
   });
 
   it("advances to next page with returned cursor and supports previous", async () => {
@@ -308,5 +309,88 @@ describe("BrowseRoutePage", () => {
     await waitFor(() => {
       expect(heading).toHaveFocus();
     });
+  });
+
+  it("supports selection scope toggles with deterministic count feedback", async () => {
+    const user = userEvent.setup();
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => buildPayload(["photo-a", "photo-b"], "cursor-page-2", 9)
+    } as Response);
+
+    renderBrowseAt("/browse");
+
+    expect(await screen.findByText("photo-a")).toBeInTheDocument();
+
+    await user.click(screen.getAllByRole("checkbox", { name: "Select photo" })[0]);
+    expect(screen.getByText("Selected scope: 1 photo")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("radio", { name: "This page" }));
+    expect(screen.getByText("This page scope: 2 photos")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("radio", { name: "All filtered" }));
+    expect(screen.getByText("All filtered scope: 9 photos")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("radio", { name: "Selected" }));
+    expect(screen.getByText("Selected scope: 1 photo")).toBeInTheDocument();
+  });
+
+  it("keeps explicit selections across pagination transitions", async () => {
+    const user = userEvent.setup();
+
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => buildPayload(["photo-a"], "cursor-page-2", 3)
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => buildPayload(["photo-b"], "cursor-page-3", 3)
+      } as Response);
+
+    renderBrowseAt("/browse");
+
+    expect(await screen.findByText("photo-a")).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: "Select photo" }));
+    expect(screen.getByText("Selected scope: 1 photo")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    expect(await screen.findByText("photo-b")).toBeInTheDocument();
+    expect(screen.getByText("Selected scope: 1 photo")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear selected" })).toBeEnabled();
+  });
+
+  it("hydrates selection state from route-local location state", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => buildPayload(["photo-a"], null, 1)
+    } as Response);
+
+    render(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: "/browse",
+            state: {
+              browseSelection: {
+                scope: "selected",
+                selectedPhotoIds: ["photo-a"],
+                allFilteredFingerprint: null
+              }
+            }
+          }
+        ]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <Routes>
+          <Route path="/browse" element={<BrowseRoutePage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("photo-a")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Select photo" })).toBeChecked();
+    expect(screen.getByText("Selected scope: 1 photo")).toBeInTheDocument();
   });
 });
