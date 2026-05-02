@@ -9,7 +9,11 @@ import { PRIMARY_ROUTE_LOADING_LABELS } from "../pages/PrimaryRoutePage";
 const TEST_SESSION_IDENTITY: SessionIdentity = {
   userId: "test-operator",
   displayName: "Avery Operator",
-  email: "avery.operator@example.com"
+  email: "avery.operator@example.com",
+  capabilities: {
+    addToAlbum: true,
+    export: true
+  }
 };
 
 function renderAtPath(path: string, sessionIdentity: SessionIdentity | null = TEST_SESSION_IDENTITY) {
