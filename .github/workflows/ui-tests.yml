@@ -49,11 +49,22 @@ jobs:
       - name: Install UI dependencies
         working-directory: apps/ui
         run: npm ci
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('apps/ui/package-lock.json') }}
       - name: Install Playwright Chromium
         working-directory: apps/ui
-        run: npx playwright install --with-deps chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
+        run: |
+          npx playwright install --with-deps chromium || \
+          npx playwright install --with-deps chromium
       - name: Run smoke journeys
         working-directory: apps/ui
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
         run: npm run test:e2e:smoke
       - name: Upload Playwright report
         if: failure()
@@ -77,11 +88,22 @@ jobs:
       - name: Install UI dependencies
         working-directory: apps/ui
         run: npm ci
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('apps/ui/package-lock.json') }}
       - name: Install Playwright Chromium
         working-directory: apps/ui
-        run: npx playwright install --with-deps chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
+        run: |
+          npx playwright install --with-deps chromium || \
+          npx playwright install --with-deps chromium
       - name: Run full E2E lane
         working-directory: apps/ui
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
         run: npm run test:e2e:full
       - name: Upload Playwright report
         if: failure()
