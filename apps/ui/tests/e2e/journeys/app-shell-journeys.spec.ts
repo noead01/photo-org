@@ -72,22 +72,22 @@ async function expectResponsiveNavLayout(
 }
 
 test("JRN-P2-shell-navigation-continuity @journey @smoke", async ({ page }) => {
-  await page.goto("/browse");
+  await page.goto("/library");
 
   const banner = page.getByRole("banner");
   const primaryNav = page.getByRole("navigation", { name: "Primary" });
 
   await expect(banner).toBeVisible();
   await expect(primaryNav).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Browse", level: 1 })).toBeVisible();
-  await expectShellRoute(page, "browse");
+  await expect(page.getByRole("heading", { name: "Library", level: 1 })).toBeVisible();
+  await expectShellRoute(page, "library");
 
-  await page.getByRole("link", { name: "Search", exact: true }).click();
+  await page.getByRole("link", { name: "Labeling", exact: true }).click();
 
   await expect(banner).toBeVisible();
   await expect(primaryNav).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Search", level: 1 })).toBeVisible();
-  await expectShellRoute(page, "search");
+  await expect(page.getByRole("heading", { name: "Labeling", level: 1 })).toBeVisible();
+  await expectShellRoute(page, "labeling");
 });
 
 test("JRN-P2-not-found-recovery @journey @smoke", async ({ page }) => {
@@ -96,25 +96,25 @@ test("JRN-P2-not-found-recovery @journey @smoke", async ({ page }) => {
   await expect(page.getByRole("banner")).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Page Not Found", level: 1 })).toBeVisible();
-  await expectShellRoute(page, "browse");
+  await expectShellRoute(page, "library");
 
-  await page.getByRole("link", { name: "Browse", exact: true }).click();
+  await page.getByRole("link", { name: "Library", exact: true }).click();
 
-  await expect(page).toHaveURL(/\/browse$/);
-  await expect(page.getByRole("heading", { name: "Browse", level: 1 })).toBeVisible();
-  await expectShellRoute(page, "browse");
+  await expect(page).toHaveURL(/\/library$/);
+  await expect(page.getByRole("heading", { name: "Library", level: 1 })).toBeVisible();
+  await expectShellRoute(page, "library");
 });
 
 test("JRN-P3-search-route-deep-link @journey @smoke", async ({ page }) => {
-  await page.goto("/search");
+  await page.goto("/library");
 
-  const searchLink = page.getByRole("link", { name: "Search", exact: true });
+  const libraryLink = page.getByRole("link", { name: "Library", exact: true });
 
   await expect(page.getByRole("banner")).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Search", level: 1 })).toBeVisible();
-  await expect(searchLink).toHaveAttribute("aria-current", "page");
-  await expectShellRoute(page, "search");
+  await expect(page.getByRole("heading", { name: "Library", level: 1 })).toBeVisible();
+  await expect(libraryLink).toHaveAttribute("aria-current", "page");
+  await expectShellRoute(page, "library");
 });
 
 test("JRN-P2-shared-feedback-surfaces @journey @smoke", async ({ page }) => {
@@ -183,7 +183,7 @@ test("JRN-P2-shared-feedback-surfaces @journey @smoke", async ({ page }) => {
 });
 
 test("JRN-P2-responsive-shell-layout @journey @smoke", async ({ page }) => {
-  await page.goto("/search");
+  await page.goto("/library");
 
   for (const viewport of RESPONSIVE_VIEWPORTS) {
     await test.step(`shell remains usable at ${viewport.label}`, async () => {
@@ -194,9 +194,9 @@ test("JRN-P2-responsive-shell-layout @journey @smoke", async ({ page }) => {
         viewport.expectedNavDirection,
         viewport.expectedPlacement
       );
-      await expect(page).toHaveURL(/\/search$/);
-      await expect(page.getByRole("heading", { name: "Search", level: 1 })).toBeVisible();
-      await expectShellRoute(page, "search");
+      await expect(page).toHaveURL(/\/library$/);
+      await expect(page.getByRole("heading", { name: "Library", level: 1 })).toBeVisible();
+      await expectShellRoute(page, "library");
     });
   }
 
