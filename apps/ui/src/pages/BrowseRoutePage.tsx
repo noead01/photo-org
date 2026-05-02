@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { FeedbackSurface } from "../app/feedback/FeedbackSurface";
 import type { FeedbackViewState, NotificationEntry } from "../app/feedback/feedbackTypes";
@@ -10,6 +10,14 @@ import {
 } from "./library/pagination";
 import { useRouteRequestState } from "./library/requestLifecycle";
 import { parsePositiveIntParam } from "./library/urlSerialization";
+import {
+  createLibrarySelectionState,
+  formatSelectionScopeLabel,
+  librarySelectionReducer,
+  parseLibrarySelectionRouteState,
+  resolveSelectionScopeCount,
+  serializeLibrarySelectionState
+} from "./library/librarySelection";
 import {
   consumePendingBrowseFocusPhotoId,
   resolveBrowseReturnState,
@@ -52,6 +60,7 @@ type SearchResponsePayload = {
 };
 
 const PAGE_LIMIT = 24;
+const BROWSE_FILTER_FINGERPRINT = "browse:all-results";
 
 function formatShotTimestamp(shotTs: string | null): string {
   if (!shotTs) {
@@ -124,6 +133,11 @@ export function BrowseRoutePage() {
   const [totalCount, setTotalCount] = useState(0);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<NotificationEntry[]>([]);
+  const [selectionState, dispatchSelection] = useReducer(
+    librarySelectionReducer,
+    initialReturnState?.browseSelection ?? null,
+    createLibrarySelectionState
+  );
   const {
     isLoading,
     error,
@@ -136,6 +150,10 @@ export function BrowseRoutePage() {
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   const pendingReturnFocusPhotoIdRef = useRef<string | null>(
     initialReturnState?.restoreFocusPhotoId ?? consumePendingBrowseFocusPhotoId()
+  );
+  const selectionRouteState = useMemo(
+    () => serializeLibrarySelectionState(selectionState),
+    [selectionState]
   );
 
   const cursorForPage = cursorByPage[requestedPage];
@@ -167,6 +185,44 @@ export function BrowseRoutePage() {
       ...current.filter((entry) => entry.id !== "browse-warning")
     ]);
   }
+
+  useEffect(() => {
+    dispatchSelection({
+      type: "filtersChanged",
+      activeFilterFingerprint: BROWSE_FILTER_FINGERPRINT
+    });
+  }, []);
+
+  useEffect(() => {
+    const currentRouteSelection = parseLibrarySelectionRouteState(
+      isRecord(location.state) ? location.state.browseSelection : undefined
+    );
+
+    if (areSelectionRouteStatesEqual(currentRouteSelection, selectionRouteState)) {
+      return;
+    }
+
+    const routeState = isRecord(location.state) ? location.state : {};
+    navigate(
+      {
+        pathname: location.pathname,
+        search: location.search
+      },
+      {
+        replace: true,
+        state: {
+          ...routeState,
+          browseSelection: selectionRouteState
+        }
+      }
+    );
+  }, [
+    location.pathname,
+    location.search,
+    location.state,
+    navigate,
+    selectionRouteState
+  ]);
 
   useEffect(() => {
     if (requestedPage > 1 && cursorForPage === undefined) {
@@ -265,6 +321,11 @@ export function BrowseRoutePage() {
     }
     return `Showing ${photos.length} of ${totalCount} photos`;
   }, [error, isLoading, photos.length, requestedPage, totalCount]);
+  const activeScopeCount = resolveSelectionScopeCount(selectionState, {
+    currentPageCount: photos.length,
+    totalFilteredCount: totalCount
+  });
+  const selectionSummaryLabel = `${formatSelectionScopeLabel(selectionState.scope)} scope: ${activeScopeCount} photo${activeScopeCount === 1 ? "" : "s"}`;
 
   return (
     <section aria-labelledby="page-title" className="page browse-page">
@@ -315,6 +376,71 @@ export function BrowseRoutePage() {
       </div>
 
       <p className="browse-summary" aria-live="polite">{summaryLabel}</p>
+      <section className="browse-selection-panel" aria-label="Library selection controls">
+        <fieldset className="browse-selection-scope-group">
+          <legend>Selection scope</legend>
+          <label>
+            <input
+              type="radio"
+              name="browse-selection-scope"
+              value="selected"
+              checked={selectionState.scope === "selected"}
+              onChange={() => {
+                dispatchSelection({
+                  type: "setScope",
+                  scope: "selected",
+                  activeFilterFingerprint: BROWSE_FILTER_FINGERPRINT
+                });
+              }}
+            />
+            Selected
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="browse-selection-scope"
+              value="page"
+              checked={selectionState.scope === "page"}
+              onChange={() => {
+                dispatchSelection({
+                  type: "setScope",
+                  scope: "page",
+                  activeFilterFingerprint: BROWSE_FILTER_FINGERPRINT
+                });
+              }}
+            />
+            This page
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="browse-selection-scope"
+              value="allFiltered"
+              checked={selectionState.scope === "allFiltered"}
+              onChange={() => {
+                dispatchSelection({
+                  type: "setScope",
+                  scope: "allFiltered",
+                  activeFilterFingerprint: BROWSE_FILTER_FINGERPRINT
+                });
+              }}
+            />
+            All filtered
+          </label>
+        </fieldset>
+        <p className="browse-selection-summary" aria-live="polite">
+          {selectionSummaryLabel}
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            dispatchSelection({ type: "clearExplicitSelection" });
+          }}
+          disabled={selectionState.selectedPhotoIds.size === 0}
+        >
+          Clear selected
+        </button>
+      </section>
       <section className="status-legend" aria-label="Ingest status legend">
         <h2>Ingest status legend</h2>
         <ul>
@@ -359,6 +485,19 @@ export function BrowseRoutePage() {
                     <span className={`ingest-status-badge is-${ingestStatus.tone}`}>{ingestStatus.label}</span>
                     <span className="browse-ingest-status-detail">{ingestStatus.description}</span>
                   </p>
+                  <label className="browse-card-selection">
+                    <input
+                      type="checkbox"
+                      checked={selectionState.selectedPhotoIds.has(photo.photo_id)}
+                      onChange={() => {
+                        dispatchSelection({
+                          type: "togglePhotoSelection",
+                          photoId: photo.photo_id
+                        });
+                      }}
+                    />
+                    Select photo
+                  </label>
                   {photo.thumbnail ? (
                     <img
                       className="browse-thumbnail"
@@ -382,7 +521,8 @@ export function BrowseRoutePage() {
                           to={`/browse/${photo.photo_id}`}
                           state={{
                             returnToBrowseSearch: location.search,
-                            returnFocusPhotoId: photo.photo_id
+                            returnFocusPhotoId: photo.photo_id,
+                            browseSelection: selectionRouteState
                           }}
                           onClick={() => setPendingBrowseFocusPhotoId(photo.photo_id)}
                         >
@@ -419,4 +559,30 @@ export function BrowseRoutePage() {
       </FeedbackSurface>
     </section>
   );
+}
+
+function areSelectionRouteStatesEqual(
+  left: ReturnType<typeof parseLibrarySelectionRouteState>,
+  right: ReturnType<typeof serializeLibrarySelectionState>
+): boolean {
+  if (!left) {
+    return false;
+  }
+  if (left.scope !== right.scope) {
+    return false;
+  }
+  if (left.allFilteredFingerprint !== right.allFilteredFingerprint) {
+    return false;
+  }
+  if (left.selectedPhotoIds.length !== right.selectedPhotoIds.length) {
+    return false;
+  }
+
+  return left.selectedPhotoIds.every(
+    (photoId, index) => photoId === right.selectedPhotoIds[index]
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

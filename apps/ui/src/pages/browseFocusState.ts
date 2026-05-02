@@ -1,10 +1,17 @@
+import {
+  parseLibrarySelectionRouteState,
+  type LibrarySelectionRouteState
+} from "./library/librarySelection";
+
 export interface BrowseReturnState {
   restoreFocusPhotoId?: string;
+  browseSelection?: LibrarySelectionRouteState;
 }
 
 export interface DetailReturnState {
   returnToBrowseSearch?: string;
   returnFocusPhotoId?: string;
+  browseSelection?: LibrarySelectionRouteState;
 }
 
 let pendingBrowseFocusPhotoId: string | null = null;
@@ -29,11 +36,18 @@ export function resolveBrowseReturnState(state: unknown): BrowseReturnState | nu
   }
 
   const restoreFocusPhotoId = state.restoreFocusPhotoId;
-  if (typeof restoreFocusPhotoId !== "string" || restoreFocusPhotoId.length === 0) {
+  const browseSelection = parseLibrarySelectionRouteState(state.browseSelection);
+  const hasRestoreFocusPhotoId =
+    typeof restoreFocusPhotoId === "string" && restoreFocusPhotoId.length > 0;
+
+  if (!hasRestoreFocusPhotoId && !browseSelection) {
     return null;
   }
 
-  return { restoreFocusPhotoId };
+  return {
+    restoreFocusPhotoId: hasRestoreFocusPhotoId ? restoreFocusPhotoId : undefined,
+    browseSelection: browseSelection ?? undefined
+  };
 }
 
 export function resolveDetailReturnState(state: unknown): DetailReturnState {
@@ -47,6 +61,10 @@ export function resolveDetailReturnState(state: unknown): DetailReturnState {
   }
   if (typeof state.returnFocusPhotoId === "string" && state.returnFocusPhotoId.length > 0) {
     returnState.returnFocusPhotoId = state.returnFocusPhotoId;
+  }
+  const browseSelection = parseLibrarySelectionRouteState(state.browseSelection);
+  if (browseSelection) {
+    returnState.browseSelection = browseSelection;
   }
 
   return returnState;
