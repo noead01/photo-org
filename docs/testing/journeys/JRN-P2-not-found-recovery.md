@@ -13,12 +13,12 @@ Users can recover from an unknown URL without losing orientation or global navig
 - Then the heading "Page Not Found" is shown in content
 - And primary navigation remains visible
 
-### Scenario 2: Recovery to Browse from not-found page
+### Scenario 2: Recovery to Library from not-found page
 
 - Given the user is on a not-found page
-- When the user selects `Browse` in primary navigation
-- Then the app navigates to `/browse`
-- And Browse page content is visible
+- When the user selects `Library` in primary navigation
+- Then the app navigates to `/library`
+- And Library page content is visible
 
 ## Out Of Scope
 
