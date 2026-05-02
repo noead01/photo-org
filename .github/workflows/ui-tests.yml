@@ -31,9 +31,9 @@ jobs:
       - name: Install UI dependencies
         working-directory: apps/ui
         run: npm ci
-      - name: Run Vitest unit suite
+      - name: Run Vitest unit coverage gate
         working-directory: apps/ui
-        run: npm run test
+        run: npm run test:coverage
 
   ui-e2e-smoke:
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group'

@@ -811,6 +811,224 @@ def test_face_correction_api_returns_422_for_missing_person_id(tmp_path, monkeyp
     assert any(error["loc"][-1] == "person_id" for error in response.json()["detail"])
 
 
+def test_face_confirmation_api_confirms_assigned_face_for_same_person(tmp_path, monkeypatch):
+    database_url = _database_url(tmp_path, "face-confirm-success.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        _insert_photo(connection, photo_id="photo-1")
+        _insert_person(connection, person_id="person-1", display_name="Jane Doe")
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id="person-1",
+            )
+        )
+
+    client = _authorized_client()
+    response = client.post(
+        "/api/v1/faces/face-1/confirmations",
+        json={"person_id": "person-1"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "face_id": "face-1",
+        "photo_id": "photo-1",
+        "person_id": "person-1",
+    }
+
+
+def test_face_confirmation_api_rejects_missing_face_validation_role(tmp_path, monkeypatch):
+    database_url = _database_url(tmp_path, "face-confirm-missing-role.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        _insert_photo(connection, photo_id="photo-1")
+        _insert_person(connection, person_id="person-1", display_name="Jane Doe")
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id="person-1",
+            )
+        )
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/faces/face-1/confirmations",
+        json={"person_id": "person-1"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Face validation role required"}
+
+
+def test_face_confirmation_api_persists_human_confirmed_face_label_provenance(
+    tmp_path, monkeypatch
+):
+    database_url = _database_url(tmp_path, "face-confirm-provenance.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        _insert_photo(connection, photo_id="photo-1")
+        _insert_person(connection, person_id="person-1", display_name="Jane Doe")
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id="person-1",
+            )
+        )
+
+    client = _authorized_client()
+    response = client.post(
+        "/api/v1/faces/face-1/confirmations",
+        json={"person_id": "person-1"},
+    )
+
+    assert response.status_code == 200
+    with engine.connect() as connection:
+        face_label_rows = connection.execute(
+            select(
+                face_labels.c.face_id,
+                face_labels.c.person_id,
+                face_labels.c.label_source,
+                face_labels.c.confidence,
+                face_labels.c.model_version,
+                face_labels.c.provenance,
+            )
+        ).mappings().all()
+    assert len(face_label_rows) == 1
+    assert face_label_rows[0]["face_id"] == "face-1"
+    assert face_label_rows[0]["person_id"] == "person-1"
+    assert face_label_rows[0]["label_source"] == "human_confirmed"
+    assert face_label_rows[0]["confidence"] is None
+    assert face_label_rows[0]["model_version"] is None
+    assert face_label_rows[0]["provenance"] == {
+        "workflow": "face-labeling",
+        "surface": "api",
+        "action": "confirmation",
+    }
+
+
+def test_face_confirmation_api_returns_409_when_face_is_unassigned(tmp_path, monkeypatch):
+    database_url = _database_url(tmp_path, "face-confirm-unassigned.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        _insert_photo(connection, photo_id="photo-1")
+        _insert_person(connection, person_id="person-1", display_name="Jane Doe")
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id=None,
+            )
+        )
+
+    client = _authorized_client()
+    response = client.post(
+        "/api/v1/faces/face-1/confirmations",
+        json={"person_id": "person-1"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Face is not assigned"
+
+
+def test_face_confirmation_api_returns_409_when_assigned_to_different_person(
+    tmp_path, monkeypatch
+):
+    database_url = _database_url(tmp_path, "face-confirm-different-person.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        _insert_photo(connection, photo_id="photo-1")
+        _insert_person(connection, person_id="person-1", display_name="Jane Doe")
+        _insert_person(connection, person_id="person-2", display_name="John Doe")
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id="person-1",
+            )
+        )
+
+    client = _authorized_client()
+    response = client.post(
+        "/api/v1/faces/face-1/confirmations",
+        json={"person_id": "person-2"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Face is assigned to a different person"
+
+
+def test_face_confirmation_api_returns_404_for_missing_person(tmp_path, monkeypatch):
+    database_url = _database_url(tmp_path, "face-confirm-missing-person.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        _insert_photo(connection, photo_id="photo-1")
+        _insert_person(connection, person_id="person-1", display_name="Jane Doe")
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id="person-1",
+            )
+        )
+
+    client = _authorized_client()
+    response = client.post(
+        "/api/v1/faces/face-1/confirmations",
+        json={"person_id": "missing-person"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Person not found"
+
+
+def test_face_confirmation_api_returns_404_for_missing_face(tmp_path, monkeypatch):
+    database_url = _database_url(tmp_path, "face-confirm-missing-face.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        _insert_person(connection, person_id="person-1", display_name="Jane Doe")
+
+    client = _authorized_client()
+    response = client.post(
+        "/api/v1/faces/missing-face/confirmations",
+        json={"person_id": "person-1"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Face not found"
+
+
 def test_photo_detail_api_includes_face_id_for_assignment_workflow(tmp_path, monkeypatch):
     database_url = _database_url(tmp_path, "face-assign-photo-detail.db")
     upgrade_database(database_url)
@@ -872,14 +1090,19 @@ def test_openapi_schema_includes_face_assignment_path_and_tag(tmp_path, monkeypa
 
     assert "/api/v1/faces/{face_id}/assignments" in schema["paths"]
     assert "/api/v1/faces/{face_id}/corrections" in schema["paths"]
+    assert "/api/v1/faces/{face_id}/confirmations" in schema["paths"]
     assert schema["paths"]["/api/v1/faces/{face_id}/assignments"]["post"]["responses"]["403"][
         "description"
     ] == "Face validation role required"
     assert schema["paths"]["/api/v1/faces/{face_id}/corrections"]["post"]["responses"]["403"][
         "description"
     ] == "Face validation role required"
+    assert schema["paths"]["/api/v1/faces/{face_id}/confirmations"]["post"]["responses"]["403"][
+        "description"
+    ] == "Face validation role required"
     assignment_parameters = schema["paths"]["/api/v1/faces/{face_id}/assignments"]["post"]["parameters"]
     correction_parameters = schema["paths"]["/api/v1/faces/{face_id}/corrections"]["post"]["parameters"]
+    confirmation_parameters = schema["paths"]["/api/v1/faces/{face_id}/confirmations"]["post"]["parameters"]
     assert any(
         parameter["in"] == "header" and parameter["name"] == FACE_VALIDATION_ROLE_HEADER
         for parameter in assignment_parameters
@@ -887,5 +1110,9 @@ def test_openapi_schema_includes_face_assignment_path_and_tag(tmp_path, monkeypa
     assert any(
         parameter["in"] == "header" and parameter["name"] == FACE_VALIDATION_ROLE_HEADER
         for parameter in correction_parameters
+    )
+    assert any(
+        parameter["in"] == "header" and parameter["name"] == FACE_VALIDATION_ROLE_HEADER
+        for parameter in confirmation_parameters
     )
     assert any(tag["name"] == "face-labeling" for tag in schema["tags"])

@@ -10,10 +10,12 @@ from app.dependencies import get_db, require_face_validation_role
 from app.services.face_assignment import (
     FaceAlreadyAssignedError,
     FaceAlreadyAssignedToPersonError,
+    FaceAssignedToDifferentPersonError,
     FaceNotAssignedError,
     FaceNotFoundError,
     PersonNotFoundError,
     auto_apply_face_suggestion,
+    confirm_face_assignment,
     record_review_needed_face_suggestion,
     assign_face_to_person,
     reassign_face_to_person,
@@ -72,6 +74,18 @@ class FaceCorrectionResponse(BaseModel):
     face_id: str
     photo_id: str
     previous_person_id: str
+    person_id: str
+
+
+class FaceConfirmationResponse(BaseModel):
+    """Confirmation result for one face assignment."""
+
+    model_config = ConfigDict(
+        json_schema_extra={"description": "Resolved face assignment confirmation details."}
+    )
+
+    face_id: str
+    photo_id: str
     person_id: str
 
 
@@ -206,6 +220,44 @@ def correct_face_assignment_endpoint(
 
     db.commit()
     return FaceCorrectionResponse.model_validate(correction)
+
+
+@router.post(
+    "/{face_id}/confirmations",
+    summary="Confirm face assignment",
+    description="Confirm an existing face assignment for the same person identity.",
+    response_model=FaceConfirmationResponse,
+    responses={
+        status.HTTP_403_FORBIDDEN: {"description": "Face validation role required"},
+        status.HTTP_404_NOT_FOUND: {"description": "Face or person not found"},
+        status.HTTP_409_CONFLICT: {
+            "description": "Face is unassigned or assigned to a different person"
+        },
+    },
+)
+def confirm_face_assignment_endpoint(
+    face_id: str,
+    body: AssignFaceRequest,
+    db: Session = Depends(get_db),
+    _: str = Depends(require_face_validation_role),
+) -> FaceConfirmationResponse:
+    try:
+        confirmation = confirm_face_assignment(
+            db.connection(),
+            face_id=face_id,
+            person_id=body.person_id,
+        )
+    except FaceNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PersonNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except FaceNotAssignedError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except FaceAssignedToDifferentPersonError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    db.commit()
+    return FaceConfirmationResponse.model_validate(confirmation)
 
 
 @router.get(
