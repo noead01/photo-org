@@ -100,6 +100,13 @@ describe("LibraryRoutePage", () => {
 
     expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Search query" })).toBeInTheDocument();
+    expect(screen.getByLabelText("From date")).toBeInTheDocument();
+    expect(screen.getByLabelText("To date")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Person filter" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Latitude")).toBeInTheDocument();
+    expect(screen.getByLabelText("Longitude")).toBeInTheDocument();
+    expect(screen.getByLabelText("Radius (km)")).toBeInTheDocument();
+    expect(screen.getByLabelText("Facet filters")).toBeInTheDocument();
     expect(await screen.findByRole("list", { name: "Photo gallery" })).toBeInTheDocument();
   });
 
