@@ -14,11 +14,24 @@ describe("Shell handoff expectations", () => {
 });
 
 describe("Navigation state", () => {
-  it("maps an exact primary route pathname to matching nav and context", () => {
-    const navigationState = resolveNavigationState("/search");
+  it("maps /library to the library primary route and uses it as fallback context", () => {
+    const libraryState = resolveNavigationState("/library");
 
-    expect(navigationState.activeRoute.key).toBe("search");
-    expect(navigationState.pageContext).toBe("Search");
+    expect(libraryState.activeRoute.key).toBe("library");
+    expect(libraryState.pageContext).toBe("Library");
+    expect(libraryState.usesFallback).toBe(false);
+
+    const unknownState = resolveNavigationState("/not-a-real-route");
+    expect(unknownState.activeRoute.key).toBe("library");
+    expect(unknownState.pageContext).toBe("Library");
+    expect(unknownState.usesFallback).toBe(true);
+  });
+
+  it("maps an exact primary route pathname to matching nav and context", () => {
+    const navigationState = resolveNavigationState("/library");
+
+    expect(navigationState.activeRoute.key).toBe("library");
+    expect(navigationState.pageContext).toBe("Library");
     expect(navigationState.usesFallback).toBe(false);
   });
 
@@ -33,8 +46,8 @@ describe("Navigation state", () => {
   it("falls back deterministically when pathname is unknown", () => {
     const navigationState = resolveNavigationState("/not-a-real-route");
 
-    expect(navigationState.activeRoute.key).toBe("browse");
-    expect(navigationState.pageContext).toBe("Browse");
+    expect(navigationState.activeRoute.key).toBe("library");
+    expect(navigationState.pageContext).toBe("Library");
     expect(navigationState.usesFallback).toBe(true);
   });
 });

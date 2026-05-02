@@ -9,7 +9,11 @@ import { PRIMARY_ROUTE_LOADING_LABELS } from "../pages/PrimaryRoutePage";
 const TEST_SESSION_IDENTITY: SessionIdentity = {
   userId: "test-operator",
   displayName: "Avery Operator",
-  email: "avery.operator@example.com"
+  email: "avery.operator@example.com",
+  capabilities: {
+    addToAlbum: true,
+    export: true
+  }
 };
 
 function renderAtPath(path: string, sessionIdentity: SessionIdentity | null = TEST_SESSION_IDENTITY) {
@@ -62,7 +66,7 @@ function expectShellContextText(text: string) {
 }
 
 const ROUTES_WITH_PRIMARY_PAGE_FEEDBACK = PRIMARY_ROUTE_DEFINITIONS.filter(
-  (route) => route.key !== "search" && route.key !== "labeling"
+  (route) => route.key !== "library" && route.key !== "labeling"
 );
 
 describe("App shell", () => {
@@ -103,29 +107,29 @@ describe("App shell", () => {
 
   it("keeps shell regions mounted while navigating between primary routes", async () => {
     const user = userEvent.setup();
-    renderAtPath("/browse");
+    renderAtPath("/library");
 
     const header = screen.getByRole("banner");
     const nav = screen.getByRole("navigation", { name: "Primary" });
 
-    await user.click(screen.getByRole("link", { name: "Search" }));
+    await user.click(screen.getByRole("link", { name: "Labeling" }));
 
     expect(screen.getByRole("banner")).toBe(header);
     expect(screen.getByRole("navigation", { name: "Primary" })).toBe(nav);
     expect(
       screen.getByRole("heading", {
-        name: "Search",
+        name: "Labeling",
         level: 1
       })
     ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Search" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("link", { name: "Browse" })).not.toHaveAttribute("aria-current");
-    expectShellContextText("Search");
+    expect(screen.getByRole("link", { name: "Labeling" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Library" })).not.toHaveAttribute("aria-current");
+    expectShellContextText("Labeling");
   });
 
   it("renders user identity and exposes keyboard-accessible account actions", async () => {
     const user = userEvent.setup();
-    renderAtPath("/browse");
+    renderAtPath("/library");
 
     expect(screen.getByText("Avery Operator")).toBeInTheDocument();
     expect(screen.getByText("avery.operator@example.com")).toBeInTheDocument();
@@ -139,7 +143,7 @@ describe("App shell", () => {
   });
 
   it("shows deterministic fallback when identity context is missing", () => {
-    renderAtPath("/browse", null);
+    renderAtPath("/library", null);
 
     expect(screen.getByText("Session unavailable")).toBeInTheDocument();
     expect(
@@ -151,7 +155,7 @@ describe("App shell", () => {
 
   it("switches to fallback state after sign-out entry point", async () => {
     const user = userEvent.setup();
-    renderAtPath("/search");
+    renderAtPath("/library");
 
     await user.click(screen.getByRole("button", { name: "Account actions" }));
     await user.click(screen.getByRole("button", { name: "Sign out" }));
@@ -162,15 +166,15 @@ describe("App shell", () => {
         name: "Account actions unavailable"
       })
     ).toBeDisabled();
-    expect(screen.getByRole("heading", { name: "Browse", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
   });
 
   it("uses deterministic fallback nav and context for unknown route paths", () => {
     renderAtPath("/unknown-route");
 
     expect(screen.getByRole("heading", { name: "Page Not Found", level: 1 })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Browse" })).toHaveAttribute("aria-current", "page");
-    expectShellContextText("Browse");
+    expect(screen.getByRole("link", { name: "Library" })).toHaveAttribute("aria-current", "page");
+    expectShellContextText("Library");
   });
 
   it.each(ROUTES_WITH_PRIMARY_PAGE_FEEDBACK)(
@@ -219,17 +223,18 @@ describe("App shell", () => {
     expect(screen.getByText("Operations is ready.")).toBeInTheDocument();
   });
 
-  it("renders search query controls on the /search route", async () => {
+  it("renders only Library as the discovery workflow route", async () => {
     fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({ hits: { total: 0, cursor: null, items: [] }, facets: {} })
     } as Response);
 
-    renderAtPath("/search");
+    renderAtPath("/library");
 
-    expect(await screen.findByRole("heading", { name: "Search", level: 1 })).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Search query" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Search" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Library" })).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByRole("link", { name: "Browse" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Search" })).not.toBeInTheDocument();
   });
 
   it("renders people-management controls on the /labeling route", async () => {

@@ -112,14 +112,14 @@ function buildPayload(partial: Partial<PhotoDetailPayload> = {}): PhotoDetailPay
   };
 }
 
-function renderDetail(path = "/browse/photo-1") {
+function renderDetail(path = "/library/photo-1") {
   return render(
     <MemoryRouter
       initialEntries={[path]}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
       <Routes>
-        <Route path="/browse/:photoId" element={<PhotoDetailRoutePage />} />
+        <Route path="/library/:photoId" element={<PhotoDetailRoutePage />} />
       </Routes>
     </MemoryRouter>
   );
@@ -508,6 +508,6 @@ describe("PhotoDetailRoutePage", () => {
 
     expect(await screen.findByRole("heading", { name: "Photo not found", level: 2 })).toBeInTheDocument();
     expect(screen.getByText("This photo is no longer available in the catalog.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Back to browse" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to library" })).toBeInTheDocument();
   });
 });

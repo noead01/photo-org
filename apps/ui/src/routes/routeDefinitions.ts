@@ -1,6 +1,5 @@
 export type PrimaryRouteKey =
-  | "browse"
-  | "search"
+  | "library"
   | "labeling"
   | "suggestions"
   | "operations";
@@ -37,19 +36,11 @@ const baseHandoffExpectation: ShellHandoffExpectations = {
 
 export const PRIMARY_ROUTE_DEFINITIONS: PrimaryRouteDefinition[] = [
   {
-    key: "browse",
-    path: "/browse",
-    navLabel: "Browse",
-    title: "Browse",
-    description: "Browse workflow surface placeholder.",
-    handoff: baseHandoffExpectation
-  },
-  {
-    key: "search",
-    path: "/search",
-    navLabel: "Search",
-    title: "Search",
-    description: "Search workflow surface placeholder.",
+    key: "library",
+    path: "/library",
+    navLabel: "Library",
+    title: "Library",
+    description: "Unified library workflow for search, scope, and actions.",
     handoff: baseHandoffExpectation
   },
   {

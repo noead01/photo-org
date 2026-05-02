@@ -1,19 +1,30 @@
+export interface SessionCapabilities {
+  addToAlbum: boolean;
+  export: boolean;
+}
+
 export interface SessionIdentity {
   userId: string;
   displayName: string;
   email: string;
+  capabilities: SessionCapabilities;
 }
 
 export const DEMO_SESSION_IDENTITY: SessionIdentity = {
   userId: "demo-operator",
   displayName: "Demo Operator",
-  email: "operator@photo-org.local"
+  email: "operator@photo-org.local",
+  capabilities: {
+    addToAlbum: false,
+    export: false
+  }
 };
 
 interface SessionIdentityBootstrapShape {
   userId?: unknown;
   displayName?: unknown;
   email?: unknown;
+  capabilities?: unknown;
 }
 
 declare global {
@@ -35,7 +46,20 @@ function isSessionIdentity(value: unknown): value is SessionIdentity {
     typeof candidate.displayName === "string" &&
     candidate.displayName.length > 0 &&
     typeof candidate.email === "string" &&
-    candidate.email.length > 0
+    candidate.email.length > 0 &&
+    isSessionCapabilities(candidate.capabilities)
+  );
+}
+
+function isSessionCapabilities(value: unknown): value is SessionCapabilities {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.addToAlbum === "boolean" &&
+    typeof candidate.export === "boolean"
   );
 }
 
