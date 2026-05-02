@@ -2,29 +2,29 @@
 
 ## Business Outcome
 
-Browse and Search share deterministic request lifecycle handling and result identity rendering as Library unification progresses.
+Library preserves deterministic request lifecycle handling and result identity rendering across unfiltered and filtered workflows.
 
 ## Acceptance Criteria
 
-### Scenario 1: Browse uses shared loading/error/retry lifecycle
+### Scenario 1: Library uses shared loading/error/retry lifecycle
 
-- Given the user opens `/browse`
+- Given the user opens `/library`
 - When a request is pending
-- Then Browse shows the route loading state
+- Then Library shows the route loading state
 - And a failed follow-up request shows retryable route error feedback
 - And selecting Retry restores ready results
 
-### Scenario 2: Browse resets invalid page state deterministically
+### Scenario 2: Library resets invalid page state deterministically
 
-- Given the user opens `/browse?page=3` without a valid cursor boundary
-- When Browse resolves pagination state
+- Given the user opens `/library?page=3` without a valid cursor boundary
+- When Library resolves pagination state
 - Then the route resets to page 1 and shows the invalid-page messaging
 
-### Scenario 3: Search uses shared loading/error/retry lifecycle and result identity
+### Scenario 3: Library filtered queries use shared loading/error/retry lifecycle and result identity
 
-- Given the user opens `/search` and submits a query
+- Given the user opens `/library` and submits a query
 - When a request is pending
-- Then Search shows the route loading state
+- Then Library shows the route loading state
 - And results render shared identity primitives (photo heading + path)
 - And a failed follow-up request shows retryable route error feedback
 - And selecting Retry restores ready results

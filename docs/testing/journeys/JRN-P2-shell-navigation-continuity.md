@@ -6,16 +6,16 @@ Users can navigate between primary sections without losing the persistent shell 
 
 ## Acceptance Criteria
 
-### Scenario 1: Browse to Search keeps shell frame mounted
+### Scenario 1: Library to Labeling keeps shell frame mounted
 
-- Given the user is on `/browse`
-- When the user selects `Search` from primary navigation
+- Given the user is on `/library`
+- When the user selects `Labeling` from primary navigation
 - Then the header and primary navigation remain visible
-- And the main content updates to the Search page title
+- And the main content updates to the Labeling page title
 
 ### Scenario 2: Shell route context updates with navigation
 
-- Given the user is on `/browse`
+- Given the user is on `/library`
 - When the user selects a different primary route
 - Then shell route context reflects the selected route
 
