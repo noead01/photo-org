@@ -5,13 +5,13 @@ import {
 
 export interface BrowseReturnState {
   restoreFocusPhotoId?: string;
-  browseSelection?: LibrarySelectionRouteState;
+  librarySelection?: LibrarySelectionRouteState;
 }
 
 export interface DetailReturnState {
-  returnToBrowseSearch?: string;
+  returnToLibrarySearch?: string;
   returnFocusPhotoId?: string;
-  browseSelection?: LibrarySelectionRouteState;
+  librarySelection?: LibrarySelectionRouteState;
 }
 
 let pendingBrowseFocusPhotoId: string | null = null;
@@ -36,17 +36,19 @@ export function resolveBrowseReturnState(state: unknown): BrowseReturnState | nu
   }
 
   const restoreFocusPhotoId = state.restoreFocusPhotoId;
-  const browseSelection = parseLibrarySelectionRouteState(state.browseSelection);
+  const librarySelection = parseLibrarySelectionRouteState(
+    state.librarySelection ?? state.browseSelection
+  );
   const hasRestoreFocusPhotoId =
     typeof restoreFocusPhotoId === "string" && restoreFocusPhotoId.length > 0;
 
-  if (!hasRestoreFocusPhotoId && !browseSelection) {
+  if (!hasRestoreFocusPhotoId && !librarySelection) {
     return null;
   }
 
   return {
     restoreFocusPhotoId: hasRestoreFocusPhotoId ? restoreFocusPhotoId : undefined,
-    browseSelection: browseSelection ?? undefined
+    librarySelection: librarySelection ?? undefined
   };
 }
 
@@ -56,15 +58,19 @@ export function resolveDetailReturnState(state: unknown): DetailReturnState {
   }
 
   const returnState: DetailReturnState = {};
-  if (typeof state.returnToBrowseSearch === "string") {
-    returnState.returnToBrowseSearch = state.returnToBrowseSearch;
+  if (typeof state.returnToLibrarySearch === "string") {
+    returnState.returnToLibrarySearch = state.returnToLibrarySearch;
+  } else if (typeof state.returnToBrowseSearch === "string") {
+    returnState.returnToLibrarySearch = state.returnToBrowseSearch;
   }
   if (typeof state.returnFocusPhotoId === "string" && state.returnFocusPhotoId.length > 0) {
     returnState.returnFocusPhotoId = state.returnFocusPhotoId;
   }
-  const browseSelection = parseLibrarySelectionRouteState(state.browseSelection);
-  if (browseSelection) {
-    returnState.browseSelection = browseSelection;
+  const librarySelection = parseLibrarySelectionRouteState(
+    state.librarySelection ?? state.browseSelection
+  );
+  if (librarySelection) {
+    returnState.librarySelection = librarySelection;
   }
 
   return returnState;

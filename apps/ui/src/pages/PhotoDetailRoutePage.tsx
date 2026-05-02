@@ -392,14 +392,14 @@ export function PhotoDetailRoutePage() {
         <Link
           className="detail-back-link"
           to={{
-            pathname: "/browse",
-            search: returnState.returnToBrowseSearch ?? ""
+            pathname: "/library",
+            search: returnState.returnToLibrarySearch ?? ""
           }}
           state={
-            backLinkFocusPhotoId || returnState.browseSelection
+            backLinkFocusPhotoId || returnState.librarySelection
               ? {
                   restoreFocusPhotoId: backLinkFocusPhotoId ?? undefined,
-                  browseSelection: returnState.browseSelection
+                  librarySelection: returnState.librarySelection
                 }
               : undefined
           }
@@ -409,7 +409,7 @@ export function PhotoDetailRoutePage() {
             }
           }}
         >
-          Back to browse
+          Back to library
         </Link>
       </div>
       <section className="status-legend" aria-label="Ingest status legend">

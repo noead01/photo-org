@@ -146,7 +146,9 @@ export function LibraryRoutePage() {
   const [selectionState, dispatchSelection] = useReducer(
     librarySelectionReducer,
     parseLibrarySelectionRouteState(
-      isRecord(location.state) ? location.state.browseSelection : undefined
+      isRecord(location.state)
+        ? location.state.librarySelection ?? location.state.browseSelection
+        : undefined
     ),
     createLibrarySelectionState
   );
@@ -205,7 +207,9 @@ export function LibraryRoutePage() {
 
   useEffect(() => {
     const currentRouteSelection = parseLibrarySelectionRouteState(
-      isRecord(location.state) ? location.state.browseSelection : undefined
+      isRecord(location.state)
+        ? location.state.librarySelection ?? location.state.browseSelection
+        : undefined
     );
 
     if (areSelectionRouteStatesEqual(currentRouteSelection, selectionRouteState)) {
@@ -222,7 +226,7 @@ export function LibraryRoutePage() {
         replace: true,
         state: {
           ...routeState,
-          browseSelection: selectionRouteState
+          librarySelection: selectionRouteState
         }
       }
     );
@@ -535,9 +539,9 @@ export function LibraryRoutePage() {
                           data-photo-id={photo.photo_id}
                           to={`/library/${photo.photo_id}`}
                           state={{
-                            returnToBrowseSearch: location.search,
+                            returnToLibrarySearch: location.search,
                             returnFocusPhotoId: photo.photo_id,
-                            browseSelection: selectionRouteState
+                            librarySelection: selectionRouteState
                           }}
                         >
                           {photo.photo_id}
