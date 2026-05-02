@@ -79,6 +79,23 @@ def test_process_queue_endpoint_rejects_wrong_worker_role(client: TestClient):
     assert response.json() == {"detail": "Worker role required"}
 
 
+def test_poll_storage_sources_endpoint_rejects_missing_worker_role(client: TestClient):
+    response = client.post("/api/v1/internal/storage-sources/poll")
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Worker role required"}
+
+
+def test_poll_storage_sources_endpoint_rejects_wrong_worker_role(client: TestClient):
+    response = client.post(
+        "/api/v1/internal/storage-sources/poll",
+        headers={"X-Worker-Role": "wrong-role"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Worker role required"}
+
+
 def test_process_queue_endpoint_forwards_limit_to_processor(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -112,6 +129,53 @@ def test_process_queue_endpoint_forwards_limit_to_processor(
         "processed": 0,
         "failed": 0,
         "retryable_errors": 0,
+    }
+
+
+def test_poll_storage_sources_endpoint_forwards_queue_process_limit(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    captured: dict[str, int] = {}
+
+    class Result:
+        scanned = 10
+        enqueued = 7
+        inserted = 3
+        updated = 2
+        queue_processed = 5
+        queue_failed = 1
+        queue_retryable_errors = 2
+        poll_errors = ("marker mismatch",)
+        error_count = 4
+
+    def fake_trigger_storage_source_polling(*, queue_process_limit: int = 100):
+        captured["queue_process_limit"] = queue_process_limit
+        return Result()
+
+    monkeypatch.setattr(
+        "app.routers.ingest_queue.trigger_storage_source_polling",
+        fake_trigger_storage_source_polling,
+    )
+
+    response = client.post(
+        "/api/v1/internal/storage-sources/poll",
+        headers={"X-Worker-Role": "ingest-processor"},
+        json={"queue_process_limit": 333},
+    )
+
+    assert response.status_code == 200
+    assert captured == {"queue_process_limit": 333}
+    assert response.json() == {
+        "scanned": 10,
+        "enqueued": 7,
+        "inserted": 3,
+        "updated": 2,
+        "processed": 5,
+        "failed": 1,
+        "retryable_errors": 2,
+        "error_count": 4,
+        "poll_errors": ["marker mismatch"],
     }
 
 

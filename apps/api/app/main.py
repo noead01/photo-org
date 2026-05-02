@@ -49,7 +49,7 @@ def create_app() -> FastAPI:
             },
             {
                 "name": "internal-ingest-queue",
-                "description": "Worker-only queue processing endpoint.",
+                "description": "Worker-only ingest polling and queue processing endpoints.",
             },
             {
                 "name": "operations",

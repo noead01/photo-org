@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { deriveIngestStatus } from "../../app/ingestStatus";
+import { deriveIngestStatus, INGEST_STATUS_LEGEND } from "../../app/ingestStatus";
 import { LibraryPhotoFacePanel } from "./LibraryPhotoFacePanel";
 import { PhotoResultIdentity } from "./PhotoResultIdentity";
 import {
@@ -16,6 +16,10 @@ interface LibraryPhotoGridProps {
   selectionRouteState: ReturnType<typeof serializeLibrarySelectionState>;
   onToggleSelection: (photoId: string) => void;
 }
+
+const INGEST_STATUS_LEGEND_TOOLTIP = INGEST_STATUS_LEGEND
+  .map((entry) => `${entry.label}: ${entry.description}`)
+  .join("\n");
 
 export function LibraryPhotoGrid({
   photos,
@@ -37,10 +41,13 @@ export function LibraryPhotoGrid({
         return (
           <li key={photo.photo_id} className="browse-card">
             <p className="browse-ingest-status">
-              <span className={`ingest-status-badge is-${ingestStatus.tone}`}>
+              <span
+                className={`ingest-status-badge is-${ingestStatus.tone}`}
+                title={INGEST_STATUS_LEGEND_TOOLTIP}
+                aria-label={`Ingest status ${ingestStatus.label}. Hover for full status legend.`}
+              >
                 {ingestStatus.label}
               </span>
-              <span className="browse-ingest-status-detail">{ingestStatus.description}</span>
             </p>
             <label className="browse-card-selection">
               <input

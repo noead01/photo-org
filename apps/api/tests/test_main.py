@@ -91,6 +91,17 @@ class TestHealthEndpoint:
         assert schema["paths"]["/api/v1/internal/ingest-queue/process"]["post"]["responses"]["403"][
             "description"
         ] == "Worker role required"
+        assert schema["paths"]["/api/v1/internal/storage-sources/poll"]["post"]["responses"]["403"][
+            "description"
+        ] == "Worker role required"
+        assert (
+            schema["paths"]["/api/v1/internal/storage-sources/poll"]["post"]["summary"]
+            == "Poll storage sources"
+        )
+        assert (
+            "internal-ingest-queue"
+            in schema["paths"]["/api/v1/internal/storage-sources/poll"]["post"]["tags"]
+        )
         assert (
             schema["paths"]["/api/v1/operations/activity"]["get"]["summary"]
             == "Get live operational activity"
