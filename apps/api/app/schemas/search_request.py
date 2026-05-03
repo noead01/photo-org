@@ -67,7 +67,20 @@ class SearchFilters(BaseModel):
     tags: Optional[List[str]] = None
     people: Optional[List[str]] = None
     person_names: Optional[List[str]] = None
+    person_certainty_mode: Optional[Literal["human_only", "include_suggestions"]] = None
+    suggestion_confidence_min: Optional[float] = None
     location_radius: Optional[LocationRadiusFilter] = None
+
+    @field_validator("suggestion_confidence_min")
+    @classmethod
+    def validate_suggestion_confidence_min(cls, value: Optional[float]) -> Optional[float]:
+        if value is None:
+            return None
+        if not math.isfinite(value):
+            raise ValueError("suggestion_confidence_min must be finite")
+        if value < 0 or value > 1:
+            raise ValueError("suggestion_confidence_min must be between 0 and 1")
+        return value
 
 
 class VectorSpec(BaseModel):

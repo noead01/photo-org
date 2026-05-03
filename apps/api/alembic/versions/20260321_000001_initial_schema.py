@@ -308,12 +308,88 @@ def upgrade() -> None:
         sa.Column("created_ts", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
         sa.Column("updated_ts", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
         sa.CheckConstraint(
-            "label_source IN ('human_confirmed', 'machine_applied', 'machine_suggested')",
+            "label_source IN ('human_confirmed', 'machine_suggested')",
             name="ck_face_labels_label_source",
         ),
     )
     op.create_index("idx_face_labels_face_id", "face_labels", ["face_id"], unique=False)
     op.create_index("idx_face_labels_person_id", "face_labels", ["person_id"], unique=False)
+
+    op.create_table(
+        "person_representations",
+        sa.Column(
+            "person_id",
+            sa.String(36),
+            sa.ForeignKey("people.person_id", ondelete="CASCADE"),
+            primary_key=True,
+        ),
+        sa.Column("centroid_embedding", sa.JSON(), nullable=True),
+        sa.Column("confirmed_face_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
+        sa.Column("dispersion_score", sa.Float(), nullable=True),
+        sa.Column("representation_version", sa.Integer(), nullable=False, server_default=sa.text("1")),
+        sa.Column(
+            "computed_ts",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+        sa.Column(
+            "model_version",
+            sa.String(),
+            nullable=False,
+            server_default=sa.text("'nearest-neighbor-cosine-v1'"),
+        ),
+        sa.Column("provenance", sa.JSON(), nullable=True),
+    )
+    op.create_index(
+        "idx_person_representations_computed_ts",
+        "person_representations",
+        ["computed_ts"],
+        unique=False,
+    )
+
+    op.create_table(
+        "face_suggestions",
+        sa.Column("face_suggestion_id", sa.String(36), primary_key=True),
+        sa.Column("face_id", sa.String(36), sa.ForeignKey("faces.face_id", ondelete="CASCADE"), nullable=False),
+        sa.Column("person_id", sa.String(36), sa.ForeignKey("people.person_id", ondelete="CASCADE"), nullable=False),
+        sa.Column("rank", sa.Integer(), nullable=False),
+        sa.Column("confidence", sa.Float(), nullable=False),
+        sa.Column("centroid_distance", sa.Float(), nullable=True),
+        sa.Column("knn_distance", sa.Float(), nullable=True),
+        sa.Column("representation_version", sa.Integer(), nullable=False, server_default=sa.text("1")),
+        sa.Column("scoring_version", sa.String(), nullable=False),
+        sa.Column("model_version", sa.String(), nullable=False),
+        sa.Column("provenance", sa.JSON(), nullable=True),
+        sa.Column("created_ts", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column("updated_ts", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.UniqueConstraint(
+            "face_id",
+            "person_id",
+            "representation_version",
+            "scoring_version",
+            name="uq_face_suggestions_face_person_version",
+        ),
+        sa.UniqueConstraint(
+            "face_id",
+            "rank",
+            "representation_version",
+            "scoring_version",
+            name="uq_face_suggestions_face_rank_version",
+        ),
+    )
+    op.create_index(
+        "idx_face_suggestions_face_id_updated_ts",
+        "face_suggestions",
+        ["face_id", "updated_ts"],
+        unique=False,
+    )
+    op.create_index(
+        "idx_face_suggestions_person_confidence",
+        "face_suggestions",
+        ["person_id", "confidence"],
+        unique=False,
+    )
 
     op.create_table(
         "ingest_runs",
@@ -400,6 +476,11 @@ def downgrade() -> None:
     op.drop_table("ingest_queue")
     op.drop_index("idx_ingest_runs_watched_folder_id", table_name="ingest_runs")
     op.drop_table("ingest_runs")
+    op.drop_index("idx_face_suggestions_person_confidence", table_name="face_suggestions")
+    op.drop_index("idx_face_suggestions_face_id_updated_ts", table_name="face_suggestions")
+    op.drop_table("face_suggestions")
+    op.drop_index("idx_person_representations_computed_ts", table_name="person_representations")
+    op.drop_table("person_representations")
     op.drop_index("idx_face_labels_person_id", table_name="face_labels")
     op.drop_index("idx_face_labels_face_id", table_name="face_labels")
     op.drop_table("face_labels")

@@ -5,6 +5,7 @@ export type FacetCountEntry = {
 
 export type SearchFacetPayload = {
   has_faces?: Record<string, unknown>;
+  people?: FacetCountEntry[];
   path_hints?: FacetCountEntry[];
   tags?: FacetCountEntry[];
 };

@@ -24,7 +24,6 @@ from sqlalchemy.engine import Connection, Engine
 
 EMBEDDING_DIMENSION = 128
 FACE_LABEL_SOURCE_HUMAN_CONFIRMED = "human_confirmed"
-FACE_LABEL_SOURCE_MACHINE_APPLIED = "machine_applied"
 FACE_LABEL_SOURCE_MACHINE_SUGGESTED = "machine_suggested"
 
 
@@ -228,8 +227,68 @@ face_labels = Table(
     Column("created_ts", TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
     Column("updated_ts", TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
     CheckConstraint(
-        "label_source IN ('human_confirmed', 'machine_applied', 'machine_suggested')",
+        "label_source IN ('human_confirmed', 'machine_suggested')",
         name="ck_face_labels_label_source",
+    ),
+)
+
+person_representations = Table(
+    "person_representations",
+    metadata,
+    Column(
+        "person_id",
+        String(36),
+        ForeignKey("people.person_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("centroid_embedding", JSON()),
+    Column("confirmed_face_count", Integer, nullable=False, server_default=text("0")),
+    Column("dispersion_score", Float),
+    Column("representation_version", Integer, nullable=False, server_default=text("1")),
+    Column(
+        "computed_ts",
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    Column(
+        "model_version",
+        String,
+        nullable=False,
+        server_default=text("'nearest-neighbor-cosine-v1'"),
+    ),
+    Column("provenance", JSON()),
+)
+
+face_suggestions = Table(
+    "face_suggestions",
+    metadata,
+    Column("face_suggestion_id", String(36), primary_key=True),
+    Column("face_id", String(36), ForeignKey("faces.face_id", ondelete="CASCADE"), nullable=False),
+    Column("person_id", String(36), ForeignKey("people.person_id", ondelete="CASCADE"), nullable=False),
+    Column("rank", Integer, nullable=False),
+    Column("confidence", Float, nullable=False),
+    Column("centroid_distance", Float),
+    Column("knn_distance", Float),
+    Column("representation_version", Integer, nullable=False, server_default=text("1")),
+    Column("scoring_version", String, nullable=False),
+    Column("model_version", String, nullable=False),
+    Column("provenance", JSON()),
+    Column("created_ts", TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+    Column("updated_ts", TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+    UniqueConstraint(
+        "face_id",
+        "person_id",
+        "representation_version",
+        "scoring_version",
+        name="uq_face_suggestions_face_person_version",
+    ),
+    UniqueConstraint(
+        "face_id",
+        "rank",
+        "representation_version",
+        "scoring_version",
+        name="uq_face_suggestions_face_rank_version",
     ),
 )
 
@@ -297,6 +356,9 @@ Index("idx_photo_files_photo_id", photo_files.c.photo_id)
 Index("idx_photo_tags_photo_id", photo_tags.c.photo_id)
 Index("idx_face_labels_face_id", face_labels.c.face_id)
 Index("idx_face_labels_person_id", face_labels.c.person_id)
+Index("idx_person_representations_computed_ts", person_representations.c.computed_ts)
+Index("idx_face_suggestions_face_id_updated_ts", face_suggestions.c.face_id, face_suggestions.c.updated_ts)
+Index("idx_face_suggestions_person_confidence", face_suggestions.c.person_id, face_suggestions.c.confidence)
 Index("idx_ingest_runs_watched_folder_id", ingest_runs.c.watched_folder_id)
 Index("idx_ingest_run_files_ingest_run_id", ingest_run_files.c.ingest_run_id)
 Index("idx_ingest_run_files_ingest_queue_id", ingest_run_files.c.ingest_queue_id)

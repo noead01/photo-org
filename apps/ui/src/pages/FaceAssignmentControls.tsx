@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-type FaceLabelSource = "human_confirmed" | "machine_applied" | "machine_suggested" | null;
+type FaceLabelSource = "human_confirmed" | "machine_suggested" | null;
 
 const NOT_AVAILABLE = "Not available";
 
@@ -81,9 +81,6 @@ function provenanceBadgeIcon(source: FaceLabelSource | undefined): string {
   if (source === "human_confirmed") {
     return "👤";
   }
-  if (source === "machine_applied") {
-    return "🤖";
-  }
   if (source === "machine_suggested") {
     return "💡";
   }
@@ -93,9 +90,6 @@ function provenanceBadgeIcon(source: FaceLabelSource | undefined): string {
 function provenanceSourceLabel(source: FaceLabelSource | undefined): string {
   if (source === "human_confirmed") {
     return "Human confirmed";
-  }
-  if (source === "machine_applied") {
-    return "Machine applied";
   }
   if (source === "machine_suggested") {
     return "Machine suggested";

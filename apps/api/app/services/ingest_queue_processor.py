@@ -20,8 +20,10 @@ from app.processing.ingest_persistence import (
     upsert_photo,
     upsert_source_photo,
 )
+from app.services.face_suggestions import refresh_face_suggestions_for_person_scope
 from app.services.file_reconciliation import activate_observed_file
 from app.services.ingest_extraction_worker import CandidateFileMissingError, process_candidate_payload
+from app.services.person_representations import refresh_person_representation
 from app.storage import photo_files
 
 PROCESSING_LEASE_SECONDS = _PROCESSING_LEASE_SECONDS
@@ -84,6 +86,7 @@ def process_pending_ingest_queue(
                         "photo_metadata",
                         "ingest_candidate",
                         "extracted_photo",
+                        "face_suggestion_recompute",
                     }:
                         error_detail = f"Unsupported payload_type: {claimed_row.payload_type}"
                         ingest_run_id, run_created_in_transaction = _ensure_ingest_run(
@@ -265,6 +268,16 @@ def _process_claimed_row(
     *,
     detector,
 ) -> tuple[bool | None, str | None]:
+    if claimed_row.payload_type == "face_suggestion_recompute":
+        person_id = str(claimed_row.payload_json["person_id"])
+        refresh_person_representation(connection, person_id=person_id)
+        refresh_face_suggestions_for_person_scope(
+            connection,
+            person_id=person_id,
+            limit=5,
+        )
+        return None, None
+
     if claimed_row.payload_type == "ingest_candidate":
         extraction = process_candidate_payload(
             database_url,

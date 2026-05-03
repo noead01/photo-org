@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-export type FaceLabelSource = "human_confirmed" | "machine_applied" | "machine_suggested" | null;
+export type FaceLabelSource = "human_confirmed" | "machine_suggested" | null;
 
 export type FaceBBoxOverlayFace = {
   face_id: string;

@@ -28,9 +28,6 @@ interface FaceCandidate {
 
 interface FaceCandidateLookupPayload {
   candidates?: FaceCandidate[];
-  auto_applied_assignment?: {
-    person_id?: string;
-  } | null;
 }
 
 interface PhotoFaceAssignmentModalProps {
@@ -185,13 +182,6 @@ export function PhotoFaceAssignmentModal({
 
         const nextCandidates = Array.isArray(payload.candidates) ? payload.candidates : [];
         setCandidates(nextCandidates);
-
-        const autoAssignedId = payload.auto_applied_assignment?.person_id ?? null;
-        if (autoAssignedId && autoAssignedId !== face.person_id) {
-          onFaceUpdated(face.face_id, autoAssignedId);
-          const candidateMatch = nextCandidates.find((candidate) => candidate.person_id === autoAssignedId);
-          setDraft(candidateMatch?.display_name ?? resolvePersonName(people, autoAssignedId));
-        }
       })
       .catch((caughtError: unknown) => {
         if (!controller.signal.aborted) {
@@ -207,7 +197,7 @@ export function PhotoFaceAssignmentModal({
     return () => {
       controller.abort();
     };
-  }, [face, isOpen, onFaceUpdated, people]);
+  }, [face, isOpen, people]);
 
   const peopleByName = useMemo(() => {
     const sorted = [...people].sort((left, right) => left.display_name.localeCompare(right.display_name, "en-US"));

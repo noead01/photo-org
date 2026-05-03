@@ -22,7 +22,7 @@ interface PhotoDetailPayload {
     bbox_h: number | null;
     bbox_space_width?: number | null;
     bbox_space_height?: number | null;
-    label_source: "human_confirmed" | "machine_applied" | "machine_suggested" | null;
+    label_source: "human_confirmed" | "machine_suggested" | null;
     confidence: number | null;
     model_version: string | null;
     provenance: Record<string, unknown> | null;
@@ -257,7 +257,7 @@ describe("PhotoDetailRoutePage", () => {
     renderDetail();
 
     expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Show details" }));
+    await user.click(await screen.findByRole("button", { name: "Show details" }));
 
     expect(screen.getByRole("button", { name: "Show all EXIF attributes" })).toBeInTheDocument();
     expect(screen.queryByText("exif.CustomNote")).not.toBeInTheDocument();
@@ -292,7 +292,7 @@ describe("PhotoDetailRoutePage", () => {
     renderDetail();
 
     expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Show details" }));
+    await user.click(await screen.findByRole("button", { name: "Show details" }));
     await user.click(screen.getByRole("button", { name: "Show all EXIF attributes" }));
 
     expect(screen.getByText("exif_ifd.MakerNote")).toBeInTheDocument();
@@ -653,6 +653,80 @@ describe("PhotoDetailRoutePage", () => {
 
     await user.click(await screen.findByLabelText("Face region 1 for person-1"));
     expect(await screen.findByRole("dialog", { name: "Face assignment" })).toBeInTheDocument();
+  });
+
+  it("does not auto-assign from candidates payload and only updates on explicit save", async () => {
+    const user = userEvent.setup();
+
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () =>
+          buildPayload({
+            people: [],
+            faces: [
+              {
+                face_id: "face-1",
+                person_id: null,
+                bbox_x: 10,
+                bbox_y: 10,
+                bbox_w: 20,
+                bbox_h: 20,
+                label_source: null,
+                confidence: null,
+                model_version: null,
+                provenance: null,
+                label_recorded_ts: null
+              }
+            ]
+          })
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            person_id: "person-1",
+            display_name: "Inez",
+            created_ts: "2026-03-28T19:30:00Z",
+            updated_ts: "2026-03-28T19:30:00Z"
+          },
+          {
+            person_id: "person-2",
+            display_name: "Mateo",
+            created_ts: "2026-03-28T19:30:00Z",
+            updated_ts: "2026-03-28T19:30:00Z"
+          }
+        ]
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          face_id: "face-1",
+          candidates: [
+            {
+              person_id: "person-1",
+              display_name: "Inez",
+              matched_face_id: "face-7",
+              distance: 0.09,
+              confidence: 0.87
+            }
+          ],
+          auto_applied_assignment: {
+            person_id: "person-2"
+          }
+        })
+      } as Response);
+
+    renderDetail();
+
+    expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
+    await user.click(
+      await screen.findByRole("button", { name: "Open face assignment for face region 1" })
+    );
+    expect(await screen.findByRole("dialog", { name: "Face assignment" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Assign person")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Open face assignment for face region 1" })).toHaveTextContent("?");
+    expect(screen.queryByText("person-2")).not.toBeInTheDocument();
   });
 
   it("opens a face-assignment modal from the overlay badge and assigns a person from suggestions", async () => {

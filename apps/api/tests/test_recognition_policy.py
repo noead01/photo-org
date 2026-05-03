@@ -39,8 +39,8 @@ def test_distance_to_confidence_clamps_into_zero_to_one(distance: float, expecte
     assert distance_to_confidence(distance) == pytest.approx(expected, abs=1e-6)
 
 
-def test_classify_suggestion_confidence_supports_three_policy_bands():
-    assert classify_suggestion_confidence(0.95, review_threshold=0.7, auto_accept_threshold=0.9) == "auto_apply"
+def test_classify_suggestion_confidence_uses_review_threshold_only_for_machine_suggestions():
+    assert classify_suggestion_confidence(0.95, review_threshold=0.7, auto_accept_threshold=0.9) == "review_needed"
     assert classify_suggestion_confidence(0.8, review_threshold=0.7, auto_accept_threshold=0.9) == "review_needed"
     assert classify_suggestion_confidence(0.6, review_threshold=0.7, auto_accept_threshold=0.9) == "no_suggestion"
 

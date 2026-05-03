@@ -2,6 +2,7 @@ import { isLibraryActionConflictActive } from "./operationsActivity";
 import { buildSearchFilters } from "./libraryRouteSearchState";
 import type {
   LibraryLocationRadius,
+  PersonCertaintyMode,
   PersonRecord,
   SearchResponsePayload,
   SortDirection
@@ -14,6 +15,8 @@ export async function fetchLibraryPage(
   fromDate: string,
   toDate: string,
   selectedPersonNames: string[],
+  personCertaintyMode: PersonCertaintyMode,
+  suggestionConfidenceMinDraft: string,
   locationRadius: LibraryLocationRadius | null,
   hasFaces: boolean | null,
   pathHints: string[],
@@ -24,6 +27,8 @@ export async function fetchLibraryPage(
     fromDate,
     toDate,
     selectedPersonNames,
+    personCertaintyMode,
+    suggestionConfidenceMinDraft,
     locationRadius,
     hasFaces,
     pathHints

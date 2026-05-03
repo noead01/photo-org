@@ -42,7 +42,12 @@ import {
   validateLocationDraft
 } from "./search/locationFilter";
 import type { LocationRadiusValue } from "./search/types";
-import type { LibraryPhoto, PersonRecord, SortDirection } from "./library/libraryRouteTypes";
+import type {
+  LibraryPhoto,
+  PersonCertaintyMode,
+  PersonRecord,
+  SortDirection
+} from "./library/libraryRouteTypes";
 
 const LIBRARY_FILTER_FINGERPRINT = "library:route";
 
@@ -61,6 +66,8 @@ export function LibraryRoutePage() {
         fromDate: parsedUrlState.fromDate,
         toDate: parsedUrlState.toDate,
         selectedPersonNames: parsedUrlState.selectedPersonNames,
+        personCertaintyMode: parsedUrlState.personCertaintyMode,
+        suggestionConfidenceMinDraft: parsedUrlState.suggestionConfidenceMinDraft,
         latitudeDraft: parsedUrlState.latitudeDraft,
         longitudeDraft: parsedUrlState.longitudeDraft,
         radiusDraft: parsedUrlState.radiusDraft,
@@ -78,6 +85,8 @@ export function LibraryRoutePage() {
   const [toDate, setToDate] = useState("");
   const [personDraft, setPersonDraft] = useState("");
   const [selectedPersonNames, setSelectedPersonNames] = useState<string[]>([]);
+  const [personCertaintyMode, setPersonCertaintyMode] = useState<PersonCertaintyMode>("human_only");
+  const [suggestionConfidenceMinDraft, setSuggestionConfidenceMinDraft] = useState("0.8");
   const [latitudeDraft, setLatitudeDraft] = useState("");
   const [longitudeDraft, setLongitudeDraft] = useState("");
   const [radiusDraft, setRadiusDraft] = useState("");
@@ -218,6 +227,8 @@ export function LibraryRoutePage() {
     setFromDate(parsedUrlState.fromDate);
     setToDate(parsedUrlState.toDate);
     setSelectedPersonNames(parsedUrlState.selectedPersonNames);
+    setPersonCertaintyMode(parsedUrlState.personCertaintyMode);
+    setSuggestionConfidenceMinDraft(parsedUrlState.suggestionConfidenceMinDraft);
     setPersonDraft("");
     setPersonMessage(null);
     setLatitudeDraft(parsedUrlState.latitudeDraft);
@@ -250,6 +261,8 @@ export function LibraryRoutePage() {
       fromDate,
       toDate,
       selectedPersonNames,
+      personCertaintyMode,
+      suggestionConfidenceMinDraft,
       locationRadius: locationRadiusFilter,
       hasFacesFilter,
       pathHintFilters,
@@ -283,6 +296,8 @@ export function LibraryRoutePage() {
     pathHintFilters,
     requestedPage,
     selectedPersonNames,
+    personCertaintyMode,
+    suggestionConfidenceMinDraft,
     toDate
   ]);
 
@@ -341,6 +356,8 @@ export function LibraryRoutePage() {
       fromDate,
       toDate,
       selectedPersonNames,
+      personCertaintyMode,
+      suggestionConfidenceMinDraft,
       locationRadiusFilter,
       hasFacesFilter,
       pathHintFilters,
@@ -389,6 +406,8 @@ export function LibraryRoutePage() {
     reloadToken,
     requestedPage,
     selectedPersonNames,
+    personCertaintyMode,
+    suggestionConfidenceMinDraft,
     sortDirection,
     toDate
   ]);
@@ -608,6 +627,8 @@ export function LibraryRoutePage() {
         fromDate,
         toDate,
         selectedPersonNames,
+        personCertaintyMode,
+        suggestionConfidenceMinDraft,
         locationRadiusFilter,
         hasFacesFilter,
         pathHintFilters,
@@ -656,6 +677,8 @@ export function LibraryRoutePage() {
         toDate={toDate}
         personDraft={personDraft}
         selectedPersonNames={selectedPersonNames}
+        personCertaintyMode={personCertaintyMode}
+        suggestionConfidenceMinDraft={suggestionConfidenceMinDraft}
         latitudeDraft={latitudeDraft}
         longitudeDraft={longitudeDraft}
         radiusDraft={radiusDraft}
@@ -692,6 +715,16 @@ export function LibraryRoutePage() {
         onPersonDraftChange={setPersonDraft}
         onAddPersonFilter={handleAddPersonFilter}
         onAddPersonByName={handleAddPersonByName}
+        onPersonCertaintyModeChange={(value) => {
+          setPersonCertaintyMode(value);
+          setCursorByPage({ 1: null });
+          setPage(1);
+        }}
+        onSuggestionConfidenceMinDraftChange={(value) => {
+          setSuggestionConfidenceMinDraft(value);
+          setCursorByPage({ 1: null });
+          setPage(1);
+        }}
         onLatitudeDraftChange={(value) => {
           setLatitudeDraft(value);
           setCursorByPage({ 1: null });
