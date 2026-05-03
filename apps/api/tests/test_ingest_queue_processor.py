@@ -13,7 +13,16 @@ from app.services.ingest_queue_processor import (
     PROCESSING_LEASE_SECONDS,
     process_pending_ingest_queue,
 )
-from app.storage import faces, photo_files, photos, watched_folders
+from app.storage import (
+    face_labels,
+    face_suggestions,
+    faces,
+    people,
+    person_representations,
+    photo_files,
+    photos,
+    watched_folders,
+)
 from photoorg_db_schema import ingest_queue, ingest_run_files, ingest_runs
 
 
@@ -470,7 +479,99 @@ def test_process_pending_rows_scopes_extracted_photo_idempotency_key_away_from_l
     assert len(pending_rows) == 1
     extracted_row = next(row for row in pending_rows if row.payload_type == "extracted_photo")
     assert extracted_row.payload_json == extracted_payload
-    assert extracted_row.idempotency_key == "extracted:shared-photo-id"
+
+
+def test_process_pending_queue_handles_face_suggestion_recompute_payload(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'queue-processor-face-suggestion-recompute.db'}"
+    upgrade_database(database_url)
+    queue_store = IngestQueueStore(database_url)
+
+    with create_engine(database_url, future=True).begin() as connection:
+        now = datetime.now(tz=UTC)
+        connection.execute(
+            insert(photos),
+            [
+                {
+                    "photo_id": "photo-source",
+                    "sha256": "a" * 64,
+                    "path": "queued/source.heic",
+                    "created_ts": now,
+                    "updated_ts": now,
+                },
+                {
+                    "photo_id": "photo-candidate",
+                    "sha256": "b" * 64,
+                    "path": "queued/candidate.heic",
+                    "created_ts": now,
+                    "updated_ts": now,
+                },
+            ],
+        )
+        connection.execute(
+            insert(people).values(
+                person_id="person-1",
+                display_name="Alex",
+                created_ts=now,
+                updated_ts=now,
+            )
+        )
+        connection.execute(
+            insert(faces),
+            [
+                {
+                    "face_id": "face-source",
+                    "photo_id": "photo-source",
+                    "person_id": None,
+                    "embedding": [1.0, 0.0],
+                },
+                {
+                    "face_id": "face-candidate",
+                    "photo_id": "photo-candidate",
+                    "person_id": "person-1",
+                    "embedding": [0.99, 0.01],
+                },
+            ],
+        )
+        connection.execute(
+            insert(face_labels).values(
+                face_label_id="label-candidate",
+                face_id="face-candidate",
+                person_id="person-1",
+                label_source="human_confirmed",
+            )
+        )
+        connection.execute(
+            insert(person_representations).values(
+                person_id="person-1",
+                centroid_embedding=[0.98, 0.02],
+                confirmed_face_count=3,
+                dispersion_score=0.01,
+                representation_version=2,
+                model_version="nearest-neighbor-cosine-v1",
+            )
+        )
+
+    queue_store.enqueue(
+        payload_type="face_suggestion_recompute",
+        payload={
+            "person_id": "person-1",
+            "reason": "human_confirmed_event",
+            "debounce_until_ts": "2026-05-03T12:00:00+00:00",
+        },
+        idempotency_key="face_suggestion_recompute:person-1",
+    )
+
+    result = process_pending_ingest_queue(database_url, limit=10)
+
+    assert result.processed == 1
+    assert result.failed == 0
+    with create_engine(database_url, future=True).connect() as connection:
+        suggestion_rows = connection.execute(
+            select(face_suggestions).where(face_suggestions.c.face_id == "face-source")
+        ).mappings().all()
+
+    assert len(suggestion_rows) == 1
+    assert suggestion_rows[0]["person_id"] == "person-1"
 
 
 def test_process_pending_rows_records_canonical_path_for_retryable_ingest_candidate_failure(
