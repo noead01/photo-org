@@ -65,6 +65,7 @@ class PhotosRepository:
         self.people: Table = Table("people", md, autoload_with=bind)
         self.photo_tags: Table = Table("photo_tags", md, autoload_with=bind)
         self.face_labels: Table = Table("face_labels", md, autoload_with=bind)
+        self.face_suggestions: Table = Table("face_suggestions", md, autoload_with=bind)
         self.photo_files: Table = Table("photo_files", md, autoload_with=bind)
         self.photo_exif_attributes: Table = Table("photo_exif_attributes", md, autoload_with=bind)
         self.exif_semantic_mappings: Table = Table("exif_semantic_mappings", md, autoload_with=bind)
@@ -84,6 +85,162 @@ class PhotosRepository:
     @staticmethod
     def _escape_like_literal(term: str) -> str:
         return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+    @staticmethod
+    def _suggestion_confidence_threshold(filters: SearchFilters) -> float:
+        return float(filters.suggestion_confidence_min) if filters.suggestion_confidence_min is not None else 0.0
+
+    def _build_people_filter_clause(self, filters: SearchFilters):
+        person_ids = filters.people or []
+        if not person_ids:
+            return None
+
+        person_certainty_mode = filters.person_certainty_mode
+        if person_certainty_mode is None:
+            people_subquery = select(self.faces.c.photo_id).where(
+                and_(
+                    self.faces.c.photo_id == self.photos.c.photo_id,
+                    self.faces.c.person_id.in_(person_ids),
+                )
+            ).limit(1)
+            return people_subquery.exists()
+
+        confirmed_match_exists = (
+            select(self.faces.c.photo_id)
+            .select_from(
+                self.faces.join(
+                    self.face_labels,
+                    and_(
+                        self.face_labels.c.face_id == self.faces.c.face_id,
+                        self.face_labels.c.person_id == self.faces.c.person_id,
+                    ),
+                )
+            )
+            .where(
+                and_(
+                    self.faces.c.photo_id == self.photos.c.photo_id,
+                    self.face_labels.c.person_id.in_(person_ids),
+                    self.face_labels.c.label_source == "human_confirmed",
+                )
+            )
+            .limit(1)
+            .exists()
+        )
+
+        if person_certainty_mode == "human_only":
+            return confirmed_match_exists
+
+        if person_certainty_mode == "include_suggestions":
+            suggestion_match_exists = (
+                select(self.faces.c.photo_id)
+                .select_from(
+                    self.faces.join(
+                        self.face_suggestions,
+                        self.face_suggestions.c.face_id == self.faces.c.face_id,
+                    )
+                )
+                .where(
+                    and_(
+                        self.faces.c.photo_id == self.photos.c.photo_id,
+                        self.face_suggestions.c.person_id.in_(person_ids),
+                        self.face_suggestions.c.confidence >= self._suggestion_confidence_threshold(filters),
+                    )
+                )
+                .limit(1)
+                .exists()
+            )
+            return or_(confirmed_match_exists, suggestion_match_exists)
+
+        return None
+
+    def _build_person_name_filter_clause(self, filters: SearchFilters):
+        person_name_terms = self._normalize_person_name_terms(filters.person_names or [])
+        if not person_name_terms:
+            return None
+
+        person_name_predicate = or_(
+            *[
+                self.people.c.display_name.ilike(
+                    f"%{self._escape_like_literal(name)}%",
+                    escape="\\",
+                )
+                for name in person_name_terms
+            ]
+        )
+
+        person_certainty_mode = filters.person_certainty_mode
+        if person_certainty_mode is None:
+            person_name_subquery = (
+                select(self.faces.c.photo_id)
+                .select_from(
+                    self.faces.join(
+                        self.people,
+                        self.faces.c.person_id == self.people.c.person_id,
+                    )
+                )
+                .where(
+                    and_(
+                        self.faces.c.photo_id == self.photos.c.photo_id,
+                        person_name_predicate,
+                    )
+                )
+                .limit(1)
+            )
+            return person_name_subquery.exists()
+
+        confirmed_match_exists = (
+            select(self.faces.c.photo_id)
+            .select_from(
+                self.faces.join(
+                    self.people,
+                    self.faces.c.person_id == self.people.c.person_id,
+                ).join(
+                    self.face_labels,
+                    and_(
+                        self.face_labels.c.face_id == self.faces.c.face_id,
+                        self.face_labels.c.person_id == self.faces.c.person_id,
+                    ),
+                )
+            )
+            .where(
+                and_(
+                    self.faces.c.photo_id == self.photos.c.photo_id,
+                    self.face_labels.c.label_source == "human_confirmed",
+                    person_name_predicate,
+                )
+            )
+            .limit(1)
+            .exists()
+        )
+
+        if person_certainty_mode == "human_only":
+            return confirmed_match_exists
+
+        if person_certainty_mode == "include_suggestions":
+            suggestion_match_exists = (
+                select(self.faces.c.photo_id)
+                .select_from(
+                    self.faces.join(
+                        self.face_suggestions,
+                        self.face_suggestions.c.face_id == self.faces.c.face_id,
+                    ).join(
+                        self.people,
+                        self.face_suggestions.c.person_id == self.people.c.person_id,
+                    )
+                )
+                .where(
+                    and_(
+                        self.faces.c.photo_id == self.photos.c.photo_id,
+                        self.face_suggestions.c.confidence >= self._suggestion_confidence_threshold(filters),
+                        person_name_predicate,
+                    )
+                )
+                .limit(1)
+                .exists()
+            )
+            return or_(confirmed_match_exists, suggestion_match_exists)
+
+        return None
 
     def search_photos(self, filters: SearchFilters, sort: SortSpec, page: PageSpec,
                      text_query: Optional[str] = None) -> Tuple[List[Dict[str, Any]], int, Optional[str]]:
@@ -504,43 +661,13 @@ class PhotosRepository:
             ).limit(1)
             where_conditions.append(~faces_subquery.exists())
         
-        # People filter (OR logic within people)
-        if filters.people:
-            people_subquery = select(self.faces.c.photo_id).where(
-                and_(
-                    self.faces.c.photo_id == self.photos.c.photo_id,
-                    self.faces.c.person_id.in_(filters.people)
-                )
-            ).limit(1)
-            where_conditions.append(people_subquery.exists())
+        people_clause = self._build_people_filter_clause(filters)
+        if people_clause is not None:
+            where_conditions.append(people_clause)
 
-        person_name_terms = self._normalize_person_name_terms(filters.person_names or [])
-        if person_name_terms:
-            person_name_subquery = (
-                select(self.faces.c.photo_id)
-                .select_from(
-                    self.faces.join(
-                        self.people,
-                        self.faces.c.person_id == self.people.c.person_id,
-                    )
-                )
-                .where(
-                    and_(
-                        self.faces.c.photo_id == self.photos.c.photo_id,
-                        or_(
-                            *[
-                                self.people.c.display_name.ilike(
-                                    f"%{self._escape_like_literal(name)}%",
-                                    escape="\\",
-                                )
-                                for name in person_name_terms
-                            ]
-                        ),
-                    )
-                )
-                .limit(1)
-            )
-            where_conditions.append(person_name_subquery.exists())
+        person_name_clause = self._build_person_name_filter_clause(filters)
+        if person_name_clause is not None:
+            where_conditions.append(person_name_clause)
         
         # Tags filter (OR logic within tags)
         if filters.tags:
@@ -846,13 +973,16 @@ class PhotosRepository:
             }
         return availability
 
-    def compute_facets(self, filtered_photo_ids: List[str]) -> Dict[str, Any]:
+    def compute_facets(self, filtered_photo_ids: List[str], filters: SearchFilters | None = None) -> Dict[str, Any]:
         """Compute facets for the filtered photo set."""
         context = FacetContext(
             db=self.db,
             photo_tags=self.photo_tags,
             faces=self.faces,
-            photos=self.photos
+            photos=self.photos,
+            face_labels=self.face_labels,
+            face_suggestions=self.face_suggestions,
+            filters=filters,
         )
         
         tags_facet = TagsFacet()

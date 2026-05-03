@@ -192,6 +192,112 @@ class PeopleFacet(SimpleCountFacet):
     def __init__(self):
         super().__init__("people", "faces", "person_id")
 
+    def compute(self, filtered_photo_ids: List[str], context: 'FacetContext') -> FacetResult:
+        if not filtered_photo_ids:
+            return FacetResult(
+                facet_name=self.name,
+                facet_type=self.facet_type,
+                values=[],
+                total_count=0,
+            )
+
+        filters = getattr(context, "filters", None)
+        mode = getattr(filters, "person_certainty_mode", None)
+        suggestion_confidence_min = float(getattr(filters, "suggestion_confidence_min", 0.0) or 0.0)
+
+        from sqlalchemy import select, func, and_, union_all
+
+        if mode == "human_only":
+            query = (
+                select(
+                    context.face_labels.c.person_id,
+                    func.count(func.distinct(context.faces.c.photo_id)),
+                )
+                .select_from(
+                    context.faces.join(
+                        context.face_labels,
+                        and_(
+                            context.face_labels.c.face_id == context.faces.c.face_id,
+                            context.face_labels.c.person_id == context.faces.c.person_id,
+                        ),
+                    )
+                )
+                .where(
+                    and_(
+                        context.faces.c.photo_id.in_(filtered_photo_ids),
+                        context.face_labels.c.label_source == "human_confirmed",
+                    )
+                )
+                .group_by(context.face_labels.c.person_id)
+            )
+            rows = context.db.execute(query).all()
+        elif mode == "include_suggestions":
+            confirmed_pairs = (
+                select(
+                    context.faces.c.photo_id.label("photo_id"),
+                    context.face_labels.c.person_id.label("person_id"),
+                )
+                .select_from(
+                    context.faces.join(
+                        context.face_labels,
+                        and_(
+                            context.face_labels.c.face_id == context.faces.c.face_id,
+                            context.face_labels.c.person_id == context.faces.c.person_id,
+                        ),
+                    )
+                )
+                .where(
+                    and_(
+                        context.faces.c.photo_id.in_(filtered_photo_ids),
+                        context.face_labels.c.label_source == "human_confirmed",
+                    )
+                )
+                .group_by(context.faces.c.photo_id, context.face_labels.c.person_id)
+            )
+            suggested_pairs = (
+                select(
+                    context.faces.c.photo_id.label("photo_id"),
+                    context.face_suggestions.c.person_id.label("person_id"),
+                )
+                .select_from(
+                    context.faces.join(
+                        context.face_suggestions,
+                        context.face_suggestions.c.face_id == context.faces.c.face_id,
+                    )
+                )
+                .where(
+                    and_(
+                        context.faces.c.photo_id.in_(filtered_photo_ids),
+                        context.face_suggestions.c.confidence >= suggestion_confidence_min,
+                    )
+                )
+                .group_by(context.faces.c.photo_id, context.face_suggestions.c.person_id)
+            )
+            combined_pairs = union_all(confirmed_pairs, suggested_pairs).subquery()
+            query = (
+                select(
+                    combined_pairs.c.person_id,
+                    func.count(func.distinct(combined_pairs.c.photo_id)),
+                )
+                .group_by(combined_pairs.c.person_id)
+            )
+            rows = context.db.execute(query).all()
+        else:
+            return super().compute(filtered_photo_ids, context)
+
+        values = [
+            FacetValue(value=value, count=int(count))
+            for value, count in rows
+            if value is not None
+        ]
+        values.sort(key=lambda v: v.count, reverse=True)
+        return FacetResult(
+            facet_name=self.name,
+            facet_type=self.facet_type,
+            values=values,
+            total_count=sum(v.count for v in values),
+        )
+
 
 class DuplicatesFacet(Facet):
     """Facet for duplicate photo statistics."""
@@ -309,9 +415,11 @@ class FacetContext:
     photo_tags: Any  # photo_tags table
     faces: Any  # faces table  
     photos: Any  # photos table
+    face_labels: Optional[Any] = None  # face_labels table
+    face_suggestions: Optional[Any] = None  # face_suggestions table
     queries: Optional[Any] = None  # Query builder object
     cache: Optional[Any] = None  # Optional cache
-    filters: Optional[Dict[str, Any]] = None  # Current filters for drill-sideways
+    filters: Optional[Any] = None  # Current request filters for facet semantics
 
 
 class FacetRegistry:

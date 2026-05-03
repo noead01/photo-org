@@ -1,4 +1,5 @@
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 from sqlalchemy import Column, DateTime, MetaData, String, Table
@@ -33,6 +34,7 @@ def _make_faces_table():
     return Table(
         "faces",
         metadata,
+        Column("face_id", String),
         Column("photo_id", String),
         Column("person_id", String),
     )
@@ -48,12 +50,37 @@ def _make_photo_tags_table():
     )
 
 
-def _make_context(db, photos=None, faces=None, photo_tags=None):
+def _make_face_labels_table():
+    metadata = MetaData()
+    return Table(
+        "face_labels",
+        metadata,
+        Column("face_id", String),
+        Column("person_id", String),
+        Column("label_source", String),
+    )
+
+
+def _make_face_suggestions_table():
+    metadata = MetaData()
+    return Table(
+        "face_suggestions",
+        metadata,
+        Column("face_id", String),
+        Column("person_id", String),
+        Column("confidence", String),
+    )
+
+
+def _make_context(db, photos=None, faces=None, photo_tags=None, face_labels=None, face_suggestions=None, filters=None):
     return FacetContext(
         db=db,
         photos=photos or _make_photos_table(),
         faces=faces or _make_faces_table(),
         photo_tags=photo_tags or _make_photo_tags_table(),
+        face_labels=face_labels or _make_face_labels_table(),
+        face_suggestions=face_suggestions or _make_face_suggestions_table(),
+        filters=filters,
     )
 
 
@@ -182,6 +209,30 @@ class TestPeopleFacetLogic:
 
         assert len(result.values) == 1
         assert result.values[0].value == "person_ines"
+
+    def test_people_facet_certainty_mode_human_only(self):
+        facet = PeopleFacet()
+        mock_db = Mock()
+        mock_db.execute.return_value.all.return_value = [("person_ines", 3)]
+        filters = SimpleNamespace(person_certainty_mode="human_only", suggestion_confidence_min=None)
+
+        result = facet.compute(["photo1", "photo2", "photo3"], _make_context(mock_db, filters=filters))
+
+        assert len(result.values) == 1
+        assert result.values[0].value == "person_ines"
+        assert result.values[0].count == 3
+
+    def test_people_facet_certainty_mode_include_suggestions_respects_suggestion_confidence(self):
+        facet = PeopleFacet()
+        mock_db = Mock()
+        mock_db.execute.return_value.all.return_value = [("person_ines", 2), ("person_mateo", 1)]
+        filters = SimpleNamespace(person_certainty_mode="include_suggestions", suggestion_confidence_min=0.8)
+
+        result = facet.compute(["photo1", "photo2", "photo3"], _make_context(mock_db, filters=filters))
+
+        assert len(result.values) == 2
+        assert result.values[0].value == "person_ines"
+        assert result.values[0].count == 2
 
 
 class TestTagsFacetLogic:

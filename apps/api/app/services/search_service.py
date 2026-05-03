@@ -23,7 +23,7 @@ class SearchService:
         filtered_photo_ids = self.repo.get_filtered_photo_ids(req.filters, req.q)
 
         # Compute facets using the repository
-        facets = self.repo.compute_facets(filtered_photo_ids)
+        facets = self.repo.compute_facets(filtered_photo_ids, req.filters)
 
         return SearchResponse(
             hits=Hits(total=total, items=[PhotoHit(**item) for item in items], cursor=next_cursor),
