@@ -61,7 +61,7 @@ def test_shot_ts_source_reports_semantic_alias_origin():
 def test_shot_ts_source_prefers_datetime_original_then_datetime_then_generic_exif():
     shot_ts = "2024-03-21T10:11:12+00:00"
 
-    assert metadata._shot_ts_source(shot_ts, {}, {"DateTimeOriginal": "x"}) == "exif:DateTimeOriginal"
+    assert metadata._shot_ts_source(shot_ts, {}, {"DateTimeOriginal": "x"}) == "exif_ifd:DateTimeOriginal"
     assert metadata._shot_ts_source(shot_ts, {"DateTime": "x"}, {}) == "exif:DateTime"
     assert metadata._shot_ts_source(shot_ts, {}, {}) == "exif"
     assert metadata._shot_ts_source(None, {"DateTime": "x"}, {"DateTimeOriginal": "x"}) is None

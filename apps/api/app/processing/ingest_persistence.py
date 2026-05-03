@@ -743,10 +743,9 @@ def _valid_offset(value: str) -> bool:
 def _shot_source_label(attribute_name: str | None) -> str | None:
     if attribute_name is None:
         return None
-    if attribute_name == "exif_ifd.DateTimeOriginal":
-        return "exif:DateTimeOriginal"
-    if attribute_name == "exif.DateTime":
-        return "exif:DateTime"
+    if attribute_name.startswith("exif_ifd.") or attribute_name.startswith("exif."):
+        namespace, tag_name = attribute_name.split(".", 1)
+        return f"{namespace}:{tag_name}"
     return f"exif_attr:{attribute_name}"
 
 

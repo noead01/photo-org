@@ -48,6 +48,7 @@ interface PhotoDetailPayload {
     gps_latitude: number | null;
     gps_longitude: number | null;
     gps_altitude: number | null;
+    exif_attributes: Record<string, unknown> | null;
     created_ts: string;
     updated_ts: string;
     modified_ts: string | null;
@@ -99,12 +100,16 @@ function buildPayload(partial: Partial<PhotoDetailPayload> = {}): PhotoDetailPay
     metadata: {
       sha256: "sha-1",
       phash: "phash-1",
-      shot_ts_source: "exif:DateTimeOriginal",
+      shot_ts_source: "exif_ifd:DateTimeOriginal",
       camera_model: "iPhone 15 Pro",
       software: "18.1",
       gps_latitude: 12.3456,
       gps_longitude: -45.6789,
       gps_altitude: 123.4,
+      exif_attributes: {
+        "exif.DateTime": "2026:03:28 19:30:00",
+        "exif_ifd.DateTimeOriginal": "2026:03:28 19:30:00"
+      },
       created_ts: "2026-03-28T19:30:00Z",
       updated_ts: "2026-03-28T19:30:00Z",
       modified_ts: "2026-03-28T19:30:00Z",
@@ -166,7 +171,7 @@ describe("PhotoDetailRoutePage", () => {
     expect(screen.getByText("photo-1")).toBeInTheDocument();
     expect(screen.getByText("/library/photo-1.jpg")).toBeInTheDocument();
     expect(screen.getByText("iPhone 15 Pro")).toBeInTheDocument();
-    expect(screen.getByText("exif:DateTimeOriginal")).toBeInTheDocument();
+    expect(screen.getByText("exif_ifd:DateTimeOriginal")).toBeInTheDocument();
     expect(screen.getByText("12.3456, -45.6789")).toBeInTheDocument();
     expect(screen.getByText("1 detected")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Preview for photo-1" })).toBeInTheDocument();
@@ -197,6 +202,7 @@ describe("PhotoDetailRoutePage", () => {
             gps_latitude: null,
             gps_longitude: null,
             gps_altitude: null,
+            exif_attributes: null,
             modified_ts: null,
             faces_detected_ts: null
           }
@@ -209,6 +215,41 @@ describe("PhotoDetailRoutePage", () => {
     expect(screen.getByText("No tags")).toBeInTheDocument();
     expect(screen.getByText("No recognized people")).toBeInTheDocument();
     expect(screen.getByText("Unknown availability")).toBeInTheDocument();
+  });
+
+  it("keeps EXIF attributes collapsed by default and reveals them on demand", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () =>
+        buildPayload({
+          metadata: {
+            ...buildPayload().metadata,
+            exif_attributes: {
+              "exif.CustomNote": "test-note",
+              "gps_ifd.GPSLatitude": ["42.0", "11.0", "20.95"]
+            }
+          }
+        })
+    } as Response);
+
+    renderDetail();
+
+    expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show details" }));
+
+    expect(screen.getByRole("button", { name: "Show all EXIF attributes" })).toBeInTheDocument();
+    expect(screen.queryByText("exif.CustomNote")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Show all EXIF attributes" }));
+    expect(screen.getByRole("button", { name: "Hide all EXIF attributes" })).toBeInTheDocument();
+    expect(screen.getByText("exif.CustomNote")).toBeInTheDocument();
+    expect(screen.getByText("test-note")).toBeInTheDocument();
+    expect(screen.getByText("gps_ifd.GPSLatitude")).toBeInTheDocument();
+    expect(screen.getByText("[\"42.0\",\"11.0\",\"20.95\"]")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Hide all EXIF attributes" }));
+    expect(screen.queryByText("exif.CustomNote")).not.toBeInTheDocument();
   });
 
   it("shows explicit no-face state when no face regions are present", async () => {
@@ -349,6 +390,25 @@ describe("PhotoDetailRoutePage", () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => buildPayload()
+    } as Response);
+
+    renderDetail();
+
+    const image = await screen.findByRole("img", { name: "Preview for photo-1" });
+    expect(image).toHaveAttribute("src", "/api/v1/photos/photo-1/original");
+  });
+
+  it("prefers loading the original preview even when availability metadata is stale", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () =>
+        buildPayload({
+          original: {
+            is_available: false,
+            availability_state: "missing",
+            last_failure_reason: "stale status"
+          }
+        })
     } as Response);
 
     renderDetail();
