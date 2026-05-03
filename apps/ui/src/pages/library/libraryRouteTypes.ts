@@ -1,6 +1,7 @@
 import type { SearchFacetPayload } from "../search/facetFilters";
 
 export type SortDirection = "asc" | "desc";
+export type PersonCertaintyMode = "human_only" | "include_suggestions";
 
 export type LibraryPhoto = {
   photo_id: string;
@@ -48,6 +49,8 @@ export type SearchUrlState = {
   fromDate: string;
   toDate: string;
   selectedPersonNames: string[];
+  personCertaintyMode: PersonCertaintyMode;
+  suggestionConfidenceMinDraft: string;
   latitudeDraft: string;
   longitudeDraft: string;
   radiusDraft: string;

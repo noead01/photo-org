@@ -41,7 +41,7 @@ type PhotoDetailPayload = {
     bbox_h: number | null;
     bbox_space_width?: number | null;
     bbox_space_height?: number | null;
-    label_source: "human_confirmed" | "machine_applied" | "machine_suggested" | null;
+    label_source: "human_confirmed" | "machine_suggested" | null;
     confidence: number | null;
     model_version: string | null;
     provenance: Record<string, unknown> | null;
@@ -159,6 +159,7 @@ describe("LibraryRoutePage", () => {
     expect(screen.getByLabelText("From date")).toBeInTheDocument();
     expect(screen.getByLabelText("To date")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Person filter" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Person certainty mode")).toBeInTheDocument();
     expect(screen.getByLabelText("Latitude")).toBeInTheDocument();
     expect(screen.getByLabelText("Longitude")).toBeInTheDocument();
     expect(screen.getByLabelText("Radius (km)")).toBeInTheDocument();
@@ -737,7 +738,7 @@ describe("LibraryRoutePage", () => {
                 bbox_y: 10,
                 bbox_w: 20,
                 bbox_h: 20,
-                label_source: "machine_applied",
+                label_source: "machine_suggested",
                 confidence: 0.92,
                 model_version: "v1",
                 provenance: {

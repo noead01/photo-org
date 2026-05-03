@@ -3,7 +3,7 @@ import type { FacetCountEntry } from "../search/facetFilters";
 import { FacetFilterPanel } from "../search/FacetFilterPanel";
 import { LocationRadiusPicker } from "../search/LocationRadiusPicker";
 import type { LocationRadiusValue } from "../search/types";
-import type { PersonRecord } from "./libraryRouteTypes";
+import type { PersonCertaintyMode, PersonRecord } from "./libraryRouteTypes";
 
 interface LibrarySearchFormProps {
   queryInput: string;
@@ -11,6 +11,8 @@ interface LibrarySearchFormProps {
   toDate: string;
   personDraft: string;
   selectedPersonNames: string[];
+  personCertaintyMode: PersonCertaintyMode;
+  suggestionConfidenceMinDraft: string;
   latitudeDraft: string;
   longitudeDraft: string;
   radiusDraft: string;
@@ -31,6 +33,8 @@ interface LibrarySearchFormProps {
   onPersonDraftChange: (value: string) => void;
   onAddPersonFilter: () => void;
   onAddPersonByName: (displayName: string) => void;
+  onPersonCertaintyModeChange: (value: PersonCertaintyMode) => void;
+  onSuggestionConfidenceMinDraftChange: (value: string) => void;
   onLatitudeDraftChange: (value: string) => void;
   onLongitudeDraftChange: (value: string) => void;
   onRadiusDraftChange: (value: string) => void;
@@ -48,6 +52,8 @@ export function LibrarySearchForm({
   toDate,
   personDraft,
   selectedPersonNames,
+  personCertaintyMode,
+  suggestionConfidenceMinDraft,
   latitudeDraft,
   longitudeDraft,
   radiusDraft,
@@ -68,6 +74,8 @@ export function LibrarySearchForm({
   onPersonDraftChange,
   onAddPersonFilter,
   onAddPersonByName,
+  onPersonCertaintyModeChange,
+  onSuggestionConfidenceMinDraftChange,
   onLatitudeDraftChange,
   onLongitudeDraftChange,
   onRadiusDraftChange,
@@ -161,6 +169,33 @@ export function LibrarySearchForm({
                   Add person filter
                 </button>
               </div>
+              <div className="search-person-input-row">
+                <label htmlFor="search-person-certainty-mode">Person certainty mode</label>
+                <select
+                  id="search-person-certainty-mode"
+                  aria-label="Person certainty mode"
+                  value={personCertaintyMode}
+                  onChange={(event) =>
+                    onPersonCertaintyModeChange(event.target.value as PersonCertaintyMode)
+                  }
+                >
+                  <option value="human_only">Human-reviewed only</option>
+                  <option value="include_suggestions">Include suggestions above threshold</option>
+                </select>
+              </div>
+              {personCertaintyMode === "include_suggestions" ? (
+                <div className="search-person-input-row">
+                  <label htmlFor="search-person-suggestion-threshold">Suggestion threshold</label>
+                  <input
+                    id="search-person-suggestion-threshold"
+                    aria-label="Suggestion threshold"
+                    type="text"
+                    inputMode="decimal"
+                    value={suggestionConfidenceMinDraft}
+                    onChange={(event) => onSuggestionConfidenceMinDraftChange(event.target.value)}
+                  />
+                </div>
+              ) : null}
             </div>
 
             <div className="search-location-panel">

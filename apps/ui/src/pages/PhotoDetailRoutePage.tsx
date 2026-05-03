@@ -31,7 +31,7 @@ type PhotoDetailPayload = {
     bbox_h: number | null;
     bbox_space_width?: number | null;
     bbox_space_height?: number | null;
-    label_source: "human_confirmed" | "machine_applied" | "machine_suggested" | null;
+    label_source: "human_confirmed" | "machine_suggested" | null;
     confidence: number | null;
     model_version: string | null;
     provenance: Record<string, unknown> | null;

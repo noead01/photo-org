@@ -33,9 +33,6 @@ function provenanceBadgeIcon(source: FaceLabelSource): string {
   if (source === "human_confirmed") {
     return "👤";
   }
-  if (source === "machine_applied") {
-    return "🤖";
-  }
   if (source === "machine_suggested") {
     return "💡";
   }
@@ -158,7 +155,7 @@ export function LibraryPhotoFacePanel({ photo }: LibraryPhotoFacePanelProps) {
       .filter(
         (face): face is FaceRegion & { sequence: number; person_id: string } =>
           face.person_id !== null &&
-          (face.label_source === "machine_applied" || face.label_source === "machine_suggested")
+          face.label_source === "machine_suggested"
       );
   }, [detail]);
 
