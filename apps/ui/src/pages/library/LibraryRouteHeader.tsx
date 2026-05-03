@@ -1,26 +1,28 @@
 import type { RefObject } from "react";
+import { LibraryPageNavigator } from "./LibraryPageNavigator";
+import { LibrarySortControl } from "./LibrarySortControl";
 import type { SortDirection } from "./libraryRouteTypes";
 
 interface LibraryRouteHeaderProps {
   headingRef: RefObject<HTMLHeadingElement>;
   sortDirection: SortDirection;
   requestedPage: number;
+  lastKnownPage: number;
   canGoPrevious: boolean;
   canGoNext: boolean;
   onSortDirectionChange: (direction: SortDirection) => void;
-  onPreviousPage: () => void;
-  onNextPage: () => void;
+  onSelectPage: (pageNumber: number) => void;
 }
 
 export function LibraryRouteHeader({
   headingRef,
   sortDirection,
   requestedPage,
+  lastKnownPage,
   canGoPrevious,
   canGoNext,
   onSortDirectionChange,
-  onPreviousPage,
-  onNextPage
+  onSelectPage
 }: LibraryRouteHeaderProps) {
   return (
     <div className="browse-header">
@@ -31,39 +33,17 @@ export function LibraryRouteHeader({
         <p>Unified library workflow for search, scope, and action surfaces.</p>
       </div>
       <div className="browse-controls" role="group" aria-label="Library controls">
-        <label className="browse-sort-control">
-          Sort order
-          <select
-            aria-label="Sort order"
-            value={sortDirection}
-            onChange={(event) => {
-              const nextDirection = event.target.value === "asc" ? "asc" : "desc";
-              onSortDirectionChange(nextDirection);
-            }}
-          >
-            <option value="desc">Newest first</option>
-            <option value="asc">Oldest first</option>
-          </select>
-        </label>
-        <div className="browse-pagination" aria-label="Pagination controls">
-          <button
-            type="button"
-            onClick={onPreviousPage}
-            disabled={!canGoPrevious}
-            aria-label="Previous page"
-          >
-            Previous
-          </button>
-          <p className="browse-page-indicator">Page {requestedPage}</p>
-          <button
-            type="button"
-            onClick={onNextPage}
-            disabled={!canGoNext}
-            aria-label="Next page"
-          >
-            Next
-          </button>
-        </div>
+        <LibrarySortControl
+          sortDirection={sortDirection}
+          onSortDirectionChange={onSortDirectionChange}
+        />
+        <LibraryPageNavigator
+          requestedPage={requestedPage}
+          lastKnownPage={lastKnownPage}
+          canGoPrevious={canGoPrevious}
+          canGoNext={canGoNext}
+          onSelectPage={onSelectPage}
+        />
       </div>
     </div>
   );

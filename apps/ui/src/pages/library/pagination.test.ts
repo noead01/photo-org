@@ -1,5 +1,4 @@
 import {
-  buildFirstPageCursorMap,
   INVALID_PAGE_MESSAGE,
   updateCursorByPage
 } from "./pagination";
@@ -9,19 +8,6 @@ describe("library pagination primitives", () => {
     expect(INVALID_PAGE_MESSAGE).toBe(
       "Reset to page 1 because that page position is unavailable."
     );
-  });
-
-  it("builds first page cursor map with second-page cursor when present", () => {
-    expect(buildFirstPageCursorMap("cursor-page-2")).toEqual({
-      1: null,
-      2: "cursor-page-2"
-    });
-  });
-
-  it("builds first page cursor map without second-page entry when cursor is null", () => {
-    expect(buildFirstPageCursorMap(null)).toEqual({
-      1: null
-    });
   });
 
   it("updates page cursor map and tracks the next page cursor", () => {
@@ -45,4 +31,5 @@ describe("library pagination primitives", () => {
       2: "cursor-page-2"
     });
   });
+
 });

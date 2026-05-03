@@ -325,6 +325,7 @@ describe("LibraryRoutePage", () => {
 
     const pageOneIds = Array.from({ length: 24 }, (_, index) => `photo-${index + 1}`);
     const pageTwoIds = Array.from({ length: 24 }, (_, index) => `photo-${index + 25}`);
+    const pageThreeIds = Array.from({ length: 24 }, (_, index) => `photo-${index + 49}`);
 
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -364,6 +365,19 @@ describe("LibraryRoutePage", () => {
         } as Response;
       }
 
+      if (requestCursor === "cursor-page-3") {
+        return {
+          ok: true,
+          json: async () => ({
+            hits: {
+              total: 99,
+              cursor: "cursor-page-4",
+              items: buildPayload(pageThreeIds, 99).hits.items
+            }
+          })
+        } as Response;
+      }
+
       return {
         ok: true,
         json: async () => ({
@@ -379,13 +393,33 @@ describe("LibraryRoutePage", () => {
     renderLibraryAt("/library");
 
     expect(await screen.findByText("Showing 24 of 99 photos")).toBeInTheDocument();
-    expect(screen.getByText("Page 1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Previous page" })).toHaveAttribute(
+      "aria-disabled",
+      "true"
+    );
+    expect(screen.getByRole("button", { name: "Page 1" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "Page 4" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Next page" }));
 
-    expect(await screen.findByText("Page 2")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Page 2" })).toHaveAttribute(
+      "aria-current",
+      "page"
+    );
     const detailLinks = await screen.findAllByRole("link", { name: "View details" });
     expect(detailLinks.length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: "Page 1" }));
+    expect(await screen.findByRole("button", { name: "Page 1" })).toHaveAttribute(
+      "aria-current",
+      "page"
+    );
+
+    await user.click(screen.getByRole("button", { name: "Page 3" }));
+    expect(await screen.findByRole("button", { name: "Page 3" })).toHaveAttribute(
+      "aria-current",
+      "page"
+    );
 
     const searchRequestCursors = fetchMock.mock.calls
       .filter(([input]) => String(input) === "/api/v1/search")
@@ -397,6 +431,7 @@ describe("LibraryRoutePage", () => {
       });
 
     expect(searchRequestCursors).toContain("cursor-page-2");
+    expect(searchRequestCursors).toContain("cursor-page-3");
   });
 
   it("shows action bar only when active selection scope count is positive", async () => {

@@ -7,7 +7,7 @@ import type {
   SortDirection
 } from "./libraryRouteTypes";
 
-const PAGE_LIMIT = 24;
+export const SEARCH_PAGE_LIMIT = 24;
 
 export async function fetchLibraryPage(
   query: string,
@@ -42,7 +42,7 @@ export async function fetchLibraryPage(
         dir: sortDirection
       },
       page: {
-        limit: PAGE_LIMIT,
+        limit: SEARCH_PAGE_LIMIT,
         cursor
       }
     })
