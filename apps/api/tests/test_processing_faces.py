@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -193,6 +194,96 @@ def test_create_default_face_detector_reads_env_settings(monkeypatch):
     assert detector._max_area_ratio == 0.45
     assert detector._aspect_ratio_min == 0.75
     assert detector._aspect_ratio_max == 1.35
+
+
+def test_create_default_face_detector_reads_named_profile(monkeypatch):
+    fake_cv2 = SimpleNamespace(
+        data=SimpleNamespace(haarcascades="/fake/"),
+        CascadeClassifier=lambda _path: _LoadedClassifier(_path),
+    )
+    monkeypatch.setitem(__import__("sys").modules, "cv2", fake_cv2)
+    monkeypatch.setenv("FACE_DETECT_PROFILE", "high_precision")
+
+    detector = create_default_face_detector()
+
+    assert detector._scale_factor == 1.15
+    assert detector._min_neighbors == 9
+    assert detector._min_size == (32, 32)
+    assert detector._max_size is None
+    assert detector._min_area_ratio == 0.001
+    assert detector._max_area_ratio == 0.5
+    assert detector._aspect_ratio_min == 0.75
+    assert detector._aspect_ratio_max == 1.35
+
+
+def test_create_default_face_detector_env_overrides_named_profile(monkeypatch):
+    fake_cv2 = SimpleNamespace(
+        data=SimpleNamespace(haarcascades="/fake/"),
+        CascadeClassifier=lambda _path: _LoadedClassifier(_path),
+    )
+    monkeypatch.setitem(__import__("sys").modules, "cv2", fake_cv2)
+    monkeypatch.setenv("FACE_DETECT_PROFILE", "high_precision")
+    monkeypatch.setenv("FACE_DETECT_MIN_NEIGHBORS", "11")
+    monkeypatch.setenv("FACE_DETECT_MIN_SIZE", "40x40")
+
+    detector = create_default_face_detector()
+
+    assert detector._scale_factor == 1.15
+    assert detector._min_neighbors == 11
+    assert detector._min_size == (40, 40)
+    assert detector._max_size is None
+
+
+def test_create_default_face_detector_raises_for_unknown_profile(monkeypatch):
+    fake_cv2 = SimpleNamespace(
+        data=SimpleNamespace(haarcascades="/fake/"),
+        CascadeClassifier=lambda _path: _LoadedClassifier(_path),
+    )
+    monkeypatch.setitem(__import__("sys").modules, "cv2", fake_cv2)
+    monkeypatch.setenv("FACE_DETECT_PROFILE", "not-a-real-profile")
+
+    with pytest.raises(ValueError, match="FACE_DETECT_PROFILE must be one of"):
+        create_default_face_detector()
+
+
+def test_create_default_face_detector_reads_profile_values_from_custom_file(monkeypatch, tmp_path):
+    profile_file = tmp_path / "profiles.json"
+    profile_file.write_text(
+        json.dumps(
+            {
+                "custom_profile": {
+                    "scale_factor": 1.18,
+                    "min_neighbors": 8,
+                    "min_size": [44, 44],
+                    "max_size": None,
+                    "min_area_ratio": 0.003,
+                    "max_area_ratio": 0.72,
+                    "aspect_ratio_min": 0.8,
+                    "aspect_ratio_max": 1.4,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    fake_cv2 = SimpleNamespace(
+        data=SimpleNamespace(haarcascades="/fake/"),
+        CascadeClassifier=lambda _path: _LoadedClassifier(_path),
+    )
+    monkeypatch.setitem(__import__("sys").modules, "cv2", fake_cv2)
+    monkeypatch.setenv("FACE_DETECT_PROFILE_FILE", str(profile_file))
+    monkeypatch.setenv("FACE_DETECT_PROFILE", "custom_profile")
+
+    detector = create_default_face_detector()
+
+    assert detector._scale_factor == 1.18
+    assert detector._min_neighbors == 8
+    assert detector._min_size == (44, 44)
+    assert detector._max_size is None
+    assert detector._min_area_ratio == 0.003
+    assert detector._max_area_ratio == 0.72
+    assert detector._aspect_ratio_min == 0.8
+    assert detector._aspect_ratio_max == 1.4
 
 
 def test_detector_detect_filters_false_positive_boxes(monkeypatch, tmp_path):

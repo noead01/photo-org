@@ -448,6 +448,7 @@ def test_photo_original_api_streams_registered_source_file(tmp_path, monkeypatch
     assert response.status_code == 200
     assert response.content == photo_bytes
     assert response.headers["content-type"].startswith("image/jpeg")
+    assert response.headers["content-disposition"].startswith("inline;")
 
 
 def test_photo_original_api_returns_404_when_file_is_unavailable(tmp_path, monkeypatch):
@@ -477,3 +478,200 @@ def test_photo_original_api_returns_404_when_file_is_unavailable(tmp_path, monke
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Original photo not found"
+
+
+def test_photo_original_api_ignores_range_and_returns_full_image_payload(tmp_path, monkeypatch):
+    database_url = f"sqlite:///{tmp_path / 'photo-original-api-range.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    source_root = tmp_path / "storage-source"
+    watched_root = source_root / "trips"
+    watched_root.mkdir(parents=True, exist_ok=True)
+    photo_path = watched_root / "photo-1.jpg"
+    photo_bytes = b"\xff\xd8\xff\xe0" + b"x" * 2048 + b"\xff\xd9"
+    photo_path.write_bytes(photo_bytes)
+    (source_root / ".photo-org-source.json").write_text(
+        json.dumps({"storage_source_id": "source-1", "marker_version": 1})
+    )
+
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 3, 28, 19, 30, tzinfo=UTC)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(photos).values(
+                photo_id="photo-1",
+                sha256="sha-1",
+                created_ts=now,
+                updated_ts=now,
+                path="/storage-sources/source-1/trips/photo-1.jpg",
+                filesize=len(photo_bytes),
+                ext="jpg",
+                faces_count=0,
+            )
+        )
+        connection.execute(
+            insert(storage_sources).values(
+                storage_source_id="source-1",
+                display_name="Family share",
+                marker_filename=".photo-org-source.json",
+                marker_version=1,
+                availability_state="active",
+                last_failure_reason=None,
+                last_validated_ts=now,
+                created_ts=now,
+                updated_ts=now,
+            )
+        )
+        connection.execute(
+            insert(storage_source_aliases).values(
+                storage_source_alias_id="alias-1",
+                storage_source_id="source-1",
+                alias_path=str(source_root),
+                created_ts=now,
+                updated_ts=now,
+            )
+        )
+        connection.execute(
+            insert(watched_folders).values(
+                watched_folder_id="wf-1",
+                scan_path=str(watched_root),
+                storage_source_id="source-1",
+                relative_path="trips",
+                display_name="Trips",
+                is_enabled=1,
+                availability_state="active",
+                last_failure_reason=None,
+                last_successful_scan_ts=now,
+                created_ts=now,
+                updated_ts=now,
+            )
+        )
+        connection.execute(
+            insert(photo_files).values(
+                photo_file_id="pf-1",
+                photo_id="photo-1",
+                watched_folder_id="wf-1",
+                relative_path="photo-1.jpg",
+                filename="photo-1.jpg",
+                extension="jpg",
+                filesize=len(photo_bytes),
+                created_ts=now,
+                modified_ts=now,
+                first_seen_ts=now,
+                last_seen_ts=now,
+                missing_ts=None,
+                deleted_ts=None,
+                lifecycle_state="active",
+                absence_reason=None,
+            )
+        )
+
+    client = TestClient(app)
+    response = client.get("/api/v1/photos/photo-1/original", headers={"Range": "bytes=0-127"})
+
+    assert response.status_code == 200
+    assert response.content == photo_bytes
+    assert response.headers["content-type"].startswith("image/jpeg")
+    assert response.headers["content-disposition"].startswith("inline;")
+    assert "content-range" not in response.headers
+
+
+def test_photo_original_api_transcodes_heic_for_browser_preview(tmp_path, monkeypatch):
+    database_url = f"sqlite:///{tmp_path / 'photo-original-api-heic.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    monkeypatch.setattr("app.routers.photos._transcode_image_to_jpeg", lambda _path: b"jpeg-preview")
+
+    source_root = tmp_path / "storage-source"
+    watched_root = source_root / "trips"
+    watched_root.mkdir(parents=True, exist_ok=True)
+    photo_path = watched_root / "photo-1.heic"
+    photo_bytes = b"heic-placeholder"
+    photo_path.write_bytes(photo_bytes)
+    (source_root / ".photo-org-source.json").write_text(
+        json.dumps({"storage_source_id": "source-1", "marker_version": 1})
+    )
+
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 3, 28, 19, 30, tzinfo=UTC)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(photos).values(
+                photo_id="photo-1",
+                sha256="sha-1",
+                created_ts=now,
+                updated_ts=now,
+                path="/storage-sources/source-1/trips/photo-1.heic",
+                filesize=len(photo_bytes),
+                ext="heic",
+                faces_count=0,
+            )
+        )
+        connection.execute(
+            insert(storage_sources).values(
+                storage_source_id="source-1",
+                display_name="Family share",
+                marker_filename=".photo-org-source.json",
+                marker_version=1,
+                availability_state="active",
+                last_failure_reason=None,
+                last_validated_ts=now,
+                created_ts=now,
+                updated_ts=now,
+            )
+        )
+        connection.execute(
+            insert(storage_source_aliases).values(
+                storage_source_alias_id="alias-1",
+                storage_source_id="source-1",
+                alias_path=str(source_root),
+                created_ts=now,
+                updated_ts=now,
+            )
+        )
+        connection.execute(
+            insert(watched_folders).values(
+                watched_folder_id="wf-1",
+                scan_path=str(watched_root),
+                storage_source_id="source-1",
+                relative_path="trips",
+                display_name="Trips",
+                is_enabled=1,
+                availability_state="active",
+                last_failure_reason=None,
+                last_successful_scan_ts=now,
+                created_ts=now,
+                updated_ts=now,
+            )
+        )
+        connection.execute(
+            insert(photo_files).values(
+                photo_file_id="pf-1",
+                photo_id="photo-1",
+                watched_folder_id="wf-1",
+                relative_path="photo-1.heic",
+                filename="photo-1.heic",
+                extension="heic",
+                filesize=len(photo_bytes),
+                created_ts=now,
+                modified_ts=now,
+                first_seen_ts=now,
+                last_seen_ts=now,
+                missing_ts=None,
+                deleted_ts=None,
+                lifecycle_state="active",
+                absence_reason=None,
+            )
+        )
+
+    client = TestClient(app)
+    response = client.get("/api/v1/photos/photo-1/original")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/jpeg")
+    assert response.headers["content-disposition"].startswith("inline;")
+    assert len(response.content) > 0

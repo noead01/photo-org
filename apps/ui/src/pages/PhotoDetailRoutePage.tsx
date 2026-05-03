@@ -68,6 +68,7 @@ type PhotoDetailPayload = {
 };
 
 const MISSING_VALUE = "Not available";
+const EXIF_ATTRIBUTE_PREVIEW_MAX_CHARS = 30;
 
 type MediaPresentationMode = "fit" | "actual";
 
@@ -132,17 +133,24 @@ function formatOptionalText(value: string | null): string {
 }
 
 function formatExifAttributeValue(value: unknown): string {
-  if (value === null) {
-    return "null";
+  const renderedValue = (() => {
+    if (value === null) {
+      return "null";
+    }
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      return String(value);
+    }
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  })();
+
+  if (renderedValue.length <= EXIF_ATTRIBUTE_PREVIEW_MAX_CHARS) {
+    return renderedValue;
   }
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
+  return `${renderedValue.slice(0, EXIF_ATTRIBUTE_PREVIEW_MAX_CHARS)}...`;
 }
 
 async function fetchPhotoDetail(photoId: string): Promise<PhotoDetailPayload> {
@@ -180,6 +188,32 @@ function derivePersonInitials(displayName: string | null): string {
     return token.slice(0, Math.min(2, token.length)).toUpperCase();
   }
   return `${tokens[0][0] ?? ""}${tokens[1][0] ?? ""}`.toUpperCase();
+}
+
+function resolveAbsoluteUrl(url: string): string {
+  if (typeof window === "undefined") {
+    return url;
+  }
+  return new URL(url, window.location.href).toString();
+}
+
+function revokeObjectUrl(url: string): void {
+  if (typeof URL.revokeObjectURL === "function") {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function isCurrentImageRequest(
+  image: HTMLImageElement,
+  expectedSrc: string
+): boolean {
+  const expectedAbsoluteSrc = resolveAbsoluteUrl(expectedSrc);
+  const currentSrc = image.currentSrc;
+  if (currentSrc && currentSrc.length > 0) {
+    return currentSrc === expectedAbsoluteSrc;
+  }
+  const rawSrc = image.getAttribute("src");
+  return rawSrc === expectedSrc || rawSrc === expectedAbsoluteSrc;
 }
 
 function applyFaceAssignment(
@@ -228,10 +262,12 @@ export function PhotoDetailRoutePage() {
   const [mediaMode, setMediaMode] = useState<MediaPresentationMode>("actual");
   const [imageScalePercent, setImageScalePercent] = useState(100);
   const [isOriginalImageEnabled, setIsOriginalImageEnabled] = useState(true);
+  const [originalImageRetrySrc, setOriginalImageRetrySrc] = useState<string | null>(null);
   const [originalImageNaturalSize, setOriginalImageNaturalSize] = useState<{
     width: number;
     height: number;
   } | null>(null);
+  const activePhotoIdRef = useRef<string | null>(null);
   const [showFaceBoxes, setShowFaceBoxes] = useState(true);
   const [isDetailFlyoutOpen, setIsDetailFlyoutOpen] = useState(false);
   const [isExifAttributesOpen, setIsExifAttributesOpen] = useState(false);
@@ -243,10 +279,28 @@ export function PhotoDetailRoutePage() {
   }, [photoId]);
 
   useEffect(() => {
+    activePhotoIdRef.current = detail?.photo_id ?? null;
+  }, [detail?.photo_id]);
+
+  useEffect(() => {
     setIsOriginalImageEnabled(true);
     setOriginalImageNaturalSize(null);
     setIsExifAttributesOpen(false);
+    setOriginalImageRetrySrc((current) => {
+      if (current) {
+        revokeObjectUrl(current);
+      }
+      return null;
+    });
   }, [photoId]);
+
+  useEffect(() => {
+    return () => {
+      if (originalImageRetrySrc) {
+        revokeObjectUrl(originalImageRetrySrc);
+      }
+    };
+  }, [originalImageRetrySrc]);
 
   useEffect(() => {
     if (!photoId) {
@@ -414,7 +468,8 @@ export function PhotoDetailRoutePage() {
     : null;
   const originalImageUrl = detail ? `/api/v1/photos/${encodeURIComponent(detail.photo_id)}/original` : null;
   const shouldUseOriginalImage = Boolean(originalImageUrl && isOriginalImageEnabled);
-  const previewImageSrc = shouldUseOriginalImage ? originalImageUrl : thumbnailDataUrl;
+  const activeOriginalImageSrc = shouldUseOriginalImage ? (originalImageRetrySrc ?? originalImageUrl) : null;
+  const previewImageSrc = activeOriginalImageSrc ?? thumbnailDataUrl;
   const mediaBaseWidthPx = shouldUseOriginalImage
     ? (originalImageNaturalSize?.width ?? null)
     : (detail?.thumbnail?.width ?? null);
@@ -455,6 +510,39 @@ export function PhotoDetailRoutePage() {
 
   function openFaceAssignmentModal(faceId: string) {
     setActiveFaceModalId(faceId);
+  }
+
+  async function retryOriginalImageThroughBlob(url: string, expectedPhotoId: string): Promise<boolean> {
+    try {
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) {
+        return false;
+      }
+      const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+      if (!contentType.startsWith("image/")) {
+        return false;
+      }
+      const blob = await response.blob();
+      if (blob.size <= 0) {
+        return false;
+      }
+      if (activePhotoIdRef.current !== expectedPhotoId) {
+        return false;
+      }
+      if (typeof URL.createObjectURL !== "function") {
+        return false;
+      }
+      const objectUrl = URL.createObjectURL(blob);
+      setOriginalImageRetrySrc((current) => {
+        if (current) {
+          revokeObjectUrl(current);
+        }
+        return objectUrl;
+      });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   return (
@@ -571,7 +659,11 @@ export function PhotoDetailRoutePage() {
                     height={!shouldUseOriginalImage ? detail.thumbnail?.height : undefined}
                     alt={`Preview for ${detail.photo_id}`}
                     onLoad={(event) => {
-                      if (!shouldUseOriginalImage) {
+                      if (
+                        !shouldUseOriginalImage
+                        || !activeOriginalImageSrc
+                        || !isCurrentImageRequest(event.currentTarget, activeOriginalImageSrc)
+                      ) {
                         return;
                       }
                       const { naturalWidth, naturalHeight } = event.currentTarget;
@@ -579,11 +671,26 @@ export function PhotoDetailRoutePage() {
                         setOriginalImageNaturalSize({ width: naturalWidth, height: naturalHeight });
                       }
                     }}
-                    onError={() => {
-                      if (shouldUseOriginalImage) {
-                        setIsOriginalImageEnabled(false);
-                        setOriginalImageNaturalSize(null);
+                    onError={(event) => {
+                      if (
+                        !shouldUseOriginalImage
+                        || !activeOriginalImageSrc
+                        || !isCurrentImageRequest(event.currentTarget, activeOriginalImageSrc)
+                      ) {
+                        return;
                       }
+                      if (!originalImageRetrySrc && originalImageUrl && detail) {
+                        void retryOriginalImageThroughBlob(originalImageUrl, detail.photo_id).then((recovered) => {
+                          if (recovered) {
+                            return;
+                          }
+                          setIsOriginalImageEnabled(false);
+                          setOriginalImageNaturalSize(null);
+                        });
+                        return;
+                      }
+                      setIsOriginalImageEnabled(false);
+                      setOriginalImageNaturalSize(null);
                     }}
                   />
                   {showFaceBoxes ? (
