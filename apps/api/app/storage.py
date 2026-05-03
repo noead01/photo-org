@@ -3,6 +3,7 @@ from __future__ import annotations
 from photoorg_db_schema import (
     exif_semantic_mappings,
     exif_semantics,
+    face_suggestions,
     face_labels,
     faces,
     ingest_runs,
@@ -10,6 +11,7 @@ from photoorg_db_schema import (
     ingest_queue,
     metadata,
     people,
+    person_representations,
     photo_files,
     photo_exif_attributes,
     photo_tags,
