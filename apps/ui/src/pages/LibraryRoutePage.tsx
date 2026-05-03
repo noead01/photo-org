@@ -8,7 +8,12 @@ import type {
 import { resolveInitialSessionIdentity } from "../session/sessionIdentity";
 import { LibraryActionBar } from "./library/LibraryActionBar";
 import { LibraryActiveFilterChips } from "./library/LibraryActiveFilterChips";
-import { fetchLibraryPage, fetchOperationsActivityConflictState, fetchPeopleDirectory } from "./library/libraryRouteApi";
+import {
+  fetchLibraryPage,
+  fetchOperationsActivityConflictState,
+  fetchPeopleDirectory,
+  SEARCH_PAGE_LIMIT
+} from "./library/libraryRouteApi";
 import { LibraryPhotoGrid } from "./library/LibraryPhotoGrid";
 import { LibraryRouteHeader } from "./library/LibraryRouteHeader";
 import { LibrarySearchForm } from "./library/LibrarySearchForm";
@@ -92,7 +97,6 @@ export function LibraryRoutePage() {
   const [photos, setPhotos] = useState<LibraryPhoto[]>([]);
   const [showGridFaceBoxes, setShowGridFaceBoxes] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<NotificationEntry[]>([]);
   const [hasConflictingJob, setHasConflictingJob] = useState(false);
   const [selectionState, dispatchSelection] = useReducer(
@@ -231,7 +235,6 @@ export function LibraryRoutePage() {
 
     setSortDirection("desc");
     setCursorByPage({ 1: null });
-    setNextCursor(null);
     setPhotos([]);
     setTotalCount(0);
   }, [parsedUrlState, parsedUrlStateSignature]);
@@ -327,7 +330,6 @@ export function LibraryRoutePage() {
     if (dateRangeError || locationError) {
       setPhotos([]);
       setTotalCount(0);
-      setNextCursor(null);
       return;
     }
 
@@ -358,7 +360,6 @@ export function LibraryRoutePage() {
 
         setPhotos(payload.hits.items);
         setTotalCount(payload.hits.total);
-        setNextCursor(payload.hits.cursor);
         setFacetHasFacesCounts(parseHasFacesFacetCounts(payload.facets));
         setFacetPathHintCounts(toPathHintFacetCounts(payload.facets, pathHintFilters));
         setCursorByPage((current) =>
@@ -411,8 +412,12 @@ export function LibraryRoutePage() {
     };
   }, [reloadToken]);
 
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(totalCount / SEARCH_PAGE_LIMIT)),
+    [totalCount]
+  );
   const canGoPrevious = requestedPage > 1 && !isLoading;
-  const canGoNext = nextCursor !== null && !isLoading;
+  const canGoNext = requestedPage < totalPages && !isLoading;
   const feedbackViewState: FeedbackViewState = isLoading
     ? "loading"
     : error
@@ -449,7 +454,6 @@ export function LibraryRoutePage() {
 
     setCommittedQuery(queryInput.trim());
     setCursorByPage({ 1: null });
-    setNextCursor(null);
     setPage(1);
   }
 
@@ -570,12 +574,70 @@ export function LibraryRoutePage() {
     setPage(1);
   }
 
+  async function handleSelectPage(pageNumber: number) {
+    if (isLoading) {
+      return;
+    }
+
+    const nextPage = Math.max(1, Math.min(pageNumber, totalPages));
+    if (nextPage === requestedPage) {
+      return;
+    }
+
+    if (nextPage === 1 || cursorByPage[nextPage] !== undefined) {
+      setPage(nextPage);
+      return;
+    }
+
+    let nextCursorMap: Record<number, string | null> = { ...cursorByPage };
+
+    for (let currentPage = 2; currentPage <= nextPage; currentPage += 1) {
+      if (nextCursorMap[currentPage] !== undefined) {
+        continue;
+      }
+
+      const previousPage = currentPage - 1;
+      const previousCursor = nextCursorMap[previousPage];
+      if (previousCursor === undefined) {
+        pushWarning(INVALID_PAGE_MESSAGE);
+        return;
+      }
+
+      const payload = await fetchLibraryPage(
+        committedQuery,
+        fromDate,
+        toDate,
+        selectedPersonNames,
+        locationRadiusFilter,
+        hasFacesFilter,
+        pathHintFilters,
+        sortDirection,
+        previousCursor
+      );
+      nextCursorMap = updateCursorByPage(
+        nextCursorMap,
+        previousPage,
+        previousCursor,
+        payload.hits.cursor
+      );
+
+      if (nextCursorMap[currentPage] === undefined) {
+        pushWarning(INVALID_PAGE_MESSAGE);
+        return;
+      }
+    }
+
+    setCursorByPage((current) => ({ ...current, ...nextCursorMap }));
+    setPage(nextPage);
+  }
+
   return (
     <section aria-labelledby="page-title" className="page browse-page">
       <LibraryRouteHeader
         headingRef={headingRef}
         sortDirection={sortDirection}
         requestedPage={requestedPage}
+        lastKnownPage={totalPages}
         canGoPrevious={canGoPrevious}
         canGoNext={canGoNext}
         onSortDirectionChange={(nextDirection) => {
@@ -583,8 +645,9 @@ export function LibraryRoutePage() {
           setCursorByPage({ 1: null });
           setPage(1);
         }}
-        onPreviousPage={() => setPage(requestedPage - 1)}
-        onNextPage={() => setPage(requestedPage + 1)}
+        onSelectPage={(pageNumber) => {
+          void handleSelectPage(pageNumber);
+        }}
       />
 
       <LibrarySearchForm

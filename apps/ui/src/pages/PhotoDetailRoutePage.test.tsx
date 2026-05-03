@@ -209,7 +209,6 @@ describe("PhotoDetailRoutePage", () => {
     expect(screen.getByText("No tags")).toBeInTheDocument();
     expect(screen.getByText("No recognized people")).toBeInTheDocument();
     expect(screen.getByText("Unknown availability")).toBeInTheDocument();
-    expect(screen.getAllByText("Unknown").length).toBeGreaterThan(0);
   });
 
   it("shows explicit no-face state when no face regions are present", async () => {
@@ -363,7 +362,48 @@ describe("PhotoDetailRoutePage", () => {
     expect(await screen.findByLabelText("Face region 1 for person-1")).toBeInTheDocument();
   });
 
-  it("opens face actions from the overlay badge and assigns a person from suggestions", async () => {
+  it("opens the face-assignment modal when clicking the face bounding box", async () => {
+    const user = userEvent.setup();
+
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => buildPayload()
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            person_id: "person-1",
+            display_name: "Inez",
+            created_ts: "2026-03-28T19:30:00Z",
+            updated_ts: "2026-03-28T19:30:00Z"
+          }
+        ]
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          face_id: "face-1",
+          candidates: [],
+          suggestion_policy: {
+            decision: "no_suggestion",
+            review_threshold: 0.5,
+            auto_accept_threshold: 0.9,
+            top_candidate_confidence: null
+          },
+          review_needed_suggestion: null,
+          auto_applied_assignment: null
+        })
+      } as Response);
+
+    renderDetail();
+
+    await user.click(await screen.findByLabelText("Face region 1 for person-1"));
+    expect(await screen.findByRole("dialog", { name: "Face assignment" })).toBeInTheDocument();
+  });
+
+  it("opens a face-assignment modal from the overlay badge and assigns a person from suggestions", async () => {
     const user = userEvent.setup();
 
     fetchMock
@@ -402,6 +442,29 @@ describe("PhotoDetailRoutePage", () => {
       } as Response)
       .mockResolvedValueOnce({
         ok: true,
+        json: async () => ({
+          face_id: "face-1",
+          candidates: [
+            {
+              person_id: "person-1",
+              display_name: "Inez",
+              matched_face_id: "face-7",
+              distance: 0.09,
+              confidence: 0.87
+            }
+          ],
+          suggestion_policy: {
+            decision: "review_needed",
+            review_threshold: 0.5,
+            auto_accept_threshold: 0.9,
+            top_candidate_confidence: 0.87
+          },
+          review_needed_suggestion: null,
+          auto_applied_assignment: null
+        })
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
         status: 201,
         json: async () => ({
           face_id: "face-1",
@@ -413,18 +476,28 @@ describe("PhotoDetailRoutePage", () => {
     renderDetail();
 
     expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
-    await user.click(
-      await screen.findByRole("button", { name: "Open face actions for face region 1" })
+    expect(await screen.findByRole("button", { name: "Open face assignment for face region 1" })).toHaveTextContent(
+      "?"
     );
-    await user.type(screen.getByLabelText("Person name"), "ine");
-    await user.selectOptions(screen.getByLabelText("Person suggestions"), "person-1");
-    await user.click(screen.getByRole("button", { name: "Assign selected person" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Open face assignment for face region 1" })
+    );
+    expect(await screen.findByRole("dialog", { name: "Face assignment" })).toBeInTheDocument();
+    expect(screen.getByText("Inez (87.0%)")).toBeInTheDocument();
+    await user.clear(screen.getByLabelText("Assign person"));
+    await user.type(screen.getByLabelText("Assign person"), "ine");
+    await user.click(screen.getByRole("button", { name: "Save and close" }));
 
-    expect(await screen.findByText("Face assignment saved for face 1.")).toBeInTheDocument();
-    expect(screen.getByText("Current label: Inez")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Face assignment" })).not.toBeInTheDocument();
+    });
+    expect(await screen.findByRole("button", { name: "Open face assignment for face region 1" })).toHaveTextContent(
+      "I"
+    );
+    expect(screen.getByText("person-1")).toBeInTheDocument();
   });
 
-  it("updates local face state after correction success and shows correction provenance", async () => {
+  it("updates local face state after correction success when saving from the modal", async () => {
     const user = userEvent.setup();
 
     fetchMock
@@ -473,6 +546,21 @@ describe("PhotoDetailRoutePage", () => {
       } as Response)
       .mockResolvedValueOnce({
         ok: true,
+        json: async () => ({
+          face_id: "face-1",
+          candidates: [],
+          suggestion_policy: {
+            decision: "no_suggestion",
+            review_threshold: 0.5,
+            auto_accept_threshold: 0.9,
+            top_candidate_confidence: null
+          },
+          review_needed_suggestion: null,
+          auto_applied_assignment: null
+        })
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
         status: 200,
         json: async () => ({
           face_id: "face-1",
@@ -486,14 +574,18 @@ describe("PhotoDetailRoutePage", () => {
 
     expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
     await user.click(
-      await screen.findByRole("button", { name: "Open face actions for face region 1" })
+      await screen.findByRole("button", { name: "Open face assignment for face region 1" })
     );
-    await user.type(screen.getByLabelText("Person name"), "mat");
-    await user.selectOptions(screen.getByLabelText("Person suggestions"), "person-2");
-    await user.click(screen.getByRole("button", { name: "Assign selected person" }));
+    await user.clear(screen.getByLabelText("Assign person"));
+    await user.type(screen.getByLabelText("Assign person"), "mat");
+    await user.click(screen.getByRole("button", { name: "Save and close" }));
 
-    expect(await screen.findByText("Correction recorded: Inez -> Mateo.")).toBeInTheDocument();
-    expect(screen.getByText("Current label: Mateo")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Face assignment" })).not.toBeInTheDocument();
+    });
+    expect(await screen.findByRole("button", { name: "Open face assignment for face region 1" })).toHaveTextContent(
+      "M"
+    );
     expect(screen.getByText("person-2")).toBeInTheDocument();
   });
 
@@ -535,6 +627,21 @@ describe("PhotoDetailRoutePage", () => {
       } as Response)
       .mockResolvedValueOnce({
         ok: true,
+        json: async () => ({
+          face_id: "face-1",
+          candidates: [],
+          suggestion_policy: {
+            decision: "no_suggestion",
+            review_threshold: 0.5,
+            auto_accept_threshold: 0.9,
+            top_candidate_confidence: null
+          },
+          review_needed_suggestion: null,
+          auto_applied_assignment: null
+        })
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
         status: 201,
         json: async () => ({
           person_id: "person-2",
@@ -556,13 +663,17 @@ describe("PhotoDetailRoutePage", () => {
     renderDetail();
 
     expect(await screen.findByLabelText("Face region 1")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Open face actions for face region 1" }));
-    await user.clear(screen.getByLabelText("Person name"));
-    await user.type(screen.getByLabelText("Person name"), "Nova");
+    await user.click(screen.getByRole("button", { name: "Open face assignment for face region 1" }));
+    await user.clear(screen.getByLabelText("Assign person"));
+    await user.type(screen.getByLabelText("Assign person"), "Nova");
     await user.click(screen.getByRole("button", { name: 'Create and assign "Nova"' }));
 
-    expect(await screen.findByText("Face assignment saved for face 1.")).toBeInTheDocument();
-    expect(screen.getByText("Current label: Nova")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Face assignment" })).not.toBeInTheDocument();
+    });
+    expect(await screen.findByRole("button", { name: "Open face assignment for face region 1" })).toHaveTextContent(
+      "N"
+    );
   });
 
   it("renders deterministic loading and error transitions", async () => {

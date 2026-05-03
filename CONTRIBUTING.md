@@ -176,6 +176,7 @@ Examples:
 - `PHOTO_ORG_ENVIRONMENT=alice make compose-up`
 - `PHOTO_ORG_ENVIRONMENT=alice make compose-down`
 - `PHOTO_ORG_ENVIRONMENT=alice PHOTO_ORG_ENV_FILE=.env.alice make compose-migrate`
+- `PHOTO_ORG_ENVIRONMENT=dev PHOTO_ORG_ENV_FILE=env/presets/face-detection-high-precision.env make compose-up`
 
 - `PHOTO_ORG_ENVIRONMENT=<name> make compose-up` starts postgres and the db-service container for that environment
 - `PHOTO_ORG_ENVIRONMENT=<name> make compose-migrate` reruns schema migration against that environment's Compose-managed database

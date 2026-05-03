@@ -6,7 +6,7 @@ from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
 from app.db.session import create_db_engine
-from app.processing.faces import OpenCvFaceDetector
+from app.processing.faces import create_default_face_detector
 from app.processing.ingest_persistence import (
     PhotoRecord,
     build_photo_record_from_sha,
@@ -102,7 +102,7 @@ def process_candidate_payload(
         thumbnail_width = thumbnail.width
         thumbnail_height = thumbnail.height
 
-    detector = face_detector if face_detector is not None else OpenCvFaceDetector()
+    detector = face_detector if face_detector is not None else create_default_face_detector()
     try:
         detections = detector.detect(runtime_path)
     except Exception as exc:

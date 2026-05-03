@@ -6,7 +6,7 @@ import {
   FaceBBoxOverlay,
   type FaceOverlayRegion
 } from "./FaceBBoxOverlay";
-import { PhotoFaceActionFlyout } from "./PhotoFaceActionFlyout";
+import { PhotoFaceAssignmentModal } from "./PhotoFaceAssignmentModal";
 import {
   resolveDetailReturnState,
   setPendingBrowseFocusPhotoId
@@ -148,6 +148,25 @@ function sortPeopleDirectory(people: PersonRecord[]): PersonRecord[] {
   });
 }
 
+function derivePersonInitials(displayName: string | null): string {
+  if (!displayName) {
+    return "?";
+  }
+  const tokens = displayName
+    .trim()
+    .split(/\\s+/)
+    .map((token) => token.replace(/[^a-zA-Z0-9]/g, ""))
+    .filter((token) => token.length > 0);
+  if (tokens.length === 0) {
+    return "?";
+  }
+  if (tokens.length === 1) {
+    const [token] = tokens;
+    return token.slice(0, Math.min(2, token.length)).toUpperCase();
+  }
+  return `${tokens[0][0] ?? ""}${tokens[1][0] ?? ""}`.toUpperCase();
+}
+
 function applyFaceAssignment(
   detail: PhotoDetailPayload,
   faceId: string,
@@ -181,21 +200,6 @@ function applyFaceAssignment(
   };
 }
 
-function provenanceBadgeIcon(
-  source: "human_confirmed" | "machine_applied" | "machine_suggested" | null
-): string {
-  if (source === "human_confirmed") {
-    return "👤";
-  }
-  if (source === "machine_applied") {
-    return "🤖";
-  }
-  if (source === "machine_suggested") {
-    return "💡";
-  }
-  return "❓";
-}
-
 export function PhotoDetailRoutePage() {
   const location = useLocation();
   const { photoId } = useParams<{ photoId: string }>();
@@ -210,7 +214,7 @@ export function PhotoDetailRoutePage() {
   const [imageScalePercent, setImageScalePercent] = useState(100);
   const [showFaceBoxes, setShowFaceBoxes] = useState(true);
   const [isDetailFlyoutOpen, setIsDetailFlyoutOpen] = useState(false);
-  const [requestedFaceActionFaceId, setRequestedFaceActionFaceId] = useState<string | null>(null);
+  const [activeFaceModalId, setActiveFaceModalId] = useState<string | null>(null);
   const [peopleDirectory, setPeopleDirectory] = useState<PersonRecord[]>([]);
 
   useEffect(() => {
@@ -335,6 +339,37 @@ export function PhotoDetailRoutePage() {
     });
   }, [detail]);
 
+  const peopleNameById = useMemo(() => {
+    return new Map(peopleDirectory.map((person) => [person.person_id, person.display_name]));
+  }, [peopleDirectory]);
+
+  const faceBadgeInitialsById = useMemo(() => {
+    return new Map(
+      (detail?.faces ?? []).map((face) => [
+        face.face_id,
+        face.person_id ? derivePersonInitials(peopleNameById.get(face.person_id) ?? null) : "?"
+      ])
+    );
+  }, [detail?.faces, peopleNameById]);
+
+  const selectedFaceForModal = useMemo(() => {
+    if (!detail || !activeFaceModalId) {
+      return null;
+    }
+    const index = detail.faces.findIndex((face) => face.face_id === activeFaceModalId);
+    if (index < 0) {
+      return null;
+    }
+    return { ...detail.faces[index], sequence: index + 1 };
+  }, [activeFaceModalId, detail]);
+
+  const selectedRegionForModal = useMemo(() => {
+    if (!activeFaceModalId) {
+      return null;
+    }
+    return faceOverlayRegions.find((region) => region.faceId === activeFaceModalId) ?? null;
+  }, [activeFaceModalId, faceOverlayRegions]);
+
   const backLinkFocusPhotoId = detail?.photo_id ?? returnState.returnFocusPhotoId ?? photoId ?? null;
   const mediaScale = imageScalePercent / 100;
   const mediaStageStyle: CSSProperties = mediaMode === "fit"
@@ -365,6 +400,10 @@ export function PhotoDetailRoutePage() {
         }
       ]);
     });
+  }
+
+  function openFaceAssignmentModal(faceId: string) {
+    setActiveFaceModalId(faceId);
   }
 
   return (
@@ -485,17 +524,20 @@ export function PhotoDetailRoutePage() {
                     <FaceBBoxOverlay
                       regions={faceOverlayRegions}
                       ariaLabel="Detected face regions"
+                      onRegionClick={(region) => {
+                        openFaceAssignmentModal(region.faceId);
+                      }}
                       renderRegionContent={(region, index) => (
                         <button
                           type="button"
                           className="detail-face-overlay-provenance-button"
-                          aria-label={`Open face actions for face region ${index + 1}`}
-                          onClick={() => {
-                            setRequestedFaceActionFaceId(region.faceId);
-                            setIsDetailFlyoutOpen(true);
+                          aria-label={`Open face assignment for face region ${index + 1}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openFaceAssignmentModal(region.faceId);
                           }}
                         >
-                          {provenanceBadgeIcon(region.labelSource)}
+                          {faceBadgeInitialsById.get(region.faceId) ?? "?"}
                         </button>
                       )}
                     />
@@ -565,19 +607,6 @@ export function PhotoDetailRoutePage() {
               </dl>
               {ingestStatus ? <p className="detail-ingest-status-detail">{ingestStatus.description}</p> : null}
             </article>
-
-            <PhotoFaceActionFlyout
-              faces={detail.faces}
-              people={peopleDirectory.map((person) => ({
-                person_id: person.person_id,
-                display_name: person.display_name,
-                created_ts: person.created_ts,
-                updated_ts: person.updated_ts
-              }))}
-              requestedFaceActionFaceId={requestedFaceActionFaceId}
-              onFaceUpdated={handleFaceAssigned}
-              onPersonCreated={handlePersonCreated}
-            />
 
             <article className="detail-panel">
               <h2>Metadata</h2>
@@ -660,6 +689,22 @@ export function PhotoDetailRoutePage() {
           <p>This photo is no longer available in the catalog.</p>
         </section>
       ) : null}
+
+      <PhotoFaceAssignmentModal
+        isOpen={selectedFaceForModal !== null}
+        face={selectedFaceForModal}
+        region={selectedRegionForModal}
+        thumbnail={detail?.thumbnail ?? null}
+        people={peopleDirectory.map((person) => ({
+          person_id: person.person_id,
+          display_name: person.display_name,
+          created_ts: person.created_ts,
+          updated_ts: person.updated_ts
+        }))}
+        onClose={() => setActiveFaceModalId(null)}
+        onFaceUpdated={handleFaceAssigned}
+        onPersonCreated={handlePersonCreated}
+      />
     </section>
   );
 }

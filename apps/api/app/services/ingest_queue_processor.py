@@ -9,9 +9,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.engine import Connection
 
 from app.db import IngestRunFileOutcome, IngestRunStore
-from app.db.queue import IngestQueueStore, PROCESSING_LEASE_SECONDS
+from app.db.queue import IngestQueueStore, PROCESSING_LEASE_SECONDS as _PROCESSING_LEASE_SECONDS
 from app.db.session import create_db_engine
-from app.processing.faces import OpenCvFaceDetector
+from app.processing.faces import create_default_face_detector
 from app.processing.ingest_persistence import (
     PhotoRecord,
     deserialize_detections,
@@ -23,6 +23,8 @@ from app.processing.ingest_persistence import (
 from app.services.file_reconciliation import activate_observed_file
 from app.services.ingest_extraction_worker import CandidateFileMissingError, process_candidate_payload
 from app.storage import photo_files
+
+PROCESSING_LEASE_SECONDS = _PROCESSING_LEASE_SECONDS
 
 
 @dataclass(frozen=True)
@@ -51,7 +53,7 @@ def process_pending_ingest_queue(
         return result
 
     engine = create_db_engine(database_url)
-    detector = face_detector if face_detector is not None else OpenCvFaceDetector()
+    detector = face_detector if face_detector is not None else create_default_face_detector()
     run_store = IngestRunStore(database_url)
     ingest_run_id: str | None = None
     processed = 0

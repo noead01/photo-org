@@ -111,6 +111,7 @@ For local operations:
 - `PHOTO_ORG_ENVIRONMENT=<name> make print-compose-api-base-url` prints the API URL for that environment
 - `PHOTO_ORG_ENVIRONMENT=<name> make print-compose-ui-base-url` prints the UI URL for that environment
 - `PHOTO_ORG_ENV_FILE=/path/to/file.env` can be added when you want a local command to load extra environment-specific settings
+- `PHOTO_ORG_ENVIRONMENT=<name> PHOTO_ORG_ENV_FILE=env/presets/face-detection-high-precision.env make compose-up` starts the selected environment with stricter face-detection thresholds to reduce false positives
 
 The default Compose file now bind-mounts `${PHOTO_ORG_PHOTO_LIBRARY_HOST_PATH}` into `${PHOTO_ORG_PHOTO_LIBRARY_CONTAINER_PATH}` for `db-service`, defaulting to `./seed-corpus` mounted at `/photos`. That runtime mount remains an internal deployment concern; watched-folder registration should stay relative to a registered source root.
 
@@ -132,6 +133,19 @@ Recognition suggestion behavior is configurable through environment variables:
 - `PHOTO_ORG_RECOGNITION_REVIEW_THRESHOLD` (default `0.7`)
 - `PHOTO_ORG_RECOGNITION_AUTO_ACCEPT_THRESHOLD` (default `0.9`)
 - `PHOTO_ORG_RECOGNITION_MODEL_VERSION` (default `nearest-neighbor-cosine-v1`)
+
+Face detection behavior is configurable through environment variables:
+
+- `FACE_DETECT_SCALE_FACTOR` (default `1.1`)
+- `FACE_DETECT_MIN_NEIGHBORS` (default `5`)
+- `FACE_DETECT_MIN_SIZE` (default `60x60`)
+- `FACE_DETECT_MAX_SIZE` (optional, example `420x420`)
+- `FACE_DETECT_MIN_AREA_RATIO` (default `0.0`)
+- `FACE_DETECT_MAX_AREA_RATIO` (default `1.0`)
+- `FACE_DETECT_ASPECT_RATIO_MIN` (default `0.0`)
+- `FACE_DETECT_ASPECT_RATIO_MAX` (default `100.0`)
+
+A stricter preset is checked in at `env/presets/face-detection-high-precision.env` for environments where false positives are too noisy.
 
 For operator troubleshooting during long imports or background processing, the API exposes two operational endpoints:
 
