@@ -20,7 +20,6 @@ from app.services.face_assignment import (
     reassign_face_to_person,
 )
 from app.services.face_candidates import (
-    FaceEmbeddingNotAvailableError,
     FaceNotFoundError as FaceCandidateNotFoundError,
     lookup_nearest_neighbor_candidates,
 )
@@ -255,7 +254,6 @@ def confirm_face_assignment_endpoint(
     response_model=FaceCandidateLookupResponse,
     responses={
         status.HTTP_404_NOT_FOUND: {"description": "Face not found"},
-        status.HTTP_409_CONFLICT: {"description": "Face embedding not available"},
     },
 )
 def lookup_face_candidates_endpoint(
@@ -271,8 +269,6 @@ def lookup_face_candidates_endpoint(
         )
     except FaceCandidateNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except FaceEmbeddingNotAvailableError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
     suggestion_policy = result["suggestion_policy"]
     candidates = result["candidates"]

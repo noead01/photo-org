@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 type SearchRequestPayload = {
   q?: string;
@@ -35,7 +35,33 @@ function buildSearchPayload(photoId: string) {
   };
 }
 
+async function stubLibraryAuxiliaryRequests(page: Page) {
+  await page.route("**/api/v1/people", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([])
+    });
+  });
+
+  await page.route("**/api/v1/operations/activity", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ingest_queue: {
+          summary: {
+            processing_count: 0
+          }
+        }
+      })
+    });
+  });
+}
+
 test("JRN-P4-library-shared-request-lifecycle @journey", async ({ page }) => {
+  await stubLibraryAuxiliaryRequests(page);
+
   let releaseGateResolver: (() => void) | null = null;
   const initialBrowseRequestGate = new Promise<void>((resolve) => {
     releaseGateResolver = resolve;
@@ -76,7 +102,7 @@ test("JRN-P4-library-shared-request-lifecycle @journey", async ({ page }) => {
   });
 
   await page.goto("/library");
-  await expect(page.getByRole("status")).toContainText("Loading library workflow.");
+  await expect(page.getByText("Loading library workflow.")).toBeVisible();
 
   initialRequestsReleased = true;
   releaseGateResolver?.();
@@ -92,6 +118,8 @@ test("JRN-P4-library-shared-request-lifecycle @journey", async ({ page }) => {
 });
 
 test("JRN-P4-library-invalid-page-reset @journey", async ({ page }) => {
+  await stubLibraryAuxiliaryRequests(page);
+
   await page.route("**/api/v1/search", async (route) => {
     await route.fulfill({
       status: 200,
@@ -105,24 +133,21 @@ test("JRN-P4-library-invalid-page-reset @journey", async ({ page }) => {
   await expect(
     page.getByText("Reset to page 1 because that page position is unavailable.")
   ).toBeVisible();
-  await expect(page.locator(".browse-page-indicator")).toHaveText("Page 1");
+  await expect(page.getByRole("button", { name: "Page 1" })).toHaveAttribute(
+    "aria-current",
+    "page"
+  );
   await expect(page).toHaveURL(/\/library$/);
 });
 
 test("JRN-P4-library-filtered-shared-request-lifecycle @journey", async ({ page }) => {
+  await stubLibraryAuxiliaryRequests(page);
+
   let releaseFirstSearchResponse: (() => void) | null = null;
   const firstSearchResponseGate = new Promise<void>((resolve) => {
     releaseFirstSearchResponse = resolve;
   });
   let searchRequestCount = 0;
-
-  await page.route("**/api/v1/people", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify([])
-    });
-  });
 
   await page.route("**/api/v1/search", async (route) => {
     const body = (route.request().postDataJSON() ?? {}) as SearchRequestPayload;
