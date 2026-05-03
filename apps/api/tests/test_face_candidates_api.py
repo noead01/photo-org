@@ -364,7 +364,11 @@ def test_face_candidates_api_returns_404_for_missing_face(tmp_path, monkeypatch)
     assert response.json() == {"detail": "Face not found"}
 
 
-def test_face_candidates_api_returns_409_when_source_embedding_is_missing(tmp_path, monkeypatch):
+def test_face_candidates_api_returns_no_suggestions_when_source_embedding_is_missing(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("PHOTO_ORG_RECOGNITION_REVIEW_THRESHOLD", "0.75")
+    monkeypatch.setenv("PHOTO_ORG_RECOGNITION_AUTO_ACCEPT_THRESHOLD", "0.95")
     client = _client(tmp_path, monkeypatch, "face-candidates-missing-embedding.db")
 
     engine = create_engine(
@@ -384,8 +388,18 @@ def test_face_candidates_api_returns_409_when_source_embedding_is_missing(tmp_pa
 
     response = client.get("/api/v1/faces/source-face/candidates")
 
-    assert response.status_code == 409
-    assert response.json() == {"detail": "Face embedding not available"}
+    assert response.status_code == 200
+    assert response.json() == {
+        "face_id": "source-face",
+        "candidates": [],
+        "suggestion_policy": {
+            "decision": "no_suggestion",
+            "review_threshold": 0.75,
+            "auto_accept_threshold": 0.95,
+            "top_candidate_confidence": None,
+        },
+        "review_needed_suggestion": None,
+    }
 
 
 def test_face_candidates_api_rejects_limit_out_of_bounds(tmp_path, monkeypatch):
@@ -404,6 +418,4 @@ def test_openapi_schema_includes_face_candidate_lookup_path(tmp_path, monkeypatc
     assert response.status_code == 200
     schema = response.json()
     assert "/api/v1/faces/{face_id}/candidates" in schema["paths"]
-    assert schema["paths"]["/api/v1/faces/{face_id}/candidates"]["get"]["responses"]["409"][
-        "description"
-    ] == "Face embedding not available"
+    assert "409" not in schema["paths"]["/api/v1/faces/{face_id}/candidates"]["get"]["responses"]

@@ -18,10 +18,6 @@ class FaceNotFoundError(LookupError):
     pass
 
 
-class FaceEmbeddingNotAvailableError(RuntimeError):
-    pass
-
-
 def lookup_nearest_neighbor_candidates(
     connection: Connection,
     *,
@@ -39,8 +35,18 @@ def lookup_nearest_neighbor_candidates(
         raise FaceNotFoundError("Face not found")
 
     source_embedding = _coerce_embedding(source_row["embedding"])
+    thresholds = resolve_suggestion_thresholds()
     if source_embedding is None:
-        raise FaceEmbeddingNotAvailableError("Face embedding not available")
+        return {
+            "face_id": face_id,
+            "candidates": [],
+            "suggestion_policy": {
+                "decision": SUGGESTION_DECISION_NO_SUGGESTION,
+                "review_threshold": thresholds["review_threshold"],
+                "auto_accept_threshold": thresholds["auto_accept_threshold"],
+                "top_candidate_confidence": None,
+            },
+        }
     if connection.dialect.name == "postgresql":
         ordered_candidates = _lookup_candidates_postgresql(
             connection,
@@ -55,7 +61,6 @@ def lookup_nearest_neighbor_candidates(
             source_embedding=source_embedding,
         )
     candidates_with_confidence = _with_candidate_confidence(ordered_candidates)
-    thresholds = resolve_suggestion_thresholds()
     top_candidate_confidence = (
         float(candidates_with_confidence[0]["confidence"]) if candidates_with_confidence else None
     )

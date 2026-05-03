@@ -664,3 +664,53 @@ def test_store_face_detections_rejects_embeddings_with_wrong_dimension(tmp_path)
                     }
                 ],
             )
+
+
+def test_store_face_detections_generates_embedding_when_missing(tmp_path):
+    from app.processing.ingest_persistence import store_face_detections
+
+    database_url = f"sqlite:///{tmp_path / 'store-faces-generate-embedding.db'}"
+    upgrade_database(database_url)
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 3, 28, 22, 0, tzinfo=UTC)
+
+    with engine.begin() as connection:
+        connection.execute(
+            insert(photos).values(
+                _photo_row_values(
+                    photo_id="photo-1",
+                    path="/library/photo.jpg",
+                    sha256="f" * 64,
+                    now=now,
+                    thumbnail_jpeg=None,
+                    thumbnail_mime_type=None,
+                    thumbnail_width=None,
+                    thumbnail_height=None,
+                    faces_count=0,
+                    faces_detected_ts=None,
+                )
+            )
+        )
+        store_face_detections(
+            connection,
+            "photo-1",
+            [
+                {
+                    "face_id": "face-1",
+                    "bbox_x": 1,
+                    "bbox_y": 2,
+                    "bbox_w": 3,
+                    "bbox_h": 4,
+                    "bitmap": b"bitmap",
+                    "embedding": None,
+                    "provenance": {"detector": "test"},
+                }
+            ],
+        )
+        persisted_embedding = connection.execute(
+            select(faces.c.embedding).where(faces.c.face_id == "face-1")
+        ).scalar_one()
+
+    assert isinstance(persisted_embedding, list)
+    assert len(persisted_embedding) == EMBEDDING_DIMENSION
+    assert any(component != 0.0 for component in persisted_embedding)
