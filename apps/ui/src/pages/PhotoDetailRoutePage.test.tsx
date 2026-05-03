@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { PhotoDetailRoutePage } from "./PhotoDetailRoutePage";
@@ -343,6 +343,35 @@ describe("PhotoDetailRoutePage", () => {
     expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Actual pixels" })).toHaveClass("is-active");
     expect(screen.getByRole("button", { name: "Fit to panel" })).not.toHaveClass("is-active");
+  });
+
+  it("loads the full-resolution original image when available", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => buildPayload()
+    } as Response);
+
+    renderDetail();
+
+    const image = await screen.findByRole("img", { name: "Preview for photo-1" });
+    expect(image).toHaveAttribute("src", "/api/v1/photos/photo-1/original");
+  });
+
+  it("falls back to the thumbnail when original-image loading fails", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => buildPayload()
+    } as Response);
+
+    renderDetail();
+
+    const image = await screen.findByRole("img", { name: "Preview for photo-1" });
+    expect(image).toHaveAttribute("src", "/api/v1/photos/photo-1/original");
+    fireEvent.error(image);
+
+    await waitFor(() => {
+      expect(image).toHaveAttribute("src", "data:image/jpeg;base64,dGh1bWI=");
+    });
   });
 
   it("allows toggling face bbox overlays in the preview", async () => {

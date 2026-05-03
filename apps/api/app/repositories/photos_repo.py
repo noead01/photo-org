@@ -1,12 +1,16 @@
 import base64
+import json
 import math
+import posixpath
 from datetime import UTC, datetime, time
+from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy import MetaData, Table, select, func, or_, and_, case
 from sqlalchemy.engine import Row
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import Select
 
+from app.path_contract import normalize_relative_path
 from app.schemas.search_request import SearchFilters, SortSpec, PageSpec
 from app.domain.facets import (
     TagsFacet,
@@ -62,8 +66,11 @@ class PhotosRepository:
         self.photo_tags: Table = Table("photo_tags", md, autoload_with=bind)
         self.face_labels: Table = Table("face_labels", md, autoload_with=bind)
         self.photo_files: Table = Table("photo_files", md, autoload_with=bind)
+        self.photo_exif_attributes: Table = Table("photo_exif_attributes", md, autoload_with=bind)
+        self.exif_semantic_mappings: Table = Table("exif_semantic_mappings", md, autoload_with=bind)
         self.watched_folders: Table = Table("watched_folders", md, autoload_with=bind)
         self.storage_sources: Table = Table("storage_sources", md, autoload_with=bind)
+        self.storage_source_aliases: Table = Table("storage_source_aliases", md, autoload_with=bind)
 
     @staticmethod
     def _normalize_person_name_terms(person_names: List[str]) -> List[str]:
@@ -143,6 +150,8 @@ class PhotosRepository:
 
         item = self._hydrate_items(rows, include_face_regions=True)[0]
         row = rows[0]
+        exif_attributes = self._load_photo_exif_attributes(photo_id)
+        exif_unmapped_attributes = self._load_photo_exif_unmapped_attributes(photo_id)
         item["metadata"] = {
             "sha256": row.sha256,
             "phash": row.phash,
@@ -152,6 +161,8 @@ class PhotosRepository:
             "gps_latitude": row.gps_latitude,
             "gps_longitude": row.gps_longitude,
             "gps_altitude": row.gps_altitude,
+            "exif_attributes": exif_attributes,
+            "exif_unmapped_attributes": exif_unmapped_attributes,
             "created_ts": row.created_ts,
             "updated_ts": row.updated_ts,
             "modified_ts": row.modified_ts,
@@ -161,11 +172,211 @@ class PhotosRepository:
         }
         return item
 
+    def _load_photo_exif_attributes(self, photo_id: str) -> dict[str, object] | None:
+        rows = self.db.execute(
+            select(
+                self.photo_exif_attributes.c.exif_attribute_name,
+                self.photo_exif_attributes.c.exif_attribute_value,
+            )
+            .where(self.photo_exif_attributes.c.photo_id == photo_id)
+            .order_by(self.photo_exif_attributes.c.exif_attribute_name.asc())
+        ).all()
+        if not rows:
+            return None
+        return {row.exif_attribute_name: row.exif_attribute_value for row in rows}
+
+    def _load_photo_exif_unmapped_attributes(self, photo_id: str) -> dict[str, object] | None:
+        rows = self.db.execute(
+            select(
+                self.photo_exif_attributes.c.exif_attribute_name,
+                self.photo_exif_attributes.c.exif_attribute_value,
+            )
+            .select_from(
+                self.photo_exif_attributes.outerjoin(
+                    self.exif_semantic_mappings,
+                    self.photo_exif_attributes.c.exif_attribute_name
+                    == self.exif_semantic_mappings.c.exif_attribute_name,
+                )
+            )
+            .where(self.photo_exif_attributes.c.photo_id == photo_id)
+            .where(self.exif_semantic_mappings.c.exif_attribute_name.is_(None))
+            .order_by(self.photo_exif_attributes.c.exif_attribute_name.asc())
+        ).all()
+        if not rows:
+            return None
+        return {row.exif_attribute_name: row.exif_attribute_value for row in rows}
+
     def list_photos(self) -> List[Dict[str, Any]]:
         """Return catalog photos in a deterministic browse order."""
         query = select(self.photos).order_by(*self._sorting_clauses(SortSpec()))
         rows = [row for row in self.db.execute(query).all() if row.deleted_ts is None]
         return self._hydrate_items(rows)
+
+    def resolve_original_photo_path(self, photo_id: str) -> Optional[Path]:
+        rows = self.db.execute(
+            select(
+                self.photo_files.c.relative_path,
+                self.photo_files.c.last_seen_ts,
+                self.photo_files.c.created_ts,
+                self.photo_files.c.photo_file_id,
+                self.watched_folders.c.scan_path,
+                self.watched_folders.c.relative_path.label("watched_folder_relative_path"),
+                self.watched_folders.c.storage_source_id,
+                self.storage_sources.c.marker_filename,
+            )
+            .select_from(
+                self.photo_files.outerjoin(
+                    self.watched_folders,
+                    self.photo_files.c.watched_folder_id == self.watched_folders.c.watched_folder_id,
+                ).outerjoin(
+                    self.storage_sources,
+                    self.watched_folders.c.storage_source_id == self.storage_sources.c.storage_source_id,
+                )
+            )
+            .where(self.photo_files.c.photo_id == photo_id)
+            .where(self.photo_files.c.deleted_ts.is_(None))
+            .where(self.photo_files.c.lifecycle_state == "active")
+            .order_by(
+                self.photo_files.c.last_seen_ts.desc(),
+                self.photo_files.c.created_ts.desc(),
+                self.photo_files.c.photo_file_id.desc(),
+            )
+        ).mappings().all()
+
+        for row in rows:
+            photo_relative_path = self._normalize_relative_path_or_none(row["relative_path"])
+            if photo_relative_path is None:
+                continue
+
+            storage_source_id = row["storage_source_id"]
+            if storage_source_id:
+                resolved = self._resolve_registered_storage_source_file(
+                    storage_source_id=str(storage_source_id),
+                    marker_filename=str(row["marker_filename"] or ".photo-org-source.json"),
+                    watched_folder_relative_path=row["watched_folder_relative_path"],
+                    photo_relative_path=photo_relative_path,
+                )
+                if resolved is not None:
+                    return resolved
+                continue
+
+            scan_path = row["scan_path"]
+            if not isinstance(scan_path, str) or not scan_path.strip():
+                continue
+
+            try:
+                scan_root = Path(scan_path).expanduser().resolve()
+            except OSError:
+                continue
+
+            candidate = self._resolve_candidate_path(scan_root, photo_relative_path)
+            if candidate is not None:
+                return candidate
+
+        return None
+
+    def _resolve_registered_storage_source_file(
+        self,
+        *,
+        storage_source_id: str,
+        marker_filename: str,
+        watched_folder_relative_path: object,
+        photo_relative_path: str,
+    ) -> Optional[Path]:
+        alias_rows = self.db.execute(
+            select(self.storage_source_aliases.c.alias_path)
+            .where(self.storage_source_aliases.c.storage_source_id == storage_source_id)
+            .order_by(self.storage_source_aliases.c.alias_path)
+        ).all()
+        watched_relative = self._normalize_relative_path_or_none(watched_folder_relative_path)
+        source_relative = self._join_relative_paths(watched_relative, photo_relative_path)
+        if source_relative is None:
+            return None
+
+        for alias_row in alias_rows:
+            alias_path = alias_row.alias_path
+            if not isinstance(alias_path, str) or not alias_path.strip():
+                continue
+            try:
+                alias_root = Path(alias_path).expanduser().resolve()
+            except OSError:
+                continue
+
+            if not self._is_storage_source_marker_valid(
+                alias_root=alias_root,
+                storage_source_id=storage_source_id,
+                marker_filename=marker_filename,
+            ):
+                continue
+
+            candidate = self._resolve_candidate_path(alias_root, source_relative)
+            if candidate is not None:
+                return candidate
+
+        return None
+
+    @staticmethod
+    def _is_storage_source_marker_valid(
+        *,
+        alias_root: Path,
+        storage_source_id: str,
+        marker_filename: str,
+    ) -> bool:
+        marker_path = alias_root / marker_filename
+        if not marker_path.is_file():
+            return False
+
+        try:
+            marker_payload = json.loads(marker_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return False
+
+        if not isinstance(marker_payload, dict):
+            return False
+
+        return str(marker_payload.get("storage_source_id")) == storage_source_id
+
+    @staticmethod
+    def _normalize_relative_path_or_none(value: object) -> Optional[str]:
+        if not isinstance(value, str):
+            return None
+
+        raw = value.strip()
+        if raw in {"", "."}:
+            return None
+
+        try:
+            return normalize_relative_path(raw)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _join_relative_paths(left: Optional[str], right: str) -> Optional[str]:
+        if left is None:
+            return right
+
+        joined = posixpath.normpath(posixpath.join(left, right))
+        try:
+            return normalize_relative_path(joined)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _resolve_candidate_path(root: Path, relative_path: str) -> Optional[Path]:
+        try:
+            candidate = (root / relative_path).resolve()
+        except OSError:
+            return None
+
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            return None
+
+        if not candidate.is_file():
+            return None
+
+        return candidate
 
     def get_filtered_photo_ids(self, filters: SearchFilters, text_query: Optional[str] = None) -> List[str]:
         """Get photo IDs for facet computation."""

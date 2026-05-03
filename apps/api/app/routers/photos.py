@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import mimetypes
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_db
@@ -36,3 +39,25 @@ def get_photo_detail(photo_id: str, db: Session = Depends(get_db)) -> PhotoDetai
     if photo is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Photo not found")
     return PhotoDetailResponse.model_validate(photo)
+
+
+@router.get(
+    "/{photo_id}/original",
+    summary="Get photo original",
+    description="Stream the original photo file when storage aliases and source markers resolve to a readable file.",
+    responses={
+        status.HTTP_404_NOT_FOUND: {"description": "Original photo file not found"},
+    },
+)
+def get_photo_original(photo_id: str, db: Session = Depends(get_db)) -> FileResponse:
+    repo = PhotosRepository(db)
+    resolved = repo.resolve_original_photo_path(photo_id)
+    if resolved is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Original photo not found")
+
+    mime_type, _ = mimetypes.guess_type(str(resolved))
+    return FileResponse(
+        path=resolved,
+        media_type=mime_type or "application/octet-stream",
+        filename=resolved.name,
+    )

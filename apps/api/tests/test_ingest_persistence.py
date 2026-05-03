@@ -137,6 +137,8 @@ def test_build_ingest_submission_serializes_expected_payload_fields(tmp_path):
     assert payload["gps_latitude"] is None
     assert payload["gps_longitude"] is None
     assert payload["gps_altitude"] is None
+    assert payload["exif_attributes"] is None
+    assert payload["exif_unmapped_attributes"] is None
     assert payload["faces_count"] == 0
 
 
@@ -375,6 +377,8 @@ def test_lookup_existing_artifacts_by_sha_prefers_complete_duplicate_row(tmp_pat
                         }
                     ]
                 )
+            if "FROM photo_exif_attributes" in compiled:
+                return FakeExecuteResult([])
             raise AssertionError(f"unexpected statement: {compiled}")
 
     connection = FakeConnection()

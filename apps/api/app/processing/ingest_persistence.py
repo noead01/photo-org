@@ -2,17 +2,18 @@ from __future__ import annotations
 
 import base64
 import hashlib
-from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
+from typing import Any
 
 from sqlalchemy import delete, insert, select, update
 from sqlalchemy.engine import Connection
 
 from app.path_contract import build_rooted_photo_path, relative_photo_path
 from app.processing.metadata import extract_image_metadata, stat_timestamp_to_iso
-from app.storage import faces, photos
+from app.storage import exif_semantic_mappings, faces, photo_exif_attributes, photos
 from photoorg_db_schema import EMBEDDING_DIMENSION
 
 
@@ -34,6 +35,8 @@ class PhotoRecord:
     gps_latitude: float | None
     gps_longitude: float | None
     gps_altitude: float | None
+    exif_attributes: dict[str, Any] | None = None
+    exif_unmapped_attributes: dict[str, Any] | None = None
     thumbnail_jpeg: bytes | None = None
     thumbnail_mime_type: str | None = None
     thumbnail_width: int | None = None
@@ -83,6 +86,8 @@ def build_photo_record_from_sha(
         gps_latitude=image_metadata.gps_latitude,
         gps_longitude=image_metadata.gps_longitude,
         gps_altitude=image_metadata.gps_altitude,
+        exif_attributes=image_metadata.exif_attributes,
+        exif_unmapped_attributes=image_metadata.exif_unmapped_attributes,
     )
 
 
@@ -209,6 +214,7 @@ def lookup_existing_artifacts_by_sha(
 
 
 def upsert_photo(connection: Connection, record: PhotoRecord) -> bool:
+    record = _with_semantic_shot_fields(connection, record)
     existing = connection.execute(
         select(photos.c.photo_id).where(photos.c.path == record.path)
     ).mappings().first()
@@ -233,13 +239,16 @@ def upsert_photo(connection: Connection, record: PhotoRecord) -> bool:
 
     if existing is None:
         _insert_photo_row(connection, payload)
+        _sync_photo_exif_attributes(connection, record.photo_id, record.exif_attributes)
         return True
 
     _update_photo_row(connection, photos.c.path == record.path, payload)
+    _sync_photo_exif_attributes(connection, record.photo_id, record.exif_attributes)
     return False
 
 
 def upsert_source_photo(connection: Connection, record: PhotoRecord) -> tuple[bool, str]:
+    record = _with_semantic_shot_fields(connection, record)
     existing = connection.execute(
         select(
             photos.c.photo_id,
@@ -264,6 +273,7 @@ def upsert_source_photo(connection: Connection, record: PhotoRecord) -> tuple[bo
                 faces_detected_ts=_normalize_optional_timestamp(existing["faces_detected_ts"]),
             ),
         )
+        _sync_photo_exif_attributes(connection, existing["photo_id"], record.exif_attributes)
         return False, existing["photo_id"]
 
     _insert_photo_row(
@@ -275,6 +285,7 @@ def upsert_source_photo(connection: Connection, record: PhotoRecord) -> tuple[bo
             faces_detected_ts=None,
         ),
     )
+    _sync_photo_exif_attributes(connection, record.photo_id, record.exif_attributes)
     return True, record.photo_id
 
 
@@ -311,6 +322,8 @@ def deserialize_photo_record(payload: dict) -> PhotoRecord:
         gps_latitude=payload.get("gps_latitude"),
         gps_longitude=payload.get("gps_longitude"),
         gps_altitude=payload.get("gps_altitude"),
+        exif_attributes=payload.get("exif_attributes"),
+        exif_unmapped_attributes=payload.get("exif_unmapped_attributes"),
         thumbnail_jpeg=_decode_optional_bytes(payload.get("thumbnail_jpeg")),
         thumbnail_mime_type=payload.get("thumbnail_mime_type"),
         thumbnail_width=payload.get("thumbnail_width"),
@@ -348,6 +361,8 @@ def _serialize_record(record: PhotoRecord) -> dict:
         "gps_latitude": record.gps_latitude,
         "gps_longitude": record.gps_longitude,
         "gps_altitude": record.gps_altitude,
+        "exif_attributes": record.exif_attributes,
+        "exif_unmapped_attributes": record.exif_unmapped_attributes,
         "thumbnail_jpeg": _encode_optional_thumbnail(record.thumbnail_jpeg),
         "thumbnail_mime_type": record.thumbnail_mime_type,
         "thumbnail_width": record.thumbnail_width,
@@ -376,8 +391,19 @@ def _photo_row_payload(
     faces_detected_ts: datetime | None,
 ) -> dict[str, object | None]:
     payload = {
-        **asdict(record),
         "photo_id": photo_id or record.photo_id,
+        "path": record.path,
+        "sha256": record.sha256,
+        "filesize": record.filesize,
+        "ext": record.ext,
+        "shot_ts_source": record.shot_ts_source,
+        "camera_make": record.camera_make,
+        "camera_model": record.camera_model,
+        "software": record.software,
+        "orientation": record.orientation,
+        "gps_latitude": record.gps_latitude,
+        "gps_longitude": record.gps_longitude,
+        "gps_altitude": record.gps_altitude,
         "phash": None,
         "created_ts": _normalize_timestamp(record.created_ts),
         "modified_ts": _normalize_timestamp(record.modified_ts),
@@ -466,6 +492,19 @@ def _build_reusable_artifacts_payload(
     if int(row["faces_count"] or 0) != len(detections):
         return None
 
+    exif_attribute_rows = connection.execute(
+        select(
+            photo_exif_attributes.c.exif_attribute_name,
+            photo_exif_attributes.c.exif_attribute_value,
+        )
+        .where(photo_exif_attributes.c.photo_id == row["photo_id"])
+        .order_by(photo_exif_attributes.c.exif_attribute_name)
+    ).mappings().all()
+    exif_attributes = {
+        str(attribute_row["exif_attribute_name"]): attribute_row["exif_attribute_value"]
+        for attribute_row in exif_attribute_rows
+    }
+
     return {
         "photo_id": row["photo_id"],
         "shot_ts": row["shot_ts"],
@@ -477,6 +516,8 @@ def _build_reusable_artifacts_payload(
         "gps_latitude": row["gps_latitude"],
         "gps_longitude": row["gps_longitude"],
         "gps_altitude": row["gps_altitude"],
+        "exif_attributes": exif_attributes or None,
+        "exif_unmapped_attributes": None,
         "thumbnail_jpeg": row["thumbnail_jpeg"],
         "thumbnail_mime_type": row["thumbnail_mime_type"],
         "thumbnail_width": row["thumbnail_width"],
@@ -511,7 +552,7 @@ def _sha_reuse_sort_key(row: dict[str, object | None]) -> tuple[int, int, str]:
             "gps_longitude",
             "gps_altitude",
         )
-        if row[column] is not None
+        if row.get(column) is not None
     )
     return (
         0 if thumbnail_complete and faces_complete else 1,
@@ -600,6 +641,132 @@ def _update_photo_row(
         .where(where_clause)
         .values(**payload)
     )
+
+
+def _with_semantic_shot_fields(connection: Connection, record: PhotoRecord) -> PhotoRecord:
+    resolved_shot_ts, resolved_source = _resolve_semantic_shot_fields(connection, record.exif_attributes)
+    if resolved_shot_ts is None:
+        return record
+    return replace(
+        record,
+        shot_ts=resolved_shot_ts,
+        shot_ts_source=resolved_source or record.shot_ts_source,
+    )
+
+
+def _resolve_semantic_shot_fields(
+    connection: Connection,
+    exif_attributes: dict[str, Any] | None,
+) -> tuple[datetime | None, str | None]:
+    if not exif_attributes:
+        return None, None
+
+    raw_datetime, datetime_attr_name = _first_semantic_attribute_value(
+        connection,
+        semantic_key="shot_datetime",
+        exif_attributes=exif_attributes,
+    )
+    if raw_datetime is None:
+        return None, None
+
+    parsed = _parse_exif_datetime(str(raw_datetime).strip())
+    if parsed is None:
+        return None, None
+
+    raw_subsec, _ = _first_semantic_attribute_value(
+        connection,
+        semantic_key="shot_subsec",
+        exif_attributes=exif_attributes,
+    )
+    if raw_subsec is not None:
+        digits = "".join(ch for ch in str(raw_subsec) if ch.isdigit())[:6]
+        if digits:
+            parsed = parsed.replace(microsecond=int(digits.ljust(6, "0")))
+
+    raw_offset, _ = _first_semantic_attribute_value(
+        connection,
+        semantic_key="shot_offset",
+        exif_attributes=exif_attributes,
+    )
+    if raw_offset is not None:
+        offset_text = str(raw_offset).strip()
+        if _valid_offset(offset_text):
+            offset_hours = int(offset_text[1:3])
+            offset_minutes = int(offset_text[4:6])
+            offset_delta = timedelta(hours=offset_hours, minutes=offset_minutes)
+            if offset_text[0] == "-":
+                offset_delta = -offset_delta
+            return parsed.replace(tzinfo=timezone(offset_delta)), _shot_source_label(datetime_attr_name)
+
+    return parsed.replace(tzinfo=UTC), _shot_source_label(datetime_attr_name)
+
+
+def _first_semantic_attribute_value(
+    connection: Connection,
+    *,
+    semantic_key: str,
+    exif_attributes: dict[str, Any],
+) -> tuple[Any | None, str | None]:
+    rows = connection.execute(
+        select(exif_semantic_mappings.c.exif_attribute_name)
+        .where(exif_semantic_mappings.c.semantic_key == semantic_key)
+        .order_by(exif_semantic_mappings.c.precedence.asc(), exif_semantic_mappings.c.exif_attribute_name.asc())
+    ).scalars().all()
+    for attribute_name in rows:
+        value = exif_attributes.get(attribute_name)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if not text:
+            continue
+        return value, str(attribute_name)
+    return None, None
+
+
+def _parse_exif_datetime(value: str) -> datetime | None:
+    for fmt in ("%Y:%m:%d %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _valid_offset(value: str) -> bool:
+    if len(value) != 6:
+        return False
+    if value[0] not in {"+", "-"}:
+        return False
+    return value[1:3].isdigit() and value[3] == ":" and value[4:6].isdigit()
+
+
+def _shot_source_label(attribute_name: str | None) -> str | None:
+    if attribute_name is None:
+        return None
+    if attribute_name == "exif_ifd.DateTimeOriginal":
+        return "exif:DateTimeOriginal"
+    if attribute_name == "exif.DateTime":
+        return "exif:DateTime"
+    return f"exif_attr:{attribute_name}"
+
+
+def _sync_photo_exif_attributes(
+    connection: Connection,
+    photo_id: str,
+    exif_attributes: dict[str, Any] | None,
+) -> None:
+    connection.execute(delete(photo_exif_attributes).where(photo_exif_attributes.c.photo_id == photo_id))
+    if not exif_attributes:
+        return
+
+    for attribute_name, attribute_value in sorted(exif_attributes.items()):
+        connection.execute(
+            insert(photo_exif_attributes).values(
+                photo_id=photo_id,
+                exif_attribute_name=attribute_name,
+                exif_attribute_value=attribute_value,
+            )
+        )
 
 
 __all__ = [
