@@ -257,7 +257,7 @@ describe("PhotoDetailRoutePage", () => {
     renderDetail();
 
     expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Show details" }));
+    await user.click(await screen.findByRole("button", { name: "Show details" }));
 
     expect(screen.getByRole("button", { name: "Show all EXIF attributes" })).toBeInTheDocument();
     expect(screen.queryByText("exif.CustomNote")).not.toBeInTheDocument();
@@ -292,7 +292,7 @@ describe("PhotoDetailRoutePage", () => {
     renderDetail();
 
     expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Show details" }));
+    await user.click(await screen.findByRole("button", { name: "Show details" }));
     await user.click(screen.getByRole("button", { name: "Show all EXIF attributes" }));
 
     expect(screen.getByText("exif_ifd.MakerNote")).toBeInTheDocument();
