@@ -30,6 +30,20 @@ class CandidateFileMissingError(ValueError):
     pass
 
 
+_DETECTION_SETTINGS_KEYS = (
+    "detector",
+    "model",
+    "scale_factor",
+    "min_neighbors",
+    "min_size",
+    "max_size",
+    "min_area_ratio",
+    "max_area_ratio",
+    "aspect_ratio_min",
+    "aspect_ratio_max",
+)
+
+
 def process_candidate_payload(
     database_url,
     *,
@@ -53,6 +67,23 @@ def process_candidate_payload(
         engine.dispose()
 
     if existing_artifacts is not None:
+        detector = face_detector if face_detector is not None else create_default_face_detector()
+        existing_detections = list(existing_artifacts["detections"])
+        should_refresh_detections = _should_refresh_detections(
+            detector=detector,
+            existing_detections=existing_detections,
+        )
+        detection_warnings: list[str] = []
+        analysis_performed = False
+        detections = existing_detections
+        if should_refresh_detections:
+            try:
+                detections = detector.detect(runtime_path)
+                analysis_performed = True
+            except Exception as exc:
+                if _is_missing_file_error(exc):
+                    raise CandidateFileMissingError(f"candidate file missing: {runtime_path}") from exc
+                detection_warnings.append(f"face detection failed: {exc}")
         try:
             reused_record = _build_reused_photo_record(
                 runtime_path,
@@ -68,11 +99,11 @@ def process_candidate_payload(
             extracted_payload=serialize_reused_content_submission(
                 record=reused_record,
                 candidate_payload=payload,
-                warnings=[],
-                detections=existing_artifacts["detections"],
+                warnings=detection_warnings,
+                detections=detections,
             ),
             reused_existing_artifacts=True,
-            analysis_performed=False,
+            analysis_performed=analysis_performed,
         )
 
     try:
@@ -162,6 +193,8 @@ def _build_reused_photo_record(
         gps_latitude=existing_artifacts.get("gps_latitude"),
         gps_longitude=existing_artifacts.get("gps_longitude"),
         gps_altitude=existing_artifacts.get("gps_altitude"),
+        exif_attributes=existing_artifacts.get("exif_attributes"),
+        exif_unmapped_attributes=existing_artifacts.get("exif_unmapped_attributes"),
         thumbnail_jpeg=existing_artifacts["thumbnail_jpeg"],
         thumbnail_mime_type=existing_artifacts["thumbnail_mime_type"],
         thumbnail_width=existing_artifacts["thumbnail_width"],
@@ -184,3 +217,40 @@ def _parse_optional_datetime(value: str | datetime | None) -> datetime | None:
 
 def _is_missing_file_error(exc: BaseException) -> bool:
     return isinstance(exc, (FileNotFoundError, NotADirectoryError))
+
+
+def _should_refresh_detections(*, detector, existing_detections: list[dict]) -> bool:
+    detector_settings = _read_detector_settings(detector)
+    if detector_settings is None:
+        return False
+    if not existing_detections:
+        return False
+    for detection in existing_detections:
+        existing_settings = _extract_detection_settings(detection)
+        if existing_settings is None:
+            return True
+        if existing_settings != detector_settings:
+            return True
+    return False
+
+
+def _read_detector_settings(detector) -> dict[str, object] | None:
+    settings_getter = getattr(detector, "detection_settings", None)
+    if not callable(settings_getter):
+        return None
+    settings = settings_getter()
+    if not isinstance(settings, dict):
+        return None
+    return {key: settings.get(key) for key in _DETECTION_SETTINGS_KEYS}
+
+
+def _extract_detection_settings(detection: dict) -> dict[str, object] | None:
+    provenance = detection.get("provenance")
+    if not isinstance(provenance, dict):
+        return None
+    settings: dict[str, object] = {}
+    for key in _DETECTION_SETTINGS_KEYS:
+        if key not in provenance:
+            return None
+        settings[key] = provenance[key]
+    return settings

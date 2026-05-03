@@ -39,6 +39,25 @@ def test_extract_shot_timestamp_falls_back_to_utc_or_none():
     assert metadata._extract_shot_timestamp({}, {}) is None
 
 
+def test_extract_shot_timestamp_supports_datetime_digitized_aliases():
+    exif_map = {}
+    exif_ifd = {
+        "DateTimeDigitized": "2024:03:21 10:11:12",
+        "SubsecTimeDigitized": "1234",
+        "OffsetTimeDigitized": "-04:00",
+    }
+
+    assert metadata._extract_shot_timestamp(exif_map, exif_ifd) == "2024-03-21T10:11:12.123400-04:00"
+
+
+def test_shot_ts_source_reports_semantic_alias_origin():
+    shot_ts = "2024-03-21T10:11:12+00:00"
+    exif_map = {}
+    exif_ifd = {"DateTimeDigitized": "2024:03:21 10:11:12"}
+
+    assert metadata._shot_ts_source(shot_ts, exif_map, exif_ifd) == "exif_ifd:DateTimeDigitized"
+
+
 def test_shot_ts_source_prefers_datetime_original_then_datetime_then_generic_exif():
     shot_ts = "2024-03-21T10:11:12+00:00"
 
@@ -46,6 +65,24 @@ def test_shot_ts_source_prefers_datetime_original_then_datetime_then_generic_exi
     assert metadata._shot_ts_source(shot_ts, {"DateTime": "x"}, {}) == "exif:DateTime"
     assert metadata._shot_ts_source(shot_ts, {}, {}) == "exif"
     assert metadata._shot_ts_source(None, {"DateTime": "x"}, {"DateTimeOriginal": "x"}) is None
+
+
+def test_collect_unmapped_exif_attributes_excludes_semantic_date_tags():
+    exif_map = {"DateTime": "2024:03:21 10:11:12", "Make": "Canon"}
+    exif_ifd = {"DateTimeOriginal": "2024:03:21 10:11:12", "CustomNote": b"\x01\x02"}
+    gps_ifd = {"GPSLatitudeRef": "N"}
+
+    all_attributes, unmapped_attributes = metadata._collect_exif_attributes(exif_map, exif_ifd, gps_ifd)
+
+    assert "exif.DateTime" in all_attributes
+    assert "exif_ifd.DateTimeOriginal" in all_attributes
+    assert "gps_ifd.GPSLatitudeRef" in all_attributes
+    assert all_attributes["exif_ifd.CustomNote"] == "0102"
+
+    assert "exif.DateTime" not in unmapped_attributes
+    assert "exif_ifd.DateTimeOriginal" not in unmapped_attributes
+    assert "exif.Make" not in unmapped_attributes
+    assert unmapped_attributes["exif_ifd.CustomNote"] == "0102"
 
 
 class _ExifWithIfd:

@@ -212,6 +212,11 @@ export function PhotoDetailRoutePage() {
   const [reloadToken, setReloadToken] = useState(0);
   const [mediaMode, setMediaMode] = useState<MediaPresentationMode>("actual");
   const [imageScalePercent, setImageScalePercent] = useState(100);
+  const [isOriginalImageEnabled, setIsOriginalImageEnabled] = useState(true);
+  const [originalImageNaturalSize, setOriginalImageNaturalSize] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
   const [showFaceBoxes, setShowFaceBoxes] = useState(true);
   const [isDetailFlyoutOpen, setIsDetailFlyoutOpen] = useState(false);
   const [activeFaceModalId, setActiveFaceModalId] = useState<string | null>(null);
@@ -219,6 +224,11 @@ export function PhotoDetailRoutePage() {
 
   useEffect(() => {
     headingRef.current?.focus();
+  }, [photoId]);
+
+  useEffect(() => {
+    setIsOriginalImageEnabled(true);
+    setOriginalImageNaturalSize(null);
   }, [photoId]);
 
   useEffect(() => {
@@ -372,9 +382,25 @@ export function PhotoDetailRoutePage() {
 
   const backLinkFocusPhotoId = detail?.photo_id ?? returnState.returnFocusPhotoId ?? photoId ?? null;
   const mediaScale = imageScalePercent / 100;
+  const thumbnailDataUrl = detail?.thumbnail
+    ? `data:${detail.thumbnail.mime_type};base64,${detail.thumbnail.data_base64}`
+    : null;
+  const originalImageUrl = detail ? `/api/v1/photos/${encodeURIComponent(detail.photo_id)}/original` : null;
+  const shouldUseOriginalImage = Boolean(
+    detail?.original?.is_available && originalImageUrl && isOriginalImageEnabled
+  );
+  const previewImageSrc = shouldUseOriginalImage ? originalImageUrl : thumbnailDataUrl;
+  const mediaBaseWidthPx = shouldUseOriginalImage
+    ? (originalImageNaturalSize?.width ?? null)
+    : (detail?.thumbnail?.width ?? null);
   const mediaStageStyle: CSSProperties = mediaMode === "fit"
     ? { width: `${Math.max(25, imageScalePercent)}%` }
-    : { width: detail?.thumbnail ? `${Math.max(80, Math.round(detail.thumbnail.width * mediaScale))}px` : "auto" };
+    : {
+        width:
+          mediaBaseWidthPx !== null
+            ? `${Math.max(80, Math.round(mediaBaseWidthPx * mediaScale))}px`
+            : "auto"
+      };
 
   function handleFaceAssigned(faceId: string, personId: string) {
     setDetail((current) => (current ? applyFaceAssignment(current, faceId, personId) : current));
@@ -510,15 +536,30 @@ export function PhotoDetailRoutePage() {
                 <span>{ingestStatus.description}</span>
               </p>
             ) : null}
-            {detail.thumbnail ? (
+            {previewImageSrc ? (
               <div className="detail-media-frame" data-mode={mediaMode}>
                 <div className="detail-media-stage" style={mediaStageStyle}>
                   <img
                     className="detail-media-image"
-                    src={`data:${detail.thumbnail.mime_type};base64,${detail.thumbnail.data_base64}`}
-                    width={detail.thumbnail.width}
-                    height={detail.thumbnail.height}
+                    src={previewImageSrc}
+                    width={!shouldUseOriginalImage ? detail.thumbnail?.width : undefined}
+                    height={!shouldUseOriginalImage ? detail.thumbnail?.height : undefined}
                     alt={`Preview for ${detail.photo_id}`}
+                    onLoad={(event) => {
+                      if (!shouldUseOriginalImage) {
+                        return;
+                      }
+                      const { naturalWidth, naturalHeight } = event.currentTarget;
+                      if (naturalWidth > 0 && naturalHeight > 0) {
+                        setOriginalImageNaturalSize({ width: naturalWidth, height: naturalHeight });
+                      }
+                    }}
+                    onError={() => {
+                      if (shouldUseOriginalImage) {
+                        setIsOriginalImageEnabled(false);
+                        setOriginalImageNaturalSize(null);
+                      }
+                    }}
                   />
                   {showFaceBoxes ? (
                     <FaceBBoxOverlay

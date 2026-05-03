@@ -65,6 +65,20 @@ class OpenCvFaceDetector:
             raise RuntimeError(f"unable to load cascade classifier at {cascade_path}")
         self._classifier = classifier
 
+    def detection_settings(self) -> dict[str, object]:
+        return {
+            "detector": "opencv-haarcascade",
+            "model": "haarcascade_frontalface_default",
+            "scale_factor": self._scale_factor,
+            "min_neighbors": self._min_neighbors,
+            "min_size": list(self._min_size),
+            "max_size": list(self._max_size) if self._max_size is not None else None,
+            "min_area_ratio": self._min_area_ratio,
+            "max_area_ratio": self._max_area_ratio,
+            "aspect_ratio_min": self._aspect_ratio_min,
+            "aspect_ratio_max": self._aspect_ratio_max,
+        }
+
     def detect(self, path: Path) -> list[dict]:
         import numpy as np  # type: ignore
         from PIL import Image, ImageOps  # type: ignore
@@ -110,16 +124,7 @@ class OpenCvFaceDetector:
                         bitmap=_encode_jpeg(crop),
                         embedding=None,
                         provenance={
-                            "detector": "opencv-haarcascade",
-                            "model": "haarcascade_frontalface_default",
-                            "scale_factor": self._scale_factor,
-                            "min_neighbors": self._min_neighbors,
-                            "min_size": list(self._min_size),
-                            "max_size": list(self._max_size) if self._max_size is not None else None,
-                            "min_area_ratio": self._min_area_ratio,
-                            "max_area_ratio": self._max_area_ratio,
-                            "aspect_ratio_min": self._aspect_ratio_min,
-                            "aspect_ratio_max": self._aspect_ratio_max,
+                            **self.detection_settings(),
                             "bbox_space_width": width,
                             "bbox_space_height": height,
                         },

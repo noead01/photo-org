@@ -70,6 +70,14 @@ class PhotoMetadataProjection(BaseModel):
     gps_latitude: float | None = Field(default=None, description="GPS latitude in decimal degrees.")
     gps_longitude: float | None = Field(default=None, description="GPS longitude in decimal degrees.")
     gps_altitude: float | None = Field(default=None, description="GPS altitude in meters.")
+    exif_attributes: dict[str, object] | None = Field(
+        default=None,
+        description="Flattened EXIF attributes captured during ingest (keyed as namespace.tag).",
+    )
+    exif_unmapped_attributes: dict[str, object] | None = Field(
+        default=None,
+        description="Subset of captured EXIF attributes that currently have no semantic mapping.",
+    )
     created_ts: datetime = Field(description="Creation timestamp for the catalog record.")
     updated_ts: datetime = Field(description="Last update timestamp for the catalog record.")
     modified_ts: datetime | None = Field(

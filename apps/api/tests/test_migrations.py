@@ -285,7 +285,9 @@ def test_initial_postgresql_migration_creates_vector_extension(monkeypatch):
 
     migration.upgrade()
 
-    assert recorded_sql == ["CREATE EXTENSION IF NOT EXISTS vector"]
+    assert recorded_sql[0] == "CREATE EXTENSION IF NOT EXISTS vector"
+    assert any("INSERT INTO exif_semantics" in sql for sql in recorded_sql)
+    assert any("INSERT INTO exif_semantic_mappings" in sql for sql in recorded_sql)
 
 
 def test_initial_sqlite_migration_does_not_create_vector_extension(monkeypatch):
@@ -312,7 +314,9 @@ def test_initial_sqlite_migration_does_not_create_vector_extension(monkeypatch):
 
     migration.upgrade()
 
-    assert recorded_sql == []
+    assert all("CREATE EXTENSION IF NOT EXISTS vector" not in sql for sql in recorded_sql)
+    assert any("INSERT INTO exif_semantics" in sql for sql in recorded_sql)
+    assert any("INSERT INTO exif_semantic_mappings" in sql for sql in recorded_sql)
 
 
 def test_ingest_requires_existing_schema(tmp_path):

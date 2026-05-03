@@ -64,10 +64,21 @@ class StaticFaceDetector:
     def __init__(self, detections: list[dict]) -> None:
         self._detections = detections
         self.calls = 0
+        self.paths: list[Path] = []
 
     def detect(self, path: Path) -> list[dict]:
         self.calls += 1
+        self.paths.append(path)
         return list(self._detections)
+
+
+class SettingsAwareFaceDetector(StaticFaceDetector):
+    def __init__(self, detections: list[dict], *, settings: dict[str, object]) -> None:
+        super().__init__(detections)
+        self._settings = settings
+
+    def detection_settings(self) -> dict[str, object]:
+        return dict(self._settings)
 
 
 class RaisingFaceDetector:
@@ -81,6 +92,40 @@ class RuntimeErrorFaceDetector:
 
     def detect(self, path: Path) -> list[dict]:
         raise RuntimeError(self._message)
+
+
+class SettingsAwareRuntimeErrorFaceDetector(RuntimeErrorFaceDetector):
+    def __init__(self, message: str, *, settings: dict[str, object]) -> None:
+        super().__init__(message)
+        self._settings = settings
+
+    def detection_settings(self) -> dict[str, object]:
+        return dict(self._settings)
+
+
+def _detection_settings(
+    *,
+    scale_factor: float = 1.1,
+    min_neighbors: int = 5,
+    min_size: list[int] | None = None,
+    max_size: list[int] | None = None,
+    min_area_ratio: float = 0.0,
+    max_area_ratio: float = 1.0,
+    aspect_ratio_min: float = 0.0,
+    aspect_ratio_max: float = 100.0,
+) -> dict[str, object]:
+    return {
+        "detector": "opencv-haarcascade",
+        "model": "haarcascade_frontalface_default",
+        "scale_factor": scale_factor,
+        "min_neighbors": min_neighbors,
+        "min_size": min_size or [60, 60],
+        "max_size": max_size,
+        "min_area_ratio": min_area_ratio,
+        "max_area_ratio": max_area_ratio,
+        "aspect_ratio_min": aspect_ratio_min,
+        "aspect_ratio_max": aspect_ratio_max,
+    }
 
 
 class FakeMappingsResult:
@@ -114,6 +159,8 @@ class FakeLookupConnection:
         if "FROM faces" in compiled:
             photo_id = statement.whereclause.right.value
             return FakeExecuteResult(self._face_rows_by_photo_id.get(photo_id, []))
+        if "FROM photo_exif_attributes" in compiled:
+            return FakeExecuteResult([])
 
         raise AssertionError(f"unexpected statement: {compiled}")
 
@@ -260,7 +307,7 @@ def test_process_candidate_payload_reuses_known_sha_without_invoking_metadata_ex
     assert result.extracted_payload["detections"] == []
 
 
-def test_process_candidate_payload_reuses_existing_detections_with_known_sha(tmp_path):
+def test_process_candidate_payload_reuses_existing_detections_with_matching_settings(tmp_path):
     from app.services.ingest_extraction_worker import process_candidate_payload
 
     database_url = f"sqlite:///{tmp_path / 'ingest-worker-reuse-detections.db'}"
@@ -271,6 +318,7 @@ def test_process_candidate_payload_reuses_existing_detections_with_known_sha(tmp
     photo_path = tmp_path / "sample.jpg"
     _write_test_image(photo_path)
     record_sha = hashlib.sha256(photo_path.read_bytes()).hexdigest()
+    existing_settings = _detection_settings()
 
     with engine.begin() as connection:
         connection.execute(
@@ -300,7 +348,239 @@ def test_process_candidate_payload_reuses_existing_detections_with_known_sha(tmp
                 bbox_h=13,
                 bitmap=b"existing-face",
                 embedding=None,
-                provenance={"detector": "existing"},
+                provenance={
+                    **existing_settings,
+                    "bbox_space_width": 400,
+                    "bbox_space_height": 300,
+                },
+            )
+        )
+
+    detector = SettingsAwareFaceDetector(
+        detections=[
+            {
+                "face_id": "face-new",
+                "person_id": None,
+                "bbox_x": 15,
+                "bbox_y": 16,
+                "bbox_w": 17,
+                "bbox_h": 18,
+                "bitmap": b"new-face",
+                "embedding": None,
+                "provenance": {"detector": "fresh"},
+            }
+        ],
+        settings=_detection_settings(),
+    )
+
+    result = process_candidate_payload(
+        database_url,
+        payload={
+            "storage_source_id": "source-1",
+            "watched_folder_id": "wf-1",
+            "canonical_path": "/library/sample.jpg",
+            "runtime_path": str(photo_path),
+            "relative_path": "sample.jpg",
+        },
+        face_detector=detector,
+    )
+
+    assert result.reused_existing_artifacts is True
+    assert result.analysis_performed is False
+    assert detector.calls == 0
+    assert detector.paths == []
+    assert result.extracted_payload["faces_count"] == 1
+    assert result.extracted_payload["detections"] == [
+        {
+            "face_id": "face-1",
+            "person_id": None,
+            "bbox_x": 10,
+            "bbox_y": 11,
+            "bbox_w": 12,
+            "bbox_h": 13,
+            "bitmap": "ZXhpc3RpbmctZmFjZQ==",
+            "embedding": None,
+            "provenance": {
+                **existing_settings,
+                "bbox_space_width": 400,
+                "bbox_space_height": 300,
+            },
+        }
+    ]
+
+
+def test_process_candidate_payload_reruns_detection_when_settings_change_for_same_sha(tmp_path):
+    from app.services.ingest_extraction_worker import process_candidate_payload
+
+    database_url = f"sqlite:///{tmp_path / 'ingest-worker-reuse-refresh.db'}"
+    upgrade_database(database_url)
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 4, 5, 12, 0, tzinfo=UTC)
+
+    photo_path = tmp_path / "sample.jpg"
+    _write_test_image(photo_path)
+    record_sha = hashlib.sha256(photo_path.read_bytes()).hexdigest()
+    existing_settings = _detection_settings(scale_factor=1.1)
+    updated_settings = _detection_settings(
+        scale_factor=1.15,
+        min_neighbors=9,
+        min_size=[96, 96],
+        max_size=[420, 420],
+        min_area_ratio=0.01,
+        max_area_ratio=0.45,
+        aspect_ratio_min=0.75,
+        aspect_ratio_max=1.35,
+    )
+
+    with engine.begin() as connection:
+        connection.execute(
+            insert(photos).values(
+                _photo_row_values(
+                    photo_id="existing-photo",
+                    path="/library/already-imported.jpg",
+                    sha256=record_sha,
+                    now=now,
+                    thumbnail_jpeg=b"existing-thumbnail",
+                    thumbnail_mime_type="image/jpeg",
+                    thumbnail_width=64,
+                    thumbnail_height=64,
+                    faces_count=1,
+                    faces_detected_ts=now,
+                )
+            )
+        )
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="existing-photo",
+                person_id=None,
+                bbox_x=10,
+                bbox_y=11,
+                bbox_w=12,
+                bbox_h=13,
+                bitmap=b"existing-face",
+                embedding=None,
+                provenance={
+                    **existing_settings,
+                    "bbox_space_width": 400,
+                    "bbox_space_height": 300,
+                },
+            )
+        )
+
+    detector = SettingsAwareFaceDetector(
+        detections=[
+            {
+                "face_id": "face-new",
+                "person_id": None,
+                "bbox_x": 15,
+                "bbox_y": 16,
+                "bbox_w": 17,
+                "bbox_h": 18,
+                "bitmap": b"new-face",
+                "embedding": None,
+                "provenance": {
+                    **updated_settings,
+                    "bbox_space_width": 400,
+                    "bbox_space_height": 300,
+                },
+            }
+        ],
+        settings=updated_settings,
+    )
+
+    result = process_candidate_payload(
+        database_url,
+        payload={
+            "storage_source_id": "source-1",
+            "watched_folder_id": "wf-1",
+            "canonical_path": "/library/sample.jpg",
+            "runtime_path": str(photo_path),
+            "relative_path": "sample.jpg",
+        },
+        face_detector=detector,
+    )
+
+    assert result.reused_existing_artifacts is True
+    assert result.analysis_performed is True
+    assert detector.calls == 1
+    assert detector.paths == [photo_path.resolve()]
+    assert result.extracted_payload["faces_count"] == 1
+    assert result.extracted_payload["detections"] == [
+        {
+            "face_id": "face-new",
+            "person_id": None,
+            "bbox_x": 15,
+            "bbox_y": 16,
+            "bbox_w": 17,
+            "bbox_h": 18,
+            "bitmap": "bmV3LWZhY2U=",
+            "embedding": None,
+            "provenance": {
+                **updated_settings,
+                "bbox_space_width": 400,
+                "bbox_space_height": 300,
+            },
+        }
+    ]
+
+
+def test_process_candidate_payload_reuse_path_keeps_existing_detections_when_detector_fails(tmp_path):
+    from app.services.ingest_extraction_worker import process_candidate_payload
+
+    database_url = f"sqlite:///{tmp_path / 'ingest-worker-reuse-warning.db'}"
+    upgrade_database(database_url)
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 4, 5, 12, 0, tzinfo=UTC)
+
+    photo_path = tmp_path / "sample.jpg"
+    _write_test_image(photo_path)
+    record_sha = hashlib.sha256(photo_path.read_bytes()).hexdigest()
+    existing_settings = _detection_settings(scale_factor=1.1)
+    updated_settings = _detection_settings(
+        scale_factor=1.15,
+        min_neighbors=9,
+        min_size=[96, 96],
+        max_size=[420, 420],
+        min_area_ratio=0.01,
+        max_area_ratio=0.45,
+        aspect_ratio_min=0.75,
+        aspect_ratio_max=1.35,
+    )
+
+    with engine.begin() as connection:
+        connection.execute(
+            insert(photos).values(
+                _photo_row_values(
+                    photo_id="existing-photo",
+                    path="/library/already-imported.jpg",
+                    sha256=record_sha,
+                    now=now,
+                    thumbnail_jpeg=b"existing-thumbnail",
+                    thumbnail_mime_type="image/jpeg",
+                    thumbnail_width=64,
+                    thumbnail_height=64,
+                    faces_count=1,
+                    faces_detected_ts=now,
+                )
+            )
+        )
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="existing-photo",
+                person_id=None,
+                bbox_x=10,
+                bbox_y=11,
+                bbox_w=12,
+                bbox_h=13,
+                bitmap=b"existing-face",
+                embedding=None,
+                provenance={
+                    **existing_settings,
+                    "bbox_space_width": 400,
+                    "bbox_space_height": 300,
+                },
             )
         )
 
@@ -313,12 +593,18 @@ def test_process_candidate_payload_reuses_existing_detections_with_known_sha(tmp
             "runtime_path": str(photo_path),
             "relative_path": "sample.jpg",
         },
-        face_detector=RaisingFaceDetector(),
+        face_detector=SettingsAwareRuntimeErrorFaceDetector(
+            "detector exploded",
+            settings=updated_settings,
+        ),
     )
 
     assert result.reused_existing_artifacts is True
     assert result.analysis_performed is False
     assert result.extracted_payload["faces_count"] == 1
+    assert result.extracted_payload["warnings"] == [
+        "face detection failed: detector exploded"
+    ]
     assert result.extracted_payload["detections"] == [
         {
             "face_id": "face-1",
@@ -329,7 +615,11 @@ def test_process_candidate_payload_reuses_existing_detections_with_known_sha(tmp
             "bbox_h": 13,
             "bitmap": "ZXhpc3RpbmctZmFjZQ==",
             "embedding": None,
-            "provenance": {"detector": "existing"},
+            "provenance": {
+                **existing_settings,
+                "bbox_space_width": 400,
+                "bbox_space_height": 300,
+            },
         }
     ]
 

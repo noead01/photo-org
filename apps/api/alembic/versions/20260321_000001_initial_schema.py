@@ -57,6 +57,109 @@ def upgrade() -> None:
     op.create_index("idx_photos_sha256", "photos", ["sha256"], unique=False)
 
     op.create_table(
+        "photo_exif_attributes",
+        sa.Column(
+            "photo_id",
+            sa.String(36),
+            sa.ForeignKey("photos.photo_id", ondelete="CASCADE"),
+            primary_key=True,
+        ),
+        sa.Column("exif_attribute_name", sa.Text(), primary_key=True),
+        sa.Column("exif_attribute_value", sa.JSON(), nullable=False),
+        sa.Column(
+            "created_ts",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+        sa.Column(
+            "updated_ts",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+    )
+    op.create_index(
+        "idx_photo_exif_attributes_photo_id",
+        "photo_exif_attributes",
+        ["photo_id"],
+        unique=False,
+    )
+
+    op.create_table(
+        "exif_semantics",
+        sa.Column("semantic_key", sa.String(length=64), primary_key=True),
+        sa.Column("description", sa.Text(), nullable=True),
+        sa.Column(
+            "created_ts",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+        sa.Column(
+            "updated_ts",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+        ),
+    )
+
+    op.create_table(
+        "exif_semantic_mappings",
+        sa.Column(
+            "semantic_key",
+            sa.String(length=64),
+            sa.ForeignKey("exif_semantics.semantic_key", ondelete="CASCADE"),
+            primary_key=True,
+        ),
+        sa.Column("exif_attribute_name", sa.Text(), primary_key=True),
+        sa.Column("precedence", sa.Integer(), nullable=False, server_default=sa.text("1")),
+        sa.UniqueConstraint("exif_attribute_name", name="uq_exif_semantic_mappings_attribute_name"),
+    )
+    op.create_index(
+        "idx_exif_semantic_mappings_semantic_precedence",
+        "exif_semantic_mappings",
+        ["semantic_key", "precedence"],
+        unique=False,
+    )
+
+    op.execute(
+        sa.text(
+            """
+            INSERT INTO exif_semantics (semantic_key, description) VALUES
+            ('shot_datetime', 'Primary capture datetime value for shot timestamp'),
+            ('shot_subsec', 'Fractional second component for shot timestamp'),
+            ('shot_offset', 'UTC offset component for shot timestamp')
+            """
+        )
+    )
+
+    op.execute(
+        sa.text(
+            """
+            INSERT INTO exif_semantic_mappings (semantic_key, exif_attribute_name, precedence) VALUES
+            ('shot_datetime', 'exif_ifd.DateTimeOriginal', 1),
+            ('shot_datetime', 'exif_ifd.DateTimeDigitized', 2),
+            ('shot_datetime', 'exif.DateTimeOriginal', 3),
+            ('shot_datetime', 'exif.DateTimeDigitized', 4),
+            ('shot_datetime', 'exif.DateTime', 5),
+            ('shot_subsec', 'exif_ifd.SubsecTimeOriginal', 1),
+            ('shot_subsec', 'exif_ifd.SubsecTimeDigitized', 2),
+            ('shot_subsec', 'exif_ifd.SubsecTime', 3),
+            ('shot_subsec', 'exif.SubsecTimeOriginal', 4),
+            ('shot_subsec', 'exif.SubsecTimeDigitized', 5),
+            ('shot_subsec', 'exif.SubsecTime', 6),
+            ('shot_offset', 'exif_ifd.OffsetTimeOriginal', 1),
+            ('shot_offset', 'exif_ifd.OffsetTimeDigitized', 2),
+            ('shot_offset', 'exif_ifd.OffsetTime', 3),
+            ('shot_offset', 'exif.OffsetTimeOriginal', 4),
+            ('shot_offset', 'exif.OffsetTimeDigitized', 5),
+            ('shot_offset', 'exif.OffsetTime', 6)
+            """
+        )
+    )
+
+    op.create_table(
         "storage_sources",
         sa.Column("storage_source_id", sa.String(36), primary_key=True),
         sa.Column("display_name", sa.String(), nullable=False),
@@ -312,6 +415,11 @@ def downgrade() -> None:
     op.drop_table("storage_source_aliases")
     op.drop_index("idx_storage_sources_availability_state", table_name="storage_sources")
     op.drop_table("storage_sources")
+    op.drop_index("idx_exif_semantic_mappings_semantic_precedence", table_name="exif_semantic_mappings")
+    op.drop_table("exif_semantic_mappings")
+    op.drop_table("exif_semantics")
+    op.drop_index("idx_photo_exif_attributes_photo_id", table_name="photo_exif_attributes")
+    op.drop_table("photo_exif_attributes")
     op.drop_index("idx_photos_sha256", table_name="photos")
     op.drop_index("idx_photos_shot_ts", table_name="photos")
     op.drop_table("photos")

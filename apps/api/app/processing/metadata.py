@@ -6,6 +6,48 @@ from pathlib import Path
 from typing import Any
 
 
+_SHOT_DATETIME_ALIASES: tuple[tuple[str, str], ...] = (
+    ("exif_ifd", "DateTimeOriginal"),
+    ("exif_ifd", "DateTimeDigitized"),
+    ("exif", "DateTimeOriginal"),
+    ("exif", "DateTimeDigitized"),
+    ("exif", "DateTime"),
+)
+_SHOT_SUBSEC_ALIASES: tuple[tuple[str, str], ...] = (
+    ("exif_ifd", "SubsecTimeOriginal"),
+    ("exif_ifd", "SubsecTimeDigitized"),
+    ("exif_ifd", "SubsecTime"),
+    ("exif", "SubsecTimeOriginal"),
+    ("exif", "SubsecTimeDigitized"),
+    ("exif", "SubsecTime"),
+)
+_SHOT_OFFSET_ALIASES: tuple[tuple[str, str], ...] = (
+    ("exif_ifd", "OffsetTimeOriginal"),
+    ("exif_ifd", "OffsetTimeDigitized"),
+    ("exif_ifd", "OffsetTime"),
+    ("exif", "OffsetTimeOriginal"),
+    ("exif", "OffsetTimeDigitized"),
+    ("exif", "OffsetTime"),
+)
+_MAPPED_EXIF_ATTRIBUTES: frozenset[tuple[str, str]] = frozenset(
+    {
+        *_SHOT_DATETIME_ALIASES,
+        *_SHOT_SUBSEC_ALIASES,
+        *_SHOT_OFFSET_ALIASES,
+        ("exif", "Orientation"),
+        ("exif", "Make"),
+        ("exif", "Model"),
+        ("exif", "Software"),
+        ("gps_ifd", "GPSLatitude"),
+        ("gps_ifd", "GPSLatitudeRef"),
+        ("gps_ifd", "GPSLongitude"),
+        ("gps_ifd", "GPSLongitudeRef"),
+        ("gps_ifd", "GPSAltitude"),
+        ("gps_ifd", "GPSAltitudeRef"),
+    }
+)
+
+
 @dataclass(frozen=True)
 class ImageMetadata:
     shot_ts: str | None = None
@@ -17,6 +59,8 @@ class ImageMetadata:
     gps_latitude: float | None = None
     gps_longitude: float | None = None
     gps_altitude: float | None = None
+    exif_attributes: dict[str, Any] | None = None
+    exif_unmapped_attributes: dict[str, Any] | None = None
 
 
 def extract_image_metadata(path: Path) -> ImageMetadata:
@@ -42,6 +86,7 @@ def extract_image_metadata(path: Path) -> ImageMetadata:
     }
     exif_ifd = _read_ifd(exif, 0x8769, tag_names)
     gps_ifd = _read_ifd(exif, 0x8825, gps_tag_names)
+    exif_attributes, exif_unmapped_attributes = _collect_exif_attributes(exif_map, exif_ifd, gps_ifd)
 
     shot_ts = _extract_shot_timestamp(exif_map, exif_ifd)
     orientation = exif_map.get("Orientation")
@@ -83,6 +128,8 @@ def extract_image_metadata(path: Path) -> ImageMetadata:
         gps_latitude=latitude,
         gps_longitude=longitude,
         gps_altitude=altitude,
+        exif_attributes=exif_attributes or None,
+        exif_unmapped_attributes=exif_unmapped_attributes or None,
     )
 
 
@@ -109,7 +156,11 @@ def _normalize_exif_datetime(value: Any) -> str | None:
 
 
 def _extract_shot_timestamp(exif_map: dict[str, Any], exif_ifd: dict[str, Any]) -> str | None:
-    raw_value = exif_ifd.get("DateTimeOriginal") or exif_map.get("DateTime")
+    raw_value, _ = _first_semantic_value(
+        exif_map,
+        exif_ifd,
+        _SHOT_DATETIME_ALIASES,
+    )
     if raw_value is None:
         return None
 
@@ -117,18 +168,17 @@ def _extract_shot_timestamp(exif_map: dict[str, Any], exif_ifd: dict[str, Any]) 
     if not text:
         return None
 
-    try:
-        parsed = datetime.strptime(text, "%Y:%m:%d %H:%M:%S")
-    except ValueError:
+    parsed = _parse_exif_datetime(text)
+    if parsed is None:
         return None
 
-    subsec = exif_ifd.get("SubsecTimeOriginal")
+    subsec, _ = _first_semantic_value(exif_map, exif_ifd, _SHOT_SUBSEC_ALIASES)
     if subsec is not None:
         digits = "".join(ch for ch in str(subsec) if ch.isdigit())[:6]
         if digits:
             parsed = parsed.replace(microsecond=int(digits.ljust(6, "0")))
 
-    offset = exif_ifd.get("OffsetTimeOriginal") or exif_ifd.get("OffsetTime")
+    offset, _ = _first_semantic_value(exif_map, exif_ifd, _SHOT_OFFSET_ALIASES)
     offset_text = str(offset).strip() if offset is not None else ""
     if offset_text and _valid_offset(offset_text):
         return parsed.isoformat() + offset_text
@@ -139,11 +189,40 @@ def _extract_shot_timestamp(exif_map: dict[str, Any], exif_ifd: dict[str, Any]) 
 def _shot_ts_source(shot_ts: str | None, exif_map: dict[str, Any], exif_ifd: dict[str, Any]) -> str | None:
     if shot_ts is None:
         return None
-    if exif_ifd.get("DateTimeOriginal"):
+
+    _value, source = _first_semantic_value(
+        exif_map,
+        exif_ifd,
+        _SHOT_DATETIME_ALIASES,
+    )
+    if source is None:
+        return "exif"
+    if source == "exif_ifd:DateTimeOriginal":
         return "exif:DateTimeOriginal"
-    if exif_map.get("DateTime"):
+    if source == "exif:DateTime":
         return "exif:DateTime"
-    return "exif"
+    return source
+
+
+def _first_semantic_value(
+    exif_map: dict[str, Any],
+    exif_ifd: dict[str, Any],
+    aliases: tuple[tuple[str, str], ...],
+) -> tuple[Any | None, str | None]:
+    sources = {
+        "exif": exif_map,
+        "exif_ifd": exif_ifd,
+    }
+    for namespace, tag_name in aliases:
+        container = sources[namespace]
+        value = container.get(tag_name)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if not text:
+            continue
+        return value, f"{namespace}:{tag_name}"
+    return None, None
 
 
 def _read_ifd(exif: Any, ifd_id: int, tag_names: dict[int, str]) -> dict[str, Any]:
@@ -189,3 +268,49 @@ def _valid_offset(value: str) -> bool:
     if value[0] not in {"+", "-"}:
         return False
     return value[1:3].isdigit() and value[3] == ":" and value[4:6].isdigit()
+
+
+def _parse_exif_datetime(value: str) -> datetime | None:
+    for fmt in ("%Y:%m:%d %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _collect_exif_attributes(
+    exif_map: dict[str, Any],
+    exif_ifd: dict[str, Any],
+    gps_ifd: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    qualified: dict[str, Any] = {}
+    for namespace, values in (
+        ("exif", exif_map),
+        ("exif_ifd", exif_ifd),
+        ("gps_ifd", gps_ifd),
+    ):
+        for tag_name, raw_value in values.items():
+            qualified_name = f"{namespace}.{tag_name}"
+            qualified[qualified_name] = _serialize_exif_value(raw_value)
+
+    unmapped: dict[str, Any] = {}
+    for qualified_name, value in qualified.items():
+        namespace, tag_name = qualified_name.split(".", 1)
+        if (namespace, tag_name) in _MAPPED_EXIF_ATTRIBUTES:
+            continue
+        unmapped[qualified_name] = value
+
+    return qualified, unmapped
+
+
+def _serialize_exif_value(value: Any) -> Any:
+    if value is None or isinstance(value, bool | int | float | str):
+        return value
+    if isinstance(value, bytes):
+        return value.hex()
+    if isinstance(value, list | tuple):
+        return [_serialize_exif_value(component) for component in value]
+    if isinstance(value, dict):
+        return {str(key): _serialize_exif_value(component) for key, component in value.items()}
+    return str(value)

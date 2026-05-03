@@ -78,6 +78,39 @@ photos = Table(
     Column("faces_detected_ts", TIMESTAMP(timezone=True)),
 )
 
+photo_exif_attributes = Table(
+    "photo_exif_attributes",
+    metadata,
+    Column("photo_id", String(36), ForeignKey("photos.photo_id", ondelete="CASCADE"), primary_key=True),
+    Column("exif_attribute_name", Text, primary_key=True),
+    Column("exif_attribute_value", JSON, nullable=False),
+    Column("created_ts", TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+    Column("updated_ts", TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+)
+
+exif_semantics = Table(
+    "exif_semantics",
+    metadata,
+    Column("semantic_key", String(64), primary_key=True),
+    Column("description", Text),
+    Column("created_ts", TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+    Column("updated_ts", TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
+)
+
+exif_semantic_mappings = Table(
+    "exif_semantic_mappings",
+    metadata,
+    Column(
+        "semantic_key",
+        String(64),
+        ForeignKey("exif_semantics.semantic_key", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("exif_attribute_name", Text, primary_key=True),
+    Column("precedence", Integer, nullable=False, server_default=text("1")),
+    UniqueConstraint("exif_attribute_name", name="uq_exif_semantic_mappings_attribute_name"),
+)
+
 storage_sources = Table(
     "storage_sources",
     metadata,
@@ -255,6 +288,8 @@ ingest_queue = Table(
 
 Index("idx_photos_shot_ts", photos.c.shot_ts)
 Index("idx_photos_sha256", photos.c.sha256)
+Index("idx_photo_exif_attributes_photo_id", photo_exif_attributes.c.photo_id)
+Index("idx_exif_semantic_mappings_semantic_precedence", exif_semantic_mappings.c.semantic_key, exif_semantic_mappings.c.precedence)
 Index("idx_storage_sources_availability_state", storage_sources.c.availability_state)
 Index("idx_storage_source_aliases_source_id", storage_source_aliases.c.storage_source_id)
 Index("idx_faces_photo_id", faces.c.photo_id)
