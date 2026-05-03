@@ -297,7 +297,7 @@ def test_photo_detail_api_returns_latest_matching_face_label_provenance(tmp_path
                 face_label_id="face-label-1",
                 face_id="face-1",
                 person_id="person-1",
-                label_source="machine_applied",
+                label_source="machine_suggested",
                 confidence=0.71,
                 model_version="recognizer-v1",
                 provenance={
