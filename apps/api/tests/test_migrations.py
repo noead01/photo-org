@@ -111,6 +111,40 @@ def test_upgrade_database_enforces_face_label_source_constraint(tmp_path):
                     label_source="manual",
                 )
             )
+        with pytest.raises(IntegrityError):
+            connection.execute(
+                insert(face_labels).values(
+                    face_label_id="face-label-3",
+                    face_id="face-1",
+                    person_id="person-1",
+                    label_source="machine_applied",
+                )
+            )
+
+
+def test_upgrade_database_creates_face_suggestion_support_tables(tmp_path):
+    from app.migrations import upgrade_database
+
+    database_url = f"sqlite:///{tmp_path / 'face-suggestion-support.db'}"
+    upgrade_database(database_url)
+
+    engine = create_engine(database_url, future=True)
+    with engine.connect() as connection:
+        inspector = inspect(connection)
+        tables = set(inspector.get_table_names())
+        people_representation_indexes = {
+            index["name"] for index in inspector.get_indexes("person_representations")
+        }
+        face_suggestion_indexes = {
+            index["name"] for index in inspector.get_indexes("face_suggestions")
+        }
+
+    assert {"person_representations", "face_suggestions"} <= tables
+    assert "idx_person_representations_computed_ts" in people_representation_indexes
+    assert {
+        "idx_face_suggestions_face_id_updated_ts",
+        "idx_face_suggestions_person_confidence",
+    } <= face_suggestion_indexes
 
 
 def test_upgrade_database_enforces_faces_person_fk_constraint(tmp_path):
