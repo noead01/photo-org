@@ -8,7 +8,6 @@ from sqlalchemy.exc import IntegrityError
 
 from photoorg_db_schema import (
     FACE_LABEL_SOURCE_HUMAN_CONFIRMED,
-    FACE_LABEL_SOURCE_MACHINE_APPLIED,
     FACE_LABEL_SOURCE_MACHINE_SUGGESTED,
 )
 
@@ -170,57 +169,6 @@ def confirm_face_assignment(
     }
 
 
-def auto_apply_face_suggestion(
-    connection: Connection,
-    *,
-    face_id: str,
-    person_id: str,
-    confidence: float,
-    distance: float,
-    matched_face_id: str,
-    review_threshold: float,
-    auto_accept_threshold: float,
-) -> dict[str, object] | None:
-    if not _person_exists(connection, person_id):
-        return None
-
-    try:
-        result = connection.execute(
-            update(faces)
-            .where(
-                faces.c.face_id == face_id,
-                faces.c.person_id.is_(None),
-            )
-            .values(person_id=person_id)
-        )
-    except IntegrityError as exc:
-        _raise_person_not_found_on_fk_violation(
-            connection,
-            person_id=person_id,
-            exc=exc,
-        )
-        return None
-
-    if result.rowcount != 1:
-        return None
-
-    assignment = _face_assignment(connection, face_id)
-    _persist_machine_applied_face_label_event(
-        connection,
-        face_id=face_id,
-        person_id=person_id,
-        confidence=confidence,
-        distance=distance,
-        matched_face_id=matched_face_id,
-        review_threshold=review_threshold,
-        auto_accept_threshold=auto_accept_threshold,
-    )
-    return {
-        **assignment,
-        "confidence": float(confidence),
-    }
-
-
 def record_review_needed_face_suggestion(
     connection: Connection,
     *,
@@ -333,42 +281,6 @@ def _persist_face_label_event(
             confidence=None,
             model_version=None,
             provenance=provenance,
-        )
-    )
-
-
-def _persist_machine_applied_face_label_event(
-    connection: Connection,
-    *,
-    face_id: str,
-    person_id: str,
-    confidence: float,
-    distance: float,
-    matched_face_id: str,
-    review_threshold: float,
-    auto_accept_threshold: float,
-) -> None:
-    prediction_metadata = resolve_prediction_metadata()
-    connection.execute(
-        insert(face_labels).values(
-            face_label_id=str(uuid4()),
-            face_id=face_id,
-            person_id=person_id,
-            label_source=FACE_LABEL_SOURCE_MACHINE_APPLIED,
-            confidence=float(confidence),
-            model_version=prediction_metadata["model_version"],
-            provenance={
-                "workflow": "recognition-suggestions",
-                "surface": "api",
-                "action": "auto_apply",
-                "matched_face_id": matched_face_id,
-                "review_threshold": float(review_threshold),
-                "auto_accept_threshold": float(auto_accept_threshold),
-                "prediction_source": prediction_metadata["prediction_source"],
-                "distance_metric": prediction_metadata["distance_metric"],
-                "candidate_distance": float(distance),
-                "candidate_confidence": float(confidence),
-            },
         )
     )
 

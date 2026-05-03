@@ -14,7 +14,6 @@ from app.services.face_assignment import (
     FaceNotAssignedError,
     FaceNotFoundError,
     PersonNotFoundError,
-    auto_apply_face_suggestion,
     confirm_face_assignment,
     record_review_needed_face_suggestion,
     assign_face_to_person,
@@ -26,7 +25,6 @@ from app.services.face_candidates import (
     lookup_nearest_neighbor_candidates,
 )
 from app.services.recognition_policy import (
-    SUGGESTION_DECISION_AUTO_APPLY,
     SUGGESTION_DECISION_REVIEW_NEEDED,
 )
 
@@ -103,15 +101,6 @@ class FaceCandidateResponse(BaseModel):
     confidence: float
 
 
-class AutoAppliedFaceAssignmentResponse(BaseModel):
-    """Auto-applied assignment details for high-confidence suggestions."""
-
-    face_id: str
-    photo_id: str
-    person_id: str
-    confidence: float
-
-
 class ReviewNeededFaceSuggestionResponse(BaseModel):
     """Review-needed suggestion details for medium-confidence matches."""
 
@@ -125,7 +114,7 @@ class ReviewNeededFaceSuggestionResponse(BaseModel):
 class FaceSuggestionPolicyResponse(BaseModel):
     """Threshold policy decision for the source face suggestion flow."""
 
-    decision: Literal["auto_apply", "review_needed", "no_suggestion"]
+    decision: Literal["review_needed", "no_suggestion"]
     review_threshold: float
     auto_accept_threshold: float
     top_candidate_confidence: float | None
@@ -144,7 +133,6 @@ class FaceCandidateLookupResponse(BaseModel):
     candidates: list[FaceCandidateResponse]
     suggestion_policy: FaceSuggestionPolicyResponse
     review_needed_suggestion: ReviewNeededFaceSuggestionResponse | None = None
-    auto_applied_assignment: AutoAppliedFaceAssignmentResponse | None = None
 
 
 @router.post(
@@ -306,26 +294,6 @@ def lookup_face_candidates_endpoint(
         )
         if review_needed_suggestion is not None:
             result["review_needed_suggestion"] = review_needed_suggestion
-            db.commit()
-
-    if (
-        suggestion_policy["decision"] == SUGGESTION_DECISION_AUTO_APPLY
-        and isinstance(candidates, list)
-        and candidates
-    ):
-        top_candidate = candidates[0]
-        auto_applied_assignment = auto_apply_face_suggestion(
-            db.connection(),
-            face_id=face_id,
-            person_id=str(top_candidate["person_id"]),
-            confidence=float(top_candidate["confidence"]),
-            distance=float(top_candidate["distance"]),
-            matched_face_id=str(top_candidate["matched_face_id"]),
-            review_threshold=float(suggestion_policy["review_threshold"]),
-            auto_accept_threshold=float(suggestion_policy["auto_accept_threshold"]),
-        )
-        if auto_applied_assignment is not None:
-            result["auto_applied_assignment"] = auto_applied_assignment
             db.commit()
 
     return FaceCandidateLookupResponse.model_validate(result)

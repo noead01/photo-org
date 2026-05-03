@@ -15,7 +15,6 @@ DEFAULT_MODEL_VERSION = "nearest-neighbor-cosine-v1"
 PREDICTION_SOURCE_NEAREST_NEIGHBOR = "nearest-neighbor"
 DISTANCE_METRIC_COSINE = "cosine"
 
-SUGGESTION_DECISION_AUTO_APPLY = "auto_apply"
 SUGGESTION_DECISION_REVIEW_NEEDED = "review_needed"
 SUGGESTION_DECISION_NO_SUGGESTION = "no_suggestion"
 
@@ -72,9 +71,8 @@ def classify_suggestion_confidence(
     review_threshold: float,
     auto_accept_threshold: float,
 ) -> str:
+    del auto_accept_threshold
     bounded_confidence = min(1.0, max(0.0, confidence))
-    if bounded_confidence >= auto_accept_threshold:
-        return SUGGESTION_DECISION_AUTO_APPLY
     if bounded_confidence >= review_threshold:
         return SUGGESTION_DECISION_REVIEW_NEEDED
     return SUGGESTION_DECISION_NO_SUGGESTION

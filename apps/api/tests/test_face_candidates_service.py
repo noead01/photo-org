@@ -105,7 +105,7 @@ def test_lookup_nearest_neighbor_candidates_uses_postgresql_strategy_in_isolatio
             }
         ],
         "suggestion_policy": {
-            "decision": "auto_apply",
+            "decision": "review_needed",
             "review_threshold": 0.6,
             "auto_accept_threshold": 0.85,
             "top_candidate_confidence": 0.9,

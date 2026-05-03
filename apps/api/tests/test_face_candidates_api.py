@@ -132,22 +132,17 @@ def test_face_candidates_api_returns_ranked_person_candidates_with_per_person_be
     assert payload["candidates"][0]["confidence"] == pytest.approx(0.999949, abs=1e-4)
     assert payload["candidates"][1]["confidence"] == pytest.approx(0.8, abs=1e-6)
     assert payload["suggestion_policy"] == {
-        "decision": "auto_apply",
+        "decision": "review_needed",
         "review_threshold": 0.75,
         "auto_accept_threshold": 0.95,
         "top_candidate_confidence": pytest.approx(0.999949, abs=1e-4),
     }
-    assert payload["auto_applied_assignment"] == {
-        "face_id": "source-face",
-        "photo_id": "photo-1",
-        "person_id": "person-1",
-        "confidence": pytest.approx(0.999949, abs=1e-4),
-    }
+    assert "auto_applied_assignment" not in payload
 
     with engine.connect() as connection:
         persisted_person_id = connection.execute(
             select(faces.c.person_id).where(faces.c.face_id == "source-face")
-        ).scalar_one()
+        ).scalar_one_or_none()
         persisted_label = connection.execute(
             select(
                 face_labels.c.face_id,
@@ -158,16 +153,16 @@ def test_face_candidates_api_returns_ranked_person_candidates_with_per_person_be
                 face_labels.c.provenance,
             ).where(face_labels.c.face_id == "source-face")
         ).mappings().one()
-    assert persisted_person_id == "person-1"
+    assert persisted_person_id is None
     assert persisted_label["face_id"] == "source-face"
     assert persisted_label["person_id"] == "person-1"
-    assert persisted_label["label_source"] == "machine_applied"
+    assert persisted_label["label_source"] == "machine_suggested"
     assert persisted_label["confidence"] == pytest.approx(0.999949, abs=1e-4)
     assert persisted_label["model_version"] == "recognition-cosine-v1"
     assert persisted_label["provenance"] == {
         "workflow": "recognition-suggestions",
         "surface": "api",
-        "action": "auto_apply",
+        "action": "review_needed",
         "matched_face_id": "candidate-1-best",
         "review_threshold": 0.75,
         "auto_accept_threshold": 0.95,
@@ -228,7 +223,7 @@ def test_face_candidates_api_returns_review_needed_state_for_medium_confidence_m
         "confidence": pytest.approx(0.8, abs=1e-6),
         "matched_face_id": "candidate-1",
     }
-    assert payload.get("auto_applied_assignment") is None
+    assert "auto_applied_assignment" not in payload
 
     with engine.connect() as connection:
         persisted_person_id = connection.execute(
@@ -308,10 +303,10 @@ def test_face_candidates_api_returns_no_suggestion_when_best_confidence_is_below
         "auto_accept_threshold": 0.99,
         "top_candidate_confidence": pytest.approx(0.8, abs=1e-6),
     }
-    assert payload.get("auto_applied_assignment") is None
+    assert "auto_applied_assignment" not in payload
 
 
-def test_face_candidates_api_does_not_overwrite_existing_assignment_when_policy_is_auto_apply(
+def test_face_candidates_api_does_not_overwrite_existing_assignment_when_policy_is_review_needed(
     tmp_path,
     monkeypatch,
 ):
@@ -347,8 +342,8 @@ def test_face_candidates_api_does_not_overwrite_existing_assignment_when_policy_
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["suggestion_policy"]["decision"] == "auto_apply"
-    assert payload.get("auto_applied_assignment") is None
+    assert payload["suggestion_policy"]["decision"] == "review_needed"
+    assert "auto_applied_assignment" not in payload
     with engine.connect() as connection:
         persisted_person_id = connection.execute(
             select(faces.c.person_id).where(faces.c.face_id == "source-face")
