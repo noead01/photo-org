@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import { PhotoDetailRoutePage } from "./PhotoDetailRoutePage";
 
 interface PhotoDetailPayload {
@@ -134,6 +134,27 @@ function renderDetail(path = "/library/photo-1") {
   );
 }
 
+function renderDetailWithPhotoSwitcher(path = "/library/photo-1") {
+  return render(
+    <MemoryRouter
+      initialEntries={[path]}
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+    >
+      <Routes>
+        <Route
+          path="/library/:photoId"
+          element={
+            <>
+              <PhotoDetailRoutePage />
+              <Link to="/library/photo-2">Open photo 2</Link>
+            </>
+          }
+        />
+      </Routes>
+    </MemoryRouter>
+  );
+}
+
 describe("PhotoDetailRoutePage", () => {
   const fetchMock = vi.fn();
 
@@ -250,6 +271,33 @@ describe("PhotoDetailRoutePage", () => {
 
     await user.click(screen.getByRole("button", { name: "Hide all EXIF attributes" }));
     expect(screen.queryByText("exif.CustomNote")).not.toBeInTheDocument();
+  });
+
+  it("truncates long EXIF attribute values with an ellipsis", async () => {
+    const user = userEvent.setup();
+    const longExifValue = "123456789012345678901234567890EXTRA-MAKERNOTE-DATA";
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () =>
+        buildPayload({
+          metadata: {
+            ...buildPayload().metadata,
+            exif_attributes: {
+              "exif_ifd.MakerNote": longExifValue
+            }
+          }
+        })
+    } as Response);
+
+    renderDetail();
+
+    expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show details" }));
+    await user.click(screen.getByRole("button", { name: "Show all EXIF attributes" }));
+
+    expect(screen.getByText("exif_ifd.MakerNote")).toBeInTheDocument();
+    expect(screen.getByText("123456789012345678901234567890...")).toBeInTheDocument();
+    expect(screen.queryByText(longExifValue)).not.toBeInTheDocument();
   });
 
   it("shows explicit no-face state when no face regions are present", async () => {
@@ -432,6 +480,121 @@ describe("PhotoDetailRoutePage", () => {
     await waitFor(() => {
       expect(image).toHaveAttribute("src", "data:image/jpeg;base64,dGh1bWI=");
     });
+  });
+
+  it("retries original-image rendering using fetched bytes before falling back", async () => {
+    const originalCreateObjectUrl = URL.createObjectURL;
+    const originalRevokeObjectUrl = URL.revokeObjectURL;
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: vi.fn(() => "blob:photo-1")
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: vi.fn()
+    });
+    fetchMock.mockImplementation(async (input) => {
+      const requestPath = String(input);
+      if (requestPath === "/api/v1/people") {
+        return {
+          ok: true,
+          json: async () => []
+        } as Response;
+      }
+      if (requestPath === "/api/v1/photos/photo-1") {
+        return {
+          ok: true,
+          json: async () => buildPayload()
+        } as Response;
+      }
+      if (requestPath === "/api/v1/photos/photo-1/original") {
+        return {
+          ok: true,
+          headers: new Headers({ "content-type": "image/jpeg" }),
+          blob: async () => new Blob(["original"], { type: "image/jpeg" })
+        } as unknown as Response;
+      }
+      return {
+        ok: false,
+        status: 500
+      } as Response;
+    });
+
+    renderDetail();
+
+    const image = await screen.findByRole("img", { name: "Preview for photo-1" });
+    expect(image).toHaveAttribute("src", "/api/v1/photos/photo-1/original");
+    fireEvent.error(image);
+
+    await waitFor(() => {
+      expect(image).toHaveAttribute("src", "blob:photo-1");
+    });
+
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: originalCreateObjectUrl
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: originalRevokeObjectUrl
+    });
+  });
+
+  it("ignores stale original-image errors after navigating to another photo", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation(async (input) => {
+      const requestPath = String(input);
+      if (requestPath === "/api/v1/people") {
+        return {
+          ok: true,
+          json: async () => []
+        } as Response;
+      }
+      if (requestPath === "/api/v1/photos/photo-1") {
+        return {
+          ok: true,
+          json: async () => buildPayload()
+        } as Response;
+      }
+      if (requestPath === "/api/v1/photos/photo-2") {
+        return {
+          ok: true,
+          json: async () =>
+            buildPayload({
+              photo_id: "photo-2",
+              path: "/library/photo-2.jpg",
+              metadata: {
+                ...buildPayload().metadata,
+                sha256: "sha-2"
+              }
+            })
+        } as Response;
+      }
+      return {
+        ok: false,
+        status: 500
+      } as Response;
+    });
+
+    renderDetailWithPhotoSwitcher();
+
+    expect(await screen.findByRole("img", { name: "Preview for photo-1" })).toHaveAttribute(
+      "src",
+      "/api/v1/photos/photo-1/original"
+    );
+
+    await user.click(screen.getByRole("link", { name: "Open photo 2" }));
+
+    const image = await screen.findByRole("img", { name: "Preview for photo-2" });
+    expect(image).toHaveAttribute("src", "/api/v1/photos/photo-2/original");
+
+    Object.defineProperty(image, "currentSrc", {
+      configurable: true,
+      value: "http://localhost/api/v1/photos/photo-1/original"
+    });
+    fireEvent.error(image);
+
+    expect(image).toHaveAttribute("src", "/api/v1/photos/photo-2/original");
   });
 
   it("allows toggling face bbox overlays in the preview", async () => {

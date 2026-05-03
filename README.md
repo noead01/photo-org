@@ -111,7 +111,7 @@ For local operations:
 - `PHOTO_ORG_ENVIRONMENT=<name> make print-compose-api-base-url` prints the API URL for that environment
 - `PHOTO_ORG_ENVIRONMENT=<name> make print-compose-ui-base-url` prints the UI URL for that environment
 - `PHOTO_ORG_ENV_FILE=/path/to/file.env` can be added when you want a local command to load extra environment-specific settings
-- `PHOTO_ORG_ENVIRONMENT=<name> PHOTO_ORG_ENV_FILE=env/presets/face-detection-high-precision.env make compose-up` starts the selected environment with stricter face-detection thresholds to reduce false positives
+- `PHOTO_ORG_ENVIRONMENT=<name> PHOTO_ORG_ENV_FILE=env/presets/face-detection-high-precision.env make compose-up` starts the selected environment with the named `high_precision` face-detection profile
 
 The default Compose file now bind-mounts `${PHOTO_ORG_PHOTO_LIBRARY_HOST_PATH}` into `${PHOTO_ORG_PHOTO_LIBRARY_CONTAINER_PATH}` for `db-service`, defaulting to `./seed-corpus` mounted at `/photos`. That runtime mount remains an internal deployment concern; watched-folder registration should stay relative to a registered source root.
 
@@ -136,6 +136,12 @@ Recognition suggestion behavior is configurable through environment variables:
 
 Face detection behavior is configurable through environment variables:
 
+- `FACE_DETECT_PROFILE` (default `balanced`) with built-in profiles:
+  - `balanced`
+  - `high_precision`
+  - `high_recall`
+  - `portraits`
+- `FACE_DETECT_PROFILE_FILE` (optional path to JSON profile definitions; defaults to `apps/api/app/processing/face_detect_profiles.json`)
 - `FACE_DETECT_SCALE_FACTOR` (default `1.1`)
 - `FACE_DETECT_MIN_NEIGHBORS` (default `5`)
 - `FACE_DETECT_MIN_SIZE` (default `60x60`)
@@ -145,7 +151,14 @@ Face detection behavior is configurable through environment variables:
 - `FACE_DETECT_ASPECT_RATIO_MIN` (default `0.0`)
 - `FACE_DETECT_ASPECT_RATIO_MAX` (default `100.0`)
 
-A stricter preset is checked in at `env/presets/face-detection-high-precision.env` for environments where false positives are too noisy.
+Preset files are checked in under `env/presets/` (each includes a full parameter set):
+
+- `face-detection-balanced.env`
+- `face-detection-high-precision.env`
+- `face-detection-high-recall.env`
+- `face-detection-portraits.env`
+
+When both `FACE_DETECT_PROFILE` and specific `FACE_DETECT_*` variables are set, explicit `FACE_DETECT_*` variables override the selected profile values.
 
 For operator troubleshooting during long imports or background processing, the API exposes two operational endpoints:
 

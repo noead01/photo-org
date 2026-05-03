@@ -845,10 +845,19 @@ body {
   border-radius: 0.55rem;
   background: #f8fafc;
   padding: 0.5rem;
+  height: clamp(16rem, calc(100vh - 18rem), 70rem);
+  max-height: calc(100vh - 8rem);
   resize: both;
   overflow: auto;
   min-width: 14rem;
   min-height: 10rem;
+}
+
+@supports (height: 100dvh) {
+  .detail-media-frame {
+    height: clamp(16rem, calc(100dvh - 18rem), 70rem);
+    max-height: calc(100dvh - 8rem);
+  }
 }
 
 .detail-media-frame[data-mode="actual"] {
