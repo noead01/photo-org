@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import delete, func, insert, select, update
@@ -11,6 +12,7 @@ from photoorg_db_schema import (
     FACE_LABEL_SOURCE_MACHINE_SUGGESTED,
 )
 
+from app.db.queue import IngestQueueStore
 from app.services.recognition_policy import resolve_prediction_metadata
 from app.storage import face_labels, faces, people
 
@@ -62,6 +64,10 @@ def assign_face_to_person(
                 face_id=face_id,
                 person_id=person_id,
                 action="assignment",
+            )
+            _enqueue_face_suggestion_recompute(
+                connection,
+                person_ids=[person_id],
             )
             return assignment
     except IntegrityError as exc:
@@ -121,6 +127,10 @@ def reassign_face_to_person(
             action="correction",
             previous_person_id=previous_person_id,
         )
+        _enqueue_face_suggestion_recompute(
+            connection,
+            person_ids=[previous_person_id, person_id],
+        )
     except IntegrityError as exc:
         _raise_person_not_found_on_fk_violation(
             connection,
@@ -161,6 +171,10 @@ def confirm_face_assignment(
         face_id=face_id,
         person_id=person_id,
         action="confirmation",
+    )
+    _enqueue_face_suggestion_recompute(
+        connection,
+        person_ids=[person_id],
     )
     return {
         "face_id": row["face_id"],
@@ -367,3 +381,35 @@ def _upsert_machine_suggested_face_label_state(
             provenance=provenance,
         )
     )
+
+
+def _enqueue_face_suggestion_recompute(
+    connection: Connection,
+    *,
+    person_ids: list[str],
+) -> None:
+    now = datetime.now(tz=UTC)
+    debounce_until_ts = now.isoformat()
+    queue_store = IngestQueueStore()
+    try:
+        for person_id in sorted({candidate for candidate in person_ids if candidate}):
+            payload = {
+                "person_id": person_id,
+                "reason": "human_confirmed_event",
+                "debounce_until_ts": debounce_until_ts,
+            }
+            idempotency_key = f"face_suggestion_recompute:{person_id}"
+            enqueue_result = queue_store.enqueue_in_transaction(
+                payload_type="face_suggestion_recompute",
+                payload=payload,
+                idempotency_key=idempotency_key,
+                connection=connection,
+            )
+            if not enqueue_result.created:
+                queue_store.refresh_nonprocessing_in_transaction(
+                    enqueue_result.ingest_queue_id,
+                    payload=payload,
+                    connection=connection,
+                )
+    finally:
+        queue_store.close()

@@ -12,7 +12,7 @@ from app.main import app
 from app.migrations import upgrade_database
 from app.routers import face_assignments as face_assignments_router
 from app.services import face_assignment as face_assignment_service
-from app.storage import face_labels, faces, people, photos
+from app.storage import face_labels, faces, ingest_queue, people, photos
 
 
 def _client(tmp_path, monkeypatch, filename: str) -> TestClient:
@@ -119,6 +119,52 @@ def test_face_assignment_api_assigns_unlabeled_face_to_existing_person(tmp_path,
             select(faces.c.person_id).where(faces.c.face_id == "face-1")
         ).scalar_one_or_none()
     assert persisted_person_id == "person-1"
+
+
+def test_face_assignment_api_enqueues_face_suggestion_recompute_after_human_assignment(
+    tmp_path, monkeypatch
+):
+    database_url = _database_url(tmp_path, "face-assign-recompute-enqueue.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        _insert_photo(connection, photo_id="photo-1")
+        _insert_person(connection, person_id="person-1", display_name="Jane Doe")
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id=None,
+            )
+        )
+
+    client = _authorized_client()
+    response = client.post(
+        "/api/v1/faces/face-1/assignments",
+        json={"person_id": "person-1"},
+    )
+
+    assert response.status_code == 201
+    with engine.connect() as connection:
+        recompute_rows = connection.execute(
+            select(
+                ingest_queue.c.payload_type,
+                ingest_queue.c.payload_json,
+                ingest_queue.c.idempotency_key,
+                ingest_queue.c.status,
+            ).where(ingest_queue.c.payload_type == "face_suggestion_recompute")
+        ).mappings().all()
+
+    assert len(recompute_rows) == 1
+    assert recompute_rows[0]["payload_type"] == "face_suggestion_recompute"
+    assert recompute_rows[0]["idempotency_key"] == "face_suggestion_recompute:person-1"
+    assert recompute_rows[0]["status"] == "pending"
+    assert recompute_rows[0]["payload_json"]["person_id"] == "person-1"
+    assert recompute_rows[0]["payload_json"]["reason"] == "human_confirmed_event"
+    assert "debounce_until_ts" in recompute_rows[0]["payload_json"]
 
 
 def test_face_assignment_api_rejects_missing_face_validation_role(tmp_path, monkeypatch):

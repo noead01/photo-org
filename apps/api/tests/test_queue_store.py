@@ -132,3 +132,33 @@ def test_list_processable_prioritizes_extracted_payloads_over_candidates(tmp_pat
     assert processable_rows[0].ingest_queue_id == extracted_id
     assert processable_rows[0].payload_type == "extracted_photo"
     assert processable_rows[0].ingest_queue_id != candidate_id
+
+
+def test_refresh_nonprocessing_in_transaction_replaces_payload_for_completed_row(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'queue-store-refresh-nonprocessing.db'}"
+    upgrade_database(database_url)
+    store = IngestQueueStore(database_url)
+
+    queue_id = store.enqueue(
+        payload_type="face_suggestion_recompute",
+        payload={"person_id": "person-1", "debounce_until_ts": "2026-05-03T12:00:00+00:00"},
+        idempotency_key="face_suggestion_recompute:person-1",
+    )
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            update(ingest_queue)
+            .where(ingest_queue.c.ingest_queue_id == queue_id)
+            .values(status="completed")
+        )
+        refreshed = store.refresh_nonprocessing_in_transaction(
+            queue_id,
+            payload={"person_id": "person-1", "debounce_until_ts": "2026-05-03T12:00:05+00:00"},
+            connection=connection,
+        )
+        row = store.get_row_in_transaction(queue_id, connection=connection)
+
+    assert refreshed is True
+    assert row is not None
+    assert row.status == "pending"
+    assert row.payload_json["debounce_until_ts"] == "2026-05-03T12:00:05+00:00"
