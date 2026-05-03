@@ -155,7 +155,10 @@ class PhotosRepository:
         item["metadata"] = {
             "sha256": row.sha256,
             "phash": row.phash,
-            "shot_ts_source": row.shot_ts_source,
+            "shot_ts_source": self._normalize_shot_ts_source_label(
+                row.shot_ts_source,
+                exif_attributes=exif_attributes,
+            ),
             "camera_model": row.camera_model,
             "software": row.software,
             "gps_latitude": row.gps_latitude,
@@ -171,6 +174,29 @@ class PhotosRepository:
             "faces_detected_ts": row.faces_detected_ts,
         }
         return item
+
+    @staticmethod
+    def _normalize_shot_ts_source_label(
+        shot_ts_source: str | None,
+        *,
+        exif_attributes: dict[str, object] | None,
+    ) -> str | None:
+        if shot_ts_source is None:
+            return None
+
+        if shot_ts_source.startswith("exif_attr:"):
+            legacy_source = shot_ts_source.removeprefix("exif_attr:")
+            if legacy_source.startswith("exif_ifd.") or legacy_source.startswith("exif."):
+                namespace, tag_name = legacy_source.split(".", 1)
+                return f"{namespace}:{tag_name}"
+
+        if shot_ts_source == "exif:DateTimeOriginal" and exif_attributes:
+            has_ifd_original = "exif_ifd.DateTimeOriginal" in exif_attributes
+            has_exif_original = "exif.DateTimeOriginal" in exif_attributes
+            if has_ifd_original and not has_exif_original:
+                return "exif_ifd:DateTimeOriginal"
+
+        return shot_ts_source
 
     def _load_photo_exif_attributes(self, photo_id: str) -> dict[str, object] | None:
         rows = self.db.execute(

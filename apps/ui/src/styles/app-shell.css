@@ -746,6 +746,58 @@ body {
   overflow-wrap: anywhere;
 }
 
+.detail-exif-attributes {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.detail-exif-attributes-toggle {
+  justify-self: flex-start;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 0.45rem;
+  padding: 0.25rem 0.5rem;
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.detail-exif-attributes-list {
+  margin: 0;
+  display: grid;
+  gap: 0.3rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  background: #f8fafc;
+  padding: 0.45rem;
+}
+
+.detail-exif-attributes-list div {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.detail-exif-attributes-list dt,
+.detail-exif-attributes-list dd {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.detail-exif-attributes-list dt {
+  color: #334155;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.detail-exif-attributes-list dd {
+  color: #0f172a;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
 .detail-media-controls {
   display: flex;
   flex-wrap: wrap;

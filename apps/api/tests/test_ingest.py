@@ -106,7 +106,11 @@ def test_ingest_directory_loads_sample_photos_into_queue(tmp_path, monkeypatch):
     assert all(row.payload_json["faces_count"] == 0 for row in rows)
     sample = next(row for row in rows if row.payload_json["path"].endswith("birthday_park_005.jpg"))
     assert sample.payload_json["shot_ts"] == "2022-06-14T15:28:00+00:00"
-    assert sample.payload_json["shot_ts_source"] in {"exif:DateTime", "exif:DateTimeOriginal"}
+    assert sample.payload_json["shot_ts_source"] in {
+        "exif:DateTime",
+        "exif:DateTimeOriginal",
+        "exif_ifd:DateTimeOriginal",
+    }
     assert sample.payload_json["camera_make"] == "Apple"
     assert sample.payload_json["camera_model"] == "iPhone 12 mini"
     assert sample.payload_json["gps_latitude"] is None

@@ -13,6 +13,7 @@ from app.storage import (
     face_labels,
     faces,
     people,
+    photo_exif_attributes,
     photo_files,
     photo_tags,
     photos,
@@ -201,6 +202,45 @@ def test_photo_detail_api_allows_missing_shot_timestamp(tmp_path, monkeypatch):
     assert payload["photo_id"] == "photo-1"
     assert payload["shot_ts"] is None
     assert payload["faces"] == []
+
+
+def test_photo_detail_api_normalizes_legacy_shot_ts_source_using_exif_attributes(tmp_path, monkeypatch):
+    database_url = f"sqlite:///{tmp_path / 'photo-detail-api-shot-source-normalization.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 3, 28, 19, 30, tzinfo=UTC)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(photos).values(
+                photo_id="photo-1",
+                sha256="sha-1",
+                shot_ts=now,
+                shot_ts_source="exif:DateTimeOriginal",
+                created_ts=now,
+                updated_ts=now,
+                path="/photos/photo-1.jpg",
+                filesize=1024,
+                ext="jpg",
+                faces_count=0,
+            )
+        )
+        connection.execute(
+            insert(photo_exif_attributes).values(
+                photo_id="photo-1",
+                exif_attribute_name="exif_ifd.DateTimeOriginal",
+                exif_attribute_value="2026:03:28 19:30:00",
+            )
+        )
+
+    client = TestClient(app)
+    response = client.get("/api/v1/photos/photo-1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["metadata"]["shot_ts_source"] == "exif_ifd:DateTimeOriginal"
 
 
 def test_photo_detail_api_returns_latest_matching_face_label_provenance(tmp_path, monkeypatch):

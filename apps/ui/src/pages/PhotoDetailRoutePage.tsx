@@ -57,6 +57,7 @@ type PhotoDetailPayload = {
     gps_latitude: number | null;
     gps_longitude: number | null;
     gps_altitude: number | null;
+    exif_attributes: Record<string, unknown> | null;
     created_ts: string;
     updated_ts: string;
     modified_ts: string | null;
@@ -128,6 +129,20 @@ function formatGps(lat: number | null, lon: number | null): string {
 
 function formatOptionalText(value: string | null): string {
   return value && value.trim().length > 0 ? value : MISSING_VALUE;
+}
+
+function formatExifAttributeValue(value: unknown): string {
+  if (value === null) {
+    return "null";
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 async function fetchPhotoDetail(photoId: string): Promise<PhotoDetailPayload> {
@@ -219,6 +234,7 @@ export function PhotoDetailRoutePage() {
   } | null>(null);
   const [showFaceBoxes, setShowFaceBoxes] = useState(true);
   const [isDetailFlyoutOpen, setIsDetailFlyoutOpen] = useState(false);
+  const [isExifAttributesOpen, setIsExifAttributesOpen] = useState(false);
   const [activeFaceModalId, setActiveFaceModalId] = useState<string | null>(null);
   const [peopleDirectory, setPeopleDirectory] = useState<PersonRecord[]>([]);
 
@@ -229,6 +245,7 @@ export function PhotoDetailRoutePage() {
   useEffect(() => {
     setIsOriginalImageEnabled(true);
     setOriginalImageNaturalSize(null);
+    setIsExifAttributesOpen(false);
   }, [photoId]);
 
   useEffect(() => {
@@ -380,15 +397,23 @@ export function PhotoDetailRoutePage() {
     return faceOverlayRegions.find((region) => region.faceId === activeFaceModalId) ?? null;
   }, [activeFaceModalId, faceOverlayRegions]);
 
+  const exifAttributeEntries = useMemo(() => {
+    const attributes = detail?.metadata.exif_attributes;
+    if (!attributes) {
+      return [] as Array<[string, unknown]>;
+    }
+    return Object.entries(attributes).sort(([leftName], [rightName]) =>
+      leftName.localeCompare(rightName, "en-US")
+    );
+  }, [detail?.metadata.exif_attributes]);
+
   const backLinkFocusPhotoId = detail?.photo_id ?? returnState.returnFocusPhotoId ?? photoId ?? null;
   const mediaScale = imageScalePercent / 100;
   const thumbnailDataUrl = detail?.thumbnail
     ? `data:${detail.thumbnail.mime_type};base64,${detail.thumbnail.data_base64}`
     : null;
   const originalImageUrl = detail ? `/api/v1/photos/${encodeURIComponent(detail.photo_id)}/original` : null;
-  const shouldUseOriginalImage = Boolean(
-    detail?.original?.is_available && originalImageUrl && isOriginalImageEnabled
-  );
+  const shouldUseOriginalImage = Boolean(originalImageUrl && isOriginalImageEnabled);
   const previewImageSrc = shouldUseOriginalImage ? originalImageUrl : thumbnailDataUrl;
   const mediaBaseWidthPx = shouldUseOriginalImage
     ? (originalImageNaturalSize?.width ?? null)
@@ -705,6 +730,29 @@ export function PhotoDetailRoutePage() {
                   <dd>{formatTimestamp(detail.metadata.modified_ts)}</dd>
                 </div>
               </dl>
+              {exifAttributeEntries.length > 0 ? (
+                <section className="detail-exif-attributes">
+                  <button
+                    type="button"
+                    className="detail-exif-attributes-toggle"
+                    aria-expanded={isExifAttributesOpen}
+                    aria-controls="detail-exif-attributes-list"
+                    onClick={() => setIsExifAttributesOpen((current) => !current)}
+                  >
+                    {isExifAttributesOpen ? "Hide all EXIF attributes" : "Show all EXIF attributes"}
+                  </button>
+                  {isExifAttributesOpen ? (
+                    <dl id="detail-exif-attributes-list" className="detail-exif-attributes-list">
+                      {exifAttributeEntries.map(([attributeName, attributeValue]) => (
+                        <div key={attributeName}>
+                          <dt>{attributeName}</dt>
+                          <dd>{formatExifAttributeValue(attributeValue)}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  ) : null}
+                </section>
+              ) : null}
             </article>
 
             <article className="detail-panel">

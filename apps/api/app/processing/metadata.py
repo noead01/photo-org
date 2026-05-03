@@ -197,10 +197,6 @@ def _shot_ts_source(shot_ts: str | None, exif_map: dict[str, Any], exif_ifd: dic
     )
     if source is None:
         return "exif"
-    if source == "exif_ifd:DateTimeOriginal":
-        return "exif:DateTimeOriginal"
-    if source == "exif:DateTime":
-        return "exif:DateTime"
     return source
 
 
