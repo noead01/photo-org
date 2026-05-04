@@ -1127,6 +1127,7 @@ def test_photo_detail_api_includes_face_id_for_assignment_workflow(tmp_path, mon
             "model_version": None,
             "provenance": None,
             "label_recorded_ts": None,
+            "suggestions": [],
         }
     ]
 
