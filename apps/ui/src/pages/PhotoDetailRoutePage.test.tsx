@@ -403,7 +403,7 @@ describe("PhotoDetailRoutePage", () => {
     });
   });
 
-  it("keeps face overlays coherent when switching image presentation mode", async () => {
+  it("keeps face overlays coherent while adjusting photo size", async () => {
     const user = userEvent.setup();
 
     fetchMock.mockResolvedValueOnce({
@@ -416,12 +416,13 @@ describe("PhotoDetailRoutePage", () => {
     expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
     expect(await screen.findByLabelText("Face region 1 for person-1")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Fit to panel" }));
+    const sizeSlider = screen.getByRole("slider", { name: "Photo size" });
+    fireEvent.change(sizeSlider, { target: { value: "120" } });
 
     expect(await screen.findByLabelText("Face region 1 for person-1")).toBeInTheDocument();
   });
 
-  it("defaults preview mode to actual pixels", async () => {
+  it("does not render preview mode toggle buttons", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => buildPayload()
@@ -430,8 +431,10 @@ describe("PhotoDetailRoutePage", () => {
     renderDetail();
 
     expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Actual pixels" })).toHaveClass("is-active");
-    expect(screen.getByRole("button", { name: "Fit to panel" })).not.toHaveClass("is-active");
+    expect(screen.getByRole("group", { name: "Preview controls" })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Preview display mode" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Fit to panel" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Actual pixels" })).not.toBeInTheDocument();
   });
 
   it("loads the full-resolution original image when available", async () => {

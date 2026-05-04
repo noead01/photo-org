@@ -38,3 +38,23 @@ export function parseNullableBooleanParam(rawValue: string | null): boolean | nu
   }
   return null;
 }
+
+export function parsePageSizeParam(
+  rawValue: string | null,
+  allowedValues: readonly number[],
+  defaultValue: number
+): number {
+  const candidate = (rawValue ?? "").trim();
+  if (!candidate) {
+    return defaultValue;
+  }
+
+  const parsed = Number.parseInt(candidate, 10);
+  if (!Number.isFinite(parsed)) {
+    return defaultValue;
+  }
+  if (!allowedValues.includes(parsed)) {
+    return defaultValue;
+  }
+  return parsed;
+}

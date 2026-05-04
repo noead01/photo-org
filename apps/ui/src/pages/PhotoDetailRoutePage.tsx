@@ -70,8 +70,6 @@ type PhotoDetailPayload = {
 const MISSING_VALUE = "Not available";
 const EXIF_ATTRIBUTE_PREVIEW_MAX_CHARS = 30;
 
-type MediaPresentationMode = "fit" | "actual";
-
 type PersonRecord = {
   person_id: string;
   display_name: string;
@@ -259,7 +257,6 @@ export function PhotoDetailRoutePage() {
   const [error, setError] = useState<string | null>(null);
   const [isNotFound, setIsNotFound] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
-  const [mediaMode, setMediaMode] = useState<MediaPresentationMode>("actual");
   const [imageScalePercent, setImageScalePercent] = useState(100);
   const [isOriginalImageEnabled, setIsOriginalImageEnabled] = useState(true);
   const [originalImageRetrySrc, setOriginalImageRetrySrc] = useState<string | null>(null);
@@ -462,7 +459,6 @@ export function PhotoDetailRoutePage() {
   }, [detail?.metadata.exif_attributes]);
 
   const backLinkFocusPhotoId = detail?.photo_id ?? returnState.returnFocusPhotoId ?? photoId ?? null;
-  const mediaScale = imageScalePercent / 100;
   const thumbnailDataUrl = detail?.thumbnail
     ? `data:${detail.thumbnail.mime_type};base64,${detail.thumbnail.data_base64}`
     : null;
@@ -470,17 +466,7 @@ export function PhotoDetailRoutePage() {
   const shouldUseOriginalImage = Boolean(originalImageUrl && isOriginalImageEnabled);
   const activeOriginalImageSrc = shouldUseOriginalImage ? (originalImageRetrySrc ?? originalImageUrl) : null;
   const previewImageSrc = activeOriginalImageSrc ?? thumbnailDataUrl;
-  const mediaBaseWidthPx = shouldUseOriginalImage
-    ? (originalImageNaturalSize?.width ?? null)
-    : (detail?.thumbnail?.width ?? null);
-  const mediaStageStyle: CSSProperties = mediaMode === "fit"
-    ? { width: `${Math.max(25, imageScalePercent)}%` }
-    : {
-        width:
-          mediaBaseWidthPx !== null
-            ? `${Math.max(80, Math.round(mediaBaseWidthPx * mediaScale))}px`
-            : "auto"
-      };
+  const mediaStageStyle: CSSProperties = { width: `${Math.max(25, imageScalePercent)}%` };
 
   function handleFaceAssigned(faceId: string, personId: string) {
     setDetail((current) => (current ? applyFaceAssignment(current, faceId, personId) : current));
@@ -561,10 +547,11 @@ export function PhotoDetailRoutePage() {
             search: returnState.returnToLibrarySearch ?? ""
           }}
           state={
-            backLinkFocusPhotoId || returnState.librarySelection
+            backLinkFocusPhotoId || returnState.librarySelection || returnState.libraryViewState
               ? {
                   restoreFocusPhotoId: backLinkFocusPhotoId ?? undefined,
-                  librarySelection: returnState.librarySelection
+                  librarySelection: returnState.librarySelection,
+                  libraryViewState: returnState.libraryViewState
                 }
               : undefined
           }
@@ -597,21 +584,7 @@ export function PhotoDetailRoutePage() {
         <div className="detail-workspace">
           <article className="detail-preview-panel">
             <h2>Preview</h2>
-            <div className="detail-media-controls" role="group" aria-label="Preview display mode">
-              <button
-                type="button"
-                className={mediaMode === "fit" ? "is-active" : undefined}
-                onClick={() => setMediaMode("fit")}
-              >
-                Fit to panel
-              </button>
-              <button
-                type="button"
-                className={mediaMode === "actual" ? "is-active" : undefined}
-                onClick={() => setMediaMode("actual")}
-              >
-                Actual pixels
-              </button>
+            <div className="detail-media-controls" role="group" aria-label="Preview controls">
               <label className="detail-face-box-toggle">
                 <input
                   type="checkbox"
@@ -650,7 +623,7 @@ export function PhotoDetailRoutePage() {
               </p>
             ) : null}
             {previewImageSrc ? (
-              <div className="detail-media-frame" data-mode={mediaMode}>
+              <div className="detail-media-frame">
                 <div className="detail-media-stage" style={mediaStageStyle}>
                   <img
                     className="detail-media-image"

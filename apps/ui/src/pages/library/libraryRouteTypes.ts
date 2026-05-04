@@ -10,7 +10,11 @@ export type LibraryPhoto = {
   shot_ts: string | null;
   filesize: number;
   people?: string[];
-  faces?: Array<{ person_id: string | null }>;
+  faces?: Array<{
+    person_id: string | null;
+    label_source?: "human_confirmed" | "machine_suggested" | null;
+    confidence?: number | null;
+  }>;
   thumbnail?: {
     mime_type: string;
     width: number;
@@ -48,6 +52,7 @@ export type SearchUrlState = {
   queryChips: string[];
   fromDate: string;
   toDate: string;
+  pageSize: number;
   selectedPersonNames: string[];
   personCertaintyMode: PersonCertaintyMode;
   suggestionConfidenceMinDraft: string;

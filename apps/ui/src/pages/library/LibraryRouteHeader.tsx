@@ -10,8 +10,11 @@ interface LibraryRouteHeaderProps {
   lastKnownPage: number;
   canGoPrevious: boolean;
   canGoNext: boolean;
+  pageSize: number;
+  pageSizeOptions: readonly number[];
   onSortDirectionChange: (direction: SortDirection) => void;
   onSelectPage: (pageNumber: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
 }
 
 export function LibraryRouteHeader({
@@ -21,8 +24,11 @@ export function LibraryRouteHeader({
   lastKnownPage,
   canGoPrevious,
   canGoNext,
+  pageSize,
+  pageSizeOptions,
   onSortDirectionChange,
-  onSelectPage
+  onSelectPage,
+  onPageSizeChange
 }: LibraryRouteHeaderProps) {
   return (
     <div className="browse-header">
@@ -42,7 +48,10 @@ export function LibraryRouteHeader({
           lastKnownPage={lastKnownPage}
           canGoPrevious={canGoPrevious}
           canGoNext={canGoNext}
+          pageSize={pageSize}
+          pageSizeOptions={pageSizeOptions}
           onSelectPage={onSelectPage}
+          onPageSizeChange={onPageSizeChange}
         />
       </div>
     </div>

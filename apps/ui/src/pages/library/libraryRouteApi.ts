@@ -1,5 +1,10 @@
 import { isLibraryActionConflictActive } from "./operationsActivity";
 import { buildSearchFilters } from "./libraryRouteSearchState";
+import {
+  DEFAULT_SEARCH_PAGE_LIMIT,
+  SEARCH_PAGE_LIMIT_OPTIONS,
+  type SearchPageLimit
+} from "./libraryPageSize";
 import type {
   LibraryLocationRadius,
   PersonCertaintyMode,
@@ -8,7 +13,7 @@ import type {
   SortDirection
 } from "./libraryRouteTypes";
 
-export const SEARCH_PAGE_LIMIT = 24;
+export { DEFAULT_SEARCH_PAGE_LIMIT, SEARCH_PAGE_LIMIT_OPTIONS, type SearchPageLimit };
 
 export async function fetchLibraryPage(
   query: string,
@@ -21,7 +26,8 @@ export async function fetchLibraryPage(
   hasFaces: boolean | null,
   pathHints: string[],
   sortDirection: SortDirection,
-  cursor: string | null
+  cursor: string | null,
+  pageLimit: number
 ): Promise<SearchResponsePayload> {
   const searchFilters = buildSearchFilters(
     fromDate,
@@ -47,7 +53,7 @@ export async function fetchLibraryPage(
         dir: sortDirection
       },
       page: {
-        limit: SEARCH_PAGE_LIMIT,
+        limit: pageLimit,
         cursor
       }
     })
