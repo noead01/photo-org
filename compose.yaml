@@ -35,10 +35,15 @@ services:
       FACE_DETECT_MAX_AREA_RATIO: ${FACE_DETECT_MAX_AREA_RATIO:-1.0}
       FACE_DETECT_ASPECT_RATIO_MIN: ${FACE_DETECT_ASPECT_RATIO_MIN:-0.0}
       FACE_DETECT_ASPECT_RATIO_MAX: ${FACE_DETECT_ASPECT_RATIO_MAX:-100.0}
+      FACE_RECOGNITION_SFACE_MODEL_FILE: ${FACE_RECOGNITION_SFACE_MODEL_FILE:-/models/opencv/face_recognition_sface_2021dec.onnx}
     volumes:
       - type: bind
         source: ${PHOTO_ORG_PHOTO_LIBRARY_HOST_PATH:-./seed-corpus}
         target: ${PHOTO_ORG_PHOTO_LIBRARY_CONTAINER_PATH:-/photos}
+      - type: bind
+        source: ${PHOTO_ORG_MODEL_HOST_PATH:-/mnt/d/models}
+        target: ${PHOTO_ORG_MODEL_CONTAINER_PATH:-/models}
+        read_only: true
     depends_on:
       postgres:
         condition: service_healthy

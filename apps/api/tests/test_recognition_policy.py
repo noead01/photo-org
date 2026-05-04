@@ -13,10 +13,15 @@ from app.services.recognition_policy import (
 def test_resolve_suggestion_thresholds_reads_environment_overrides(monkeypatch):
     monkeypatch.setenv("PHOTO_ORG_RECOGNITION_REVIEW_THRESHOLD", "0.7")
     monkeypatch.setenv("PHOTO_ORG_RECOGNITION_AUTO_ACCEPT_THRESHOLD", "0.9")
+    monkeypatch.setenv("PHOTO_ORG_RECOGNITION_MIN_TOP_MARGIN", "0.06")
 
     thresholds = resolve_suggestion_thresholds()
 
-    assert thresholds == {"review_threshold": 0.7, "auto_accept_threshold": 0.9}
+    assert thresholds == {
+        "review_threshold": 0.7,
+        "auto_accept_threshold": 0.9,
+        "min_top_margin": 0.06,
+    }
 
 
 def test_resolve_suggestion_thresholds_rejects_invalid_range(monkeypatch):

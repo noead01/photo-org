@@ -813,6 +813,7 @@ class PhotosRepository:
             .where(self.faces.c.photo_id.in_(pids))
             .order_by(self.faces.c.photo_id, self.faces.c.face_id)
         ).all()
+        face_ids = sorted({str(r.face_id) for r in face_rows if r.face_id is not None})
 
         provenance_map: Dict[tuple[str, str], Dict[str, Any]] = {}
         labeled_face_keys = {
@@ -867,6 +868,47 @@ class PhotosRepository:
                     ),
                 }
 
+        suggestion_map: Dict[str, List[Dict[str, Any]]] = {face_id: [] for face_id in face_ids}
+        if face_ids:
+            suggestion_rows = (
+                self.db.execute(
+                    select(
+                        self.face_suggestions.c.face_id,
+                        self.face_suggestions.c.person_id,
+                        self.people.c.display_name,
+                        self.face_suggestions.c.rank,
+                        self.face_suggestions.c.confidence,
+                        self.face_suggestions.c.model_version,
+                        self.face_suggestions.c.provenance,
+                    )
+                    .select_from(
+                        self.face_suggestions.join(
+                            self.people,
+                            self.face_suggestions.c.person_id == self.people.c.person_id,
+                        )
+                    )
+                    .where(self.face_suggestions.c.face_id.in_(face_ids))
+                    .order_by(
+                        self.face_suggestions.c.face_id.asc(),
+                        self.face_suggestions.c.rank.asc(),
+                        self.face_suggestions.c.person_id.asc(),
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            for row in suggestion_rows:
+                suggestion_map.setdefault(str(row["face_id"]), []).append(
+                    {
+                        "person_id": str(row["person_id"]),
+                        "display_name": str(row["display_name"]),
+                        "rank": int(row["rank"]),
+                        "confidence": float(row["confidence"]),
+                        "model_version": row["model_version"],
+                        "provenance": row["provenance"],
+                    }
+                )
+
         for r in face_rows:
             if r.person_id:
                 ppl_map[r.photo_id].append(r.person_id)
@@ -879,6 +921,7 @@ class PhotosRepository:
                 "person_id": r.person_id,
                 "label_source": provenance["label_source"] if provenance else None,
                 "confidence": provenance["confidence"] if provenance else None,
+                "suggestions": suggestion_map.get(str(r.face_id), []),
             }
             if include_face_regions:
                 bbox_space_width, bbox_space_height = _extract_bbox_space_dimensions(r.provenance)
@@ -896,6 +939,7 @@ class PhotosRepository:
                         "model_version": provenance["model_version"] if provenance else None,
                         "provenance": provenance["provenance"] if provenance else None,
                         "label_recorded_ts": provenance["label_recorded_ts"] if provenance else None,
+                        "suggestions": suggestion_map.get(str(r.face_id), []),
                     }
                 )
             faces_map[r.photo_id].append(face_item)

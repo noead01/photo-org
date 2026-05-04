@@ -6,6 +6,7 @@ import pytest
 from app.processing.faces import (
     FaceDetection,
     OpenCvFaceDetector,
+    OpenCvSFaceEmbeddingExtractor,
     _encode_jpeg,
     create_default_face_detector,
 )
@@ -166,6 +167,84 @@ def test_detector_detect_returns_serialized_face_rows(monkeypatch, tmp_path):
         "aspect_ratio_max": 100.0,
         "bbox_space_width": 200,
         "bbox_space_height": 100,
+    }
+
+
+class _FakeEmbeddingExtractor:
+    def __init__(self):
+        self.images = []
+
+    def extract(self, image):
+        self.images.append(image)
+        return [1.0, 0.0]
+
+    def provenance(self):
+        return {"extractor": "fake-sface", "model": "fake.onnx"}
+
+
+def test_detector_detect_uses_configured_embedding_extractor(monkeypatch, tmp_path):
+    classifier = _LoadedClassifier("/fake/haarcascade_frontalface_default.xml")
+    fake_cv2 = SimpleNamespace(
+        data=SimpleNamespace(haarcascades="/fake/"),
+        COLOR_RGB2GRAY="gray",
+        CascadeClassifier=lambda _path: classifier,
+        cvtColor=lambda image, _mode: image,
+    )
+    fake_numpy = SimpleNamespace(array=lambda image: image.__array__())
+    fake_rgb_image = _FakeRgbImage()
+    fake_image_module = SimpleNamespace(open=lambda _path: _FakeImageContext(fake_rgb_image))
+    fake_image_ops = SimpleNamespace(exif_transpose=lambda image: image)
+    fake_pil = SimpleNamespace(Image=fake_image_module, ImageOps=fake_image_ops)
+    fake_heif = SimpleNamespace(register_heif_opener=lambda: None)
+    embedding_extractor = _FakeEmbeddingExtractor()
+
+    monkeypatch.setitem(__import__("sys").modules, "cv2", fake_cv2)
+    monkeypatch.setitem(__import__("sys").modules, "numpy", fake_numpy)
+    monkeypatch.setitem(__import__("sys").modules, "PIL", fake_pil)
+    monkeypatch.setitem(__import__("sys").modules, "PIL.Image", fake_image_module)
+    monkeypatch.setitem(__import__("sys").modules, "PIL.ImageOps", fake_image_ops)
+    monkeypatch.setitem(__import__("sys").modules, "pillow_heif", fake_heif)
+
+    detector = OpenCvFaceDetector(embedding_extractor=embedding_extractor)
+
+    result = detector.detect(tmp_path / "sample.jpg")
+
+    assert fake_rgb_image.crops == [(10, 20, 40, 60)]
+    assert len(embedding_extractor.images) == 1
+    assert result[0]["embedding"] == [1.0, 0.0]
+    assert result[0]["provenance"]["embedding"] == {
+        "extractor": "fake-sface",
+        "model": "fake.onnx",
+    }
+
+
+def test_sface_embedding_extractor_returns_normalized_feature(monkeypatch, tmp_path):
+    model_file = tmp_path / "sface.onnx"
+    model_file.write_bytes(b"model")
+    feature = [[3.0, 4.0, *([0.0] * 126)]]
+    recognizer = SimpleNamespace(feature=lambda _image: feature)
+    fake_cv2 = SimpleNamespace(
+        FaceRecognizerSF_create=lambda model, config: recognizer,
+        COLOR_RGB2BGR="bgr",
+        cvtColor=lambda image, _mode: image,
+        resize=lambda image, size: (image, size),
+    )
+    fake_numpy = SimpleNamespace(array=lambda image: image.__array__())
+    fake_image = _FakeRgbImage()
+
+    monkeypatch.setitem(__import__("sys").modules, "cv2", fake_cv2)
+    monkeypatch.setitem(__import__("sys").modules, "numpy", fake_numpy)
+
+    extractor = OpenCvSFaceEmbeddingExtractor(model_file)
+
+    embedding = extractor.extract(fake_image)
+    assert embedding is not None
+    assert embedding[:2] == [0.6, 0.8]
+    assert embedding[2:] == [0.0] * 126
+    assert extractor.provenance() == {
+        "extractor": "opencv-sface",
+        "model": str(model_file),
+        "input_size": [112, 112],
     }
 
 

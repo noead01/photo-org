@@ -36,6 +36,14 @@ type PhotoDetailPayload = {
     model_version: string | null;
     provenance: Record<string, unknown> | null;
     label_recorded_ts: string | null;
+    suggestions?: Array<{
+      person_id: string;
+      display_name: string;
+      rank: number;
+      confidence: number;
+      model_version: string | null;
+      provenance: Record<string, unknown> | null;
+    }>;
   }>;
   thumbnail: {
     mime_type: string;

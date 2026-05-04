@@ -4,6 +4,7 @@ import type { FaceOverlayRegion } from "./FaceBBoxOverlay";
 interface FaceAssignmentModalFace {
   face_id: string;
   person_id: string | null;
+  suggestions?: FaceCandidate[];
 }
 
 interface FaceAssignmentModalPerson {
@@ -164,7 +165,8 @@ export function PhotoFaceAssignmentModal({
 
     setError(null);
     setCandidateError(null);
-    setCandidates([]);
+    const persistedSuggestions = Array.isArray(face.suggestions) ? face.suggestions : [];
+    setCandidates(persistedSuggestions);
     setDraft(face.person_id ? resolvePersonName(people, face.person_id) : "");
 
     const controller = new AbortController();
@@ -181,7 +183,7 @@ export function PhotoFaceAssignmentModal({
         }
 
         const nextCandidates = Array.isArray(payload.candidates) ? payload.candidates : [];
-        setCandidates(nextCandidates);
+        setCandidates(nextCandidates.length > 0 ? nextCandidates : persistedSuggestions);
       })
       .catch((caughtError: unknown) => {
         if (!controller.signal.aborted) {
@@ -349,7 +351,6 @@ export function PhotoFaceAssignmentModal({
             <input
               id="face-assignment-person-input"
               aria-label="Assign person"
-              list="face-assignment-known-people"
               value={draft}
               disabled={isBusy}
               onChange={(event) => {
@@ -357,11 +358,6 @@ export function PhotoFaceAssignmentModal({
                 setError(null);
               }}
             />
-            <datalist id="face-assignment-known-people">
-              {peopleByName.map((person) => (
-                <option key={person.person_id} value={person.display_name} />
-              ))}
-            </datalist>
 
             <div className="face-assignment-modal-actions">
               <button type="button" onClick={onClose} disabled={isBusy}>

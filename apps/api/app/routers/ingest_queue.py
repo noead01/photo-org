@@ -1,7 +1,12 @@
-from fastapi import APIRouter, Body, Depends
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.orm import Session
 
-from app.dependencies import require_worker_role
+from app.dependencies import get_db, require_worker_role
+from app.services.face_embedding_backfill import (
+    FaceEmbeddingModelUnavailableError,
+    reembed_missing_face_embeddings,
+)
 from app.services.ingest_queue_processor import process_pending_ingest_queue
 from app.services.storage_source_polling import trigger_storage_source_polling
 
@@ -80,6 +85,58 @@ class TriggerStorageSourcePollingResponse(BaseModel):
     poll_errors: list[str] = Field(description="Detailed poll-time errors from watched-folder scans.")
 
 
+class ReembedMissingFaceEmbeddingsRequest(BaseModel):
+    """Request payload for worker-driven face embedding backfill."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "description": (
+                "Backfill embeddings for face rows that are missing vectors, using the configured "
+                "SFace model."
+            )
+        }
+    )
+
+    limit: int = Field(
+        default=1000,
+        ge=1,
+        le=10000,
+        description="Maximum missing-embedding face rows to scan in one call.",
+    )
+    refresh_related: bool = Field(
+        default=True,
+        description=(
+            "When true, refresh person representations and face suggestions for people impacted "
+            "by updated embeddings."
+        ),
+    )
+    suggestion_limit: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        description="Suggestion depth to use when refreshing impacted person scopes.",
+    )
+
+
+class ReembedMissingFaceEmbeddingsResponse(BaseModel):
+    """Aggregate result returned after face embedding backfill."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "description": (
+                "Counts of scanned rows, embedding updates, skips, and related refresh activity."
+            )
+        }
+    )
+
+    scanned: int
+    updated: int
+    skipped_missing_bitmap: int
+    skipped_extraction_failed: int
+    refreshed_people: int
+    refreshed_suggestion_scopes: int
+
+
 @router.post(
     "/internal/ingest-queue/process",
     summary="Process ingest queue",
@@ -126,3 +183,37 @@ def poll_storage_sources_endpoint(
         error_count=result.error_count,
         poll_errors=list(result.poll_errors),
     )
+
+
+@router.post(
+    "/internal/faces/reembed-missing-embeddings",
+    summary="Re-embed missing face embeddings",
+    description=(
+        "Backfill face embeddings from persisted face crops for rows missing embeddings, then "
+        "optionally refresh related person representations and suggestions."
+    ),
+    response_model=ReembedMissingFaceEmbeddingsResponse,
+    responses={
+        403: {"description": "Worker role required"},
+        409: {"description": "Face embedding model not configured or unavailable"},
+    },
+)
+def reembed_missing_face_embeddings_endpoint(
+    body: ReembedMissingFaceEmbeddingsRequest = Body(
+        default_factory=ReembedMissingFaceEmbeddingsRequest
+    ),
+    _: None = Depends(require_worker_role),
+    db: Session = Depends(get_db),
+) -> ReembedMissingFaceEmbeddingsResponse:
+    try:
+        result = reembed_missing_face_embeddings(
+            db.connection(),
+            limit=body.limit,
+            refresh_related=body.refresh_related,
+            suggestion_limit=body.suggestion_limit,
+        )
+    except FaceEmbeddingModelUnavailableError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    db.commit()
+    return ReembedMissingFaceEmbeddingsResponse.model_validate(result)

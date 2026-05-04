@@ -666,10 +666,10 @@ def test_store_face_detections_rejects_embeddings_with_wrong_dimension(tmp_path)
             )
 
 
-def test_store_face_detections_generates_embedding_when_missing(tmp_path):
+def test_store_face_detections_persists_null_embedding_when_missing(tmp_path):
     from app.processing.ingest_persistence import store_face_detections
 
-    database_url = f"sqlite:///{tmp_path / 'store-faces-generate-embedding.db'}"
+    database_url = f"sqlite:///{tmp_path / 'store-faces-null-embedding.db'}"
     upgrade_database(database_url)
     engine = create_engine(database_url, future=True)
     now = datetime(2026, 3, 28, 22, 0, tzinfo=UTC)
@@ -711,6 +711,4 @@ def test_store_face_detections_generates_embedding_when_missing(tmp_path):
             select(faces.c.embedding).where(faces.c.face_id == "face-1")
         ).scalar_one()
 
-    assert isinstance(persisted_embedding, list)
-    assert len(persisted_embedding) == EMBEDDING_DIMENSION
-    assert any(component != 0.0 for component in persisted_embedding)
+    assert persisted_embedding is None

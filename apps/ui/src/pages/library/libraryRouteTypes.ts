@@ -14,6 +14,14 @@ export type LibraryPhoto = {
     person_id: string | null;
     label_source?: "human_confirmed" | "machine_suggested" | null;
     confidence?: number | null;
+    suggestions?: Array<{
+      person_id: string;
+      display_name: string;
+      rank: number;
+      confidence: number;
+      model_version: string | null;
+      provenance: Record<string, unknown> | null;
+    }>;
   }>;
   thumbnail?: {
     mime_type: string;

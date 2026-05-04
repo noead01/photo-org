@@ -113,7 +113,7 @@ For local operations:
 - `PHOTO_ORG_ENV_FILE=/path/to/file.env` can be added when you want a local command to load extra environment-specific settings
 - `PHOTO_ORG_ENVIRONMENT=<name> PHOTO_ORG_ENV_FILE=env/presets/face-detection-high-precision.env make compose-up` starts the selected environment with the named `high_precision` face-detection profile
 
-The default Compose file now bind-mounts `${PHOTO_ORG_PHOTO_LIBRARY_HOST_PATH}` into `${PHOTO_ORG_PHOTO_LIBRARY_CONTAINER_PATH}` for `db-service`, defaulting to `./seed-corpus` mounted at `/photos`. That runtime mount remains an internal deployment concern; watched-folder registration should stay relative to a registered source root.
+The default Compose file now bind-mounts `${PHOTO_ORG_PHOTO_LIBRARY_HOST_PATH}` into `${PHOTO_ORG_PHOTO_LIBRARY_CONTAINER_PATH}` for `db-service`, defaulting to `./seed-corpus` mounted at `/photos`. It also bind-mounts `${PHOTO_ORG_MODEL_HOST_PATH}` into `${PHOTO_ORG_MODEL_CONTAINER_PATH}`, defaulting to `/mnt/d/models` mounted at `/models` for ONNX model artifacts. That runtime mount remains an internal deployment concern; watched-folder registration should stay relative to a registered source root.
 
 The API allows cross-origin browser calls from the configured UI host origins through `PHOTO_ORG_API_CORS_ALLOWED_ORIGINS` (comma-separated origins).
 
@@ -150,6 +150,7 @@ Face detection behavior is configurable through environment variables:
 - `FACE_DETECT_MAX_AREA_RATIO` (default `1.0`)
 - `FACE_DETECT_ASPECT_RATIO_MIN` (default `0.0`)
 - `FACE_DETECT_ASPECT_RATIO_MAX` (default `100.0`)
+- `FACE_RECOGNITION_SFACE_MODEL_FILE` (default `/models/opencv/face_recognition_sface_2021dec.onnx`; set empty to disable embedding extraction)
 
 Preset files are checked in under `env/presets/` (each includes a full parameter set):
 

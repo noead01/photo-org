@@ -6,9 +6,11 @@ import os
 
 DEFAULT_REVIEW_THRESHOLD = 0.7
 DEFAULT_AUTO_ACCEPT_THRESHOLD = 0.9
+DEFAULT_MIN_TOP_MARGIN = 0.05
 
 REVIEW_THRESHOLD_ENV = "PHOTO_ORG_RECOGNITION_REVIEW_THRESHOLD"
 AUTO_ACCEPT_THRESHOLD_ENV = "PHOTO_ORG_RECOGNITION_AUTO_ACCEPT_THRESHOLD"
+MIN_TOP_MARGIN_ENV = "PHOTO_ORG_RECOGNITION_MIN_TOP_MARGIN"
 MODEL_VERSION_ENV = "PHOTO_ORG_RECOGNITION_MODEL_VERSION"
 
 DEFAULT_MODEL_VERSION = "nearest-neighbor-cosine-v1"
@@ -23,6 +25,7 @@ def resolve_suggestion_thresholds(
     *,
     review_threshold: float | None = None,
     auto_accept_threshold: float | None = None,
+    min_top_margin: float | None = None,
 ) -> dict[str, float]:
     if review_threshold is None:
         review_threshold = float(os.getenv(REVIEW_THRESHOLD_ENV, str(DEFAULT_REVIEW_THRESHOLD)))
@@ -33,15 +36,19 @@ def resolve_suggestion_thresholds(
                 str(DEFAULT_AUTO_ACCEPT_THRESHOLD),
             )
         )
+    if min_top_margin is None:
+        min_top_margin = float(os.getenv(MIN_TOP_MARGIN_ENV, str(DEFAULT_MIN_TOP_MARGIN)))
 
     _validate_threshold("review threshold", review_threshold)
     _validate_threshold("auto accept threshold", auto_accept_threshold)
+    _validate_threshold("minimum top margin", min_top_margin)
     if auto_accept_threshold < review_threshold:
         raise ValueError("auto accept threshold must be greater than or equal to review threshold")
 
     return {
         "review_threshold": review_threshold,
         "auto_accept_threshold": auto_accept_threshold,
+        "min_top_margin": min_top_margin,
     }
 
 
