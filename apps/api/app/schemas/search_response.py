@@ -4,6 +4,8 @@ from typing import List, Optional, Dict, Any
 
 class FaceHit(BaseModel):
     person_id: Optional[str] = None
+    label_source: Optional[str] = None
+    confidence: Optional[float] = None
 
 
 class ThumbnailHit(BaseModel):

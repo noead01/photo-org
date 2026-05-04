@@ -5,7 +5,10 @@ interface LibraryPageNavigatorProps {
   lastKnownPage: number;
   canGoPrevious: boolean;
   canGoNext: boolean;
+  pageSize: number;
+  pageSizeOptions: readonly number[];
   onSelectPage: (pageNumber: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
 }
 
 export function LibraryPageNavigator({
@@ -13,10 +16,27 @@ export function LibraryPageNavigator({
   lastKnownPage,
   canGoPrevious,
   canGoNext,
-  onSelectPage
+  pageSize,
+  pageSizeOptions,
+  onSelectPage,
+  onPageSizeChange
 }: LibraryPageNavigatorProps) {
   return (
     <div className="browse-pagination" aria-label="Pagination controls">
+      <label className="browse-page-size-control">
+        Photos per page
+        <select
+          aria-label="Photos per page"
+          value={String(pageSize)}
+          onChange={(event) => onPageSizeChange(Number.parseInt(event.currentTarget.value, 10))}
+        >
+          {pageSizeOptions.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      </label>
       <ReactPaginate
         previousLabel="<"
         nextLabel=">"

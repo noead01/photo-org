@@ -9,16 +9,22 @@ import { resolveInitialSessionIdentity } from "../session/sessionIdentity";
 import { LibraryActionBar } from "./library/LibraryActionBar";
 import { LibraryActiveFilterChips } from "./library/LibraryActiveFilterChips";
 import {
+  DEFAULT_SEARCH_PAGE_LIMIT,
   fetchLibraryPage,
   fetchOperationsActivityConflictState,
   fetchPeopleDirectory,
-  SEARCH_PAGE_LIMIT
+  SEARCH_PAGE_LIMIT_OPTIONS
 } from "./library/libraryRouteApi";
 import { LibraryPhotoGrid } from "./library/LibraryPhotoGrid";
 import { LibraryRouteHeader } from "./library/LibraryRouteHeader";
 import { LibrarySearchForm } from "./library/LibrarySearchForm";
 import { LibrarySelectionPanel } from "./library/LibrarySelectionPanel";
 import { resolveLibraryActionState } from "./library/libraryActionBarState";
+import {
+  consumePendingBrowseFocusPhotoId,
+  resolveBrowseReturnState,
+  type LibraryViewRouteState
+} from "./browseFocusState";
 import { isFuzzyNameMatch, parseLibraryUrlState, validateDateRange, buildLibraryUrlQuery } from "./library/libraryRouteSearchState";
 import {
   createLibrarySelectionState,
@@ -54,10 +60,14 @@ const LIBRARY_FILTER_FINGERPRINT = "library:route";
 export function LibraryRoutePage() {
   const location = useLocation();
   const navigate = useNavigate();
+  const initialReturnState = resolveBrowseReturnState(location.state);
   const requestedPage = parsePositiveIntParam(location.search, "page");
   const suppressNextUrlStateSyncRef = useRef(false);
   const applyingParsedUrlStateRef = useRef(false);
   const lastAppliedParsedUrlStateSignatureRef = useRef<string | null>(null);
+  const shouldRestoreInitialViewStateRef = useRef(
+    Boolean(initialReturnState?.libraryViewState)
+  );
   const parsedUrlState = useMemo(() => parseLibraryUrlState(location.search), [location.search]);
   const parsedUrlStateSignature = useMemo(
     () =>
@@ -65,6 +75,7 @@ export function LibraryRoutePage() {
         queryChips: parsedUrlState.queryChips,
         fromDate: parsedUrlState.fromDate,
         toDate: parsedUrlState.toDate,
+        pageSize: parsedUrlState.pageSize,
         selectedPersonNames: parsedUrlState.selectedPersonNames,
         personCertaintyMode: parsedUrlState.personCertaintyMode,
         suggestionConfidenceMinDraft: parsedUrlState.suggestionConfidenceMinDraft,
@@ -101,20 +112,20 @@ export function LibraryRoutePage() {
   });
   const [facetPathHintCounts, setFacetPathHintCounts] = useState<FacetCountEntry[]>([]);
 
-  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const [cursorByPage, setCursorByPage] = useState<Record<number, string | null>>({ 1: null });
+  const [sortDirection, setSortDirection] = useState<SortDirection>(
+    initialReturnState?.libraryViewState?.sortDirection ?? "desc"
+  );
+  const [pageSize, setPageSize] = useState(DEFAULT_SEARCH_PAGE_LIMIT);
+  const [cursorByPage, setCursorByPage] = useState<Record<number, string | null>>(
+    initialReturnState?.libraryViewState?.cursorByPage ?? { 1: null }
+  );
   const [photos, setPhotos] = useState<LibraryPhoto[]>([]);
-  const [showGridFaceBoxes, setShowGridFaceBoxes] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
   const [notifications, setNotifications] = useState<NotificationEntry[]>([]);
   const [hasConflictingJob, setHasConflictingJob] = useState(false);
   const [selectionState, dispatchSelection] = useReducer(
     librarySelectionReducer,
-    parseLibrarySelectionRouteState(
-      isRecord(location.state)
-        ? location.state.librarySelection ?? location.state.browseSelection
-        : undefined
-    ),
+    initialReturnState?.librarySelection ?? null,
     createLibrarySelectionState
   );
   const {
@@ -126,6 +137,9 @@ export function LibraryRoutePage() {
     failRequest,
     requestRetry
   } = useRouteRequestState();
+  const pendingReturnFocusPhotoIdRef = useRef<string | null>(
+    initialReturnState?.restoreFocusPhotoId ?? consumePendingBrowseFocusPhotoId()
+  );
 
   const dateRangeError = useMemo(() => validateDateRange(fromDate, toDate), [fromDate, toDate]);
   const parsedLocation = useMemo(
@@ -153,6 +167,13 @@ export function LibraryRoutePage() {
   const selectionRouteState = useMemo(
     () => serializeLibrarySelectionState(selectionState),
     [selectionState]
+  );
+  const libraryViewRouteState = useMemo<LibraryViewRouteState>(
+    () => ({
+      sortDirection,
+      cursorByPage: normalizeCursorByPageState(cursorByPage)
+    }),
+    [cursorByPage, sortDirection]
   );
 
   const cursorForPage = cursorByPage[requestedPage];
@@ -226,6 +247,7 @@ export function LibraryRoutePage() {
     setCommittedQuery(parsedQuery);
     setFromDate(parsedUrlState.fromDate);
     setToDate(parsedUrlState.toDate);
+    setPageSize(parsedUrlState.pageSize);
     setSelectedPersonNames(parsedUrlState.selectedPersonNames);
     setPersonCertaintyMode(parsedUrlState.personCertaintyMode);
     setSuggestionConfidenceMinDraft(parsedUrlState.suggestionConfidenceMinDraft);
@@ -244,8 +266,12 @@ export function LibraryRoutePage() {
       }))
     );
 
-    setSortDirection("desc");
-    setCursorByPage({ 1: null });
+    if (shouldRestoreInitialViewStateRef.current) {
+      shouldRestoreInitialViewStateRef.current = false;
+    } else {
+      setSortDirection("desc");
+      setCursorByPage({ 1: null });
+    }
     setPhotos([]);
     setTotalCount(0);
   }, [parsedUrlState, parsedUrlStateSignature]);
@@ -266,7 +292,8 @@ export function LibraryRoutePage() {
       locationRadius: locationRadiusFilter,
       hasFacesFilter,
       pathHintFilters,
-      page: requestedPage
+      page: requestedPage,
+      pageSize
     });
 
     const currentQuery = location.search.startsWith("?")
@@ -294,6 +321,7 @@ export function LibraryRoutePage() {
     locationRadiusFilter,
     navigate,
     pathHintFilters,
+    pageSize,
     requestedPage,
     selectedPersonNames,
     personCertaintyMode,
@@ -309,13 +337,14 @@ export function LibraryRoutePage() {
   }, []);
 
   useEffect(() => {
-    const currentRouteSelection = parseLibrarySelectionRouteState(
-      isRecord(location.state)
-        ? location.state.librarySelection ?? location.state.browseSelection
-        : undefined
-    );
+    const currentRouteState = resolveBrowseReturnState(location.state);
+    const currentRouteSelection = currentRouteState?.librarySelection ?? null;
+    const currentRouteViewState = currentRouteState?.libraryViewState ?? null;
 
-    if (areSelectionRouteStatesEqual(currentRouteSelection, selectionRouteState)) {
+    if (
+      areSelectionRouteStatesEqual(currentRouteSelection, selectionRouteState)
+      && areLibraryViewRouteStatesEqual(currentRouteViewState, libraryViewRouteState)
+    ) {
       return;
     }
 
@@ -329,11 +358,19 @@ export function LibraryRoutePage() {
         replace: true,
         state: {
           ...routeState,
-          librarySelection: selectionRouteState
+          librarySelection: selectionRouteState,
+          libraryViewState: libraryViewRouteState
         }
       }
     );
-  }, [location.pathname, location.search, location.state, navigate, selectionRouteState]);
+  }, [
+    libraryViewRouteState,
+    location.pathname,
+    location.search,
+    location.state,
+    navigate,
+    selectionRouteState
+  ]);
 
   useEffect(() => {
     if (requestedPage > 1 && cursorForPage === undefined) {
@@ -362,7 +399,8 @@ export function LibraryRoutePage() {
       hasFacesFilter,
       pathHintFilters,
       sortDirection,
-      cursorForPage ?? null
+      cursorForPage ?? null,
+      pageSize
     )
       .then((payload) => {
         if (controller.signal.aborted) {
@@ -409,6 +447,7 @@ export function LibraryRoutePage() {
     personCertaintyMode,
     suggestionConfidenceMinDraft,
     sortDirection,
+    pageSize,
     toDate
   ]);
 
@@ -431,9 +470,40 @@ export function LibraryRoutePage() {
     };
   }, [reloadToken]);
 
+  useEffect(() => {
+    const pendingPhotoId = pendingReturnFocusPhotoIdRef.current;
+    if (!pendingPhotoId || isLoading) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      if (error) {
+        headingRef.current?.focus();
+        pendingReturnFocusPhotoIdRef.current = null;
+        return;
+      }
+
+      const focusTarget = document.querySelector<HTMLAnchorElement>(
+        `[data-photo-id="${pendingPhotoId}"]`
+      );
+
+      if (focusTarget) {
+        focusTarget.focus();
+      } else {
+        headingRef.current?.focus();
+      }
+
+      pendingReturnFocusPhotoIdRef.current = null;
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [error, isLoading, photos]);
+
   const totalPages = useMemo(
-    () => Math.max(1, Math.ceil(totalCount / SEARCH_PAGE_LIMIT)),
-    [totalCount]
+    () => Math.max(1, Math.ceil(totalCount / pageSize)),
+    [totalCount, pageSize]
   );
   const canGoPrevious = requestedPage > 1 && !isLoading;
   const canGoNext = requestedPage < totalPages && !isLoading;
@@ -633,7 +703,8 @@ export function LibraryRoutePage() {
         hasFacesFilter,
         pathHintFilters,
         sortDirection,
-        previousCursor
+        previousCursor,
+        pageSize
       );
       nextCursorMap = updateCursorByPage(
         nextCursorMap,
@@ -661,8 +732,18 @@ export function LibraryRoutePage() {
         lastKnownPage={totalPages}
         canGoPrevious={canGoPrevious}
         canGoNext={canGoNext}
+        pageSize={pageSize}
+        pageSizeOptions={SEARCH_PAGE_LIMIT_OPTIONS}
         onSortDirectionChange={(nextDirection) => {
           setSortDirection(nextDirection);
+          setCursorByPage({ 1: null });
+          setPage(1);
+        }}
+        onPageSizeChange={(nextPageSize) => {
+          if (nextPageSize === pageSize) {
+            return;
+          }
+          setPageSize(nextPageSize);
           setCursorByPage({ 1: null });
           setPage(1);
         }}
@@ -771,15 +852,6 @@ export function LibraryRoutePage() {
       />
 
       <p className="browse-summary" aria-live="polite">{summaryLabel}</p>
-      <label className="browse-global-face-box-toggle">
-        <input
-          type="checkbox"
-          aria-label="Show face boxes on all photos"
-          checked={showGridFaceBoxes}
-          onChange={(event) => setShowGridFaceBoxes(event.currentTarget.checked)}
-        />
-        Show face boxes on all photos
-      </label>
 
       <LibrarySelectionPanel
         selectionState={selectionState}
@@ -828,16 +900,16 @@ export function LibraryRoutePage() {
         {!error && !isLoading && photos.length > 0 ? (
           <LibraryPhotoGrid
             photos={photos}
-            showAllFaceBoxes={showGridFaceBoxes}
-            selectedPhotoIds={selectionState.selectedPhotoIds}
             locationSearch={location.search}
             selectionRouteState={selectionRouteState}
-            onToggleSelection={(photoId) =>
+            libraryViewRouteState={libraryViewRouteState}
+            selectedPhotoIds={selectionState.selectedPhotoIds}
+            onTogglePhotoSelection={(photoId) => {
               dispatchSelection({
                 type: "togglePhotoSelection",
                 photoId
-              })
-            }
+              });
+            }}
           />
         ) : null}
       </FeedbackSurface>
@@ -863,6 +935,53 @@ function areSelectionRouteStatesEqual(
   }
 
   return left.selectedPhotoIds.every((photoId, index) => photoId === right.selectedPhotoIds[index]);
+}
+
+function normalizeCursorByPageState(
+  cursorByPage: Record<number, string | null>
+): Record<number, string | null> {
+  const normalized: Record<number, string | null> = {};
+  for (const [pageKey, cursor] of Object.entries(cursorByPage)) {
+    const pageNumber = Number.parseInt(pageKey, 10);
+    if (!Number.isInteger(pageNumber) || pageNumber < 1) {
+      continue;
+    }
+    if (typeof cursor !== "string" && cursor !== null) {
+      continue;
+    }
+    normalized[pageNumber] = cursor;
+  }
+  if (normalized[1] === undefined) {
+    normalized[1] = null;
+  }
+  return normalized;
+}
+
+function areLibraryViewRouteStatesEqual(
+  left: LibraryViewRouteState | null,
+  right: LibraryViewRouteState
+): boolean {
+  if (!left) {
+    return false;
+  }
+  if (left.sortDirection !== right.sortDirection) {
+    return false;
+  }
+
+  const leftCursorEntries = Object.entries(normalizeCursorByPageState(left.cursorByPage)).sort(
+    ([leftPage], [rightPage]) => Number(leftPage) - Number(rightPage)
+  );
+  const rightCursorEntries = Object.entries(normalizeCursorByPageState(right.cursorByPage)).sort(
+    ([leftPage], [rightPage]) => Number(leftPage) - Number(rightPage)
+  );
+  if (leftCursorEntries.length !== rightCursorEntries.length) {
+    return false;
+  }
+
+  return leftCursorEntries.every(([leftPage, leftCursor], index) => {
+    const [rightPage, rightCursor] = rightCursorEntries[index];
+    return leftPage === rightPage && leftCursor === rightCursor;
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

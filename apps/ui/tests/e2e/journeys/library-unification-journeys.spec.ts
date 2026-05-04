@@ -106,7 +106,7 @@ test("JRN-P4-library-shared-request-lifecycle @journey", async ({ page }) => {
 
   initialRequestsReleased = true;
   releaseGateResolver?.();
-  await expect(page.getByRole("link", { name: "View details" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Open details for/ })).toBeVisible();
   await expect(page.getByText("/library/browse-photo-1.jpg")).toBeVisible();
 
   failNextBrowseRequest = true;
@@ -114,7 +114,7 @@ test("JRN-P4-library-shared-request-lifecycle @journey", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Could not load Library", level: 2 })).toBeVisible();
 
   await page.getByRole("button", { name: "Retry" }).click();
-  await expect(page.getByRole("link", { name: "View details" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Open details for/ })).toBeVisible();
 });
 
 test("JRN-P4-library-invalid-page-reset @journey", async ({ page }) => {
@@ -194,7 +194,7 @@ test("JRN-P4-library-filtered-shared-request-lifecycle @journey", async ({ page 
   await expect(page.getByRole("status")).toContainText("Loading library workflow.");
 
   releaseFirstSearchResponse?.();
-  await expect(page.getByRole("link", { name: "View details" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Open details for/ })).toBeVisible();
   await expect(page.getByText("/library/search-photo-1.jpg")).toBeVisible();
 
   await page.getByRole("textbox", { name: "Search query" }).fill("coast");
@@ -202,5 +202,5 @@ test("JRN-P4-library-filtered-shared-request-lifecycle @journey", async ({ page 
   await expect(page.getByRole("heading", { name: "Could not load Library", level: 2 })).toBeVisible();
 
   await page.getByRole("button", { name: "Retry" }).click();
-  await expect(page.getByRole("link", { name: "View details" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Open details for/ })).toBeVisible();
 });

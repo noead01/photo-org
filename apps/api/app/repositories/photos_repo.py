@@ -796,11 +796,10 @@ class PhotosRepository:
             tag_map[r.photo_id].append(r.tag)
 
         # Load faces and people
-        face_columns = [self.faces.c.photo_id, self.faces.c.person_id]
+        face_columns = [self.faces.c.photo_id, self.faces.c.face_id, self.faces.c.person_id]
         if include_face_regions:
             face_columns.extend(
                 [
-                    self.faces.c.face_id,
                     self.faces.c.bbox_x,
                     self.faces.c.bbox_y,
                     self.faces.c.bbox_w,
@@ -816,70 +815,73 @@ class PhotosRepository:
         ).all()
 
         provenance_map: Dict[tuple[str, str], Dict[str, Any]] = {}
-        if include_face_regions:
-            labeled_face_keys = {
-                (str(r.face_id), str(r.person_id))
-                for r in face_rows
-                if r.person_id is not None and r.face_id is not None
-            }
-            if labeled_face_keys:
-                face_ids = sorted({face_id for face_id, _ in labeled_face_keys})
-                label_rows = (
-                    self.db.execute(
-                        select(
-                            self.face_labels.c.face_id,
-                            self.face_labels.c.person_id,
-                            self.face_labels.c.label_source,
-                            self.face_labels.c.confidence,
-                            self.face_labels.c.model_version,
-                            self.face_labels.c.provenance,
-                            self.face_labels.c.created_ts,
-                            self.face_labels.c.updated_ts,
-                            self.face_labels.c.face_label_id,
-                        )
-                        .where(self.face_labels.c.face_id.in_(face_ids))
-                        .order_by(
-                            self.face_labels.c.face_id,
-                            self.face_labels.c.person_id,
-                            self.face_labels.c.updated_ts.desc(),
-                            self.face_labels.c.created_ts.desc(),
-                            self.face_labels.c.face_label_id.desc(),
-                        )
+        labeled_face_keys = {
+            (str(r.face_id), str(r.person_id))
+            for r in face_rows
+            if r.person_id is not None and r.face_id is not None
+        }
+        if labeled_face_keys:
+            face_ids = sorted({face_id for face_id, _ in labeled_face_keys})
+            label_rows = (
+                self.db.execute(
+                    select(
+                        self.face_labels.c.face_id,
+                        self.face_labels.c.person_id,
+                        self.face_labels.c.label_source,
+                        self.face_labels.c.confidence,
+                        self.face_labels.c.model_version,
+                        self.face_labels.c.provenance,
+                        self.face_labels.c.created_ts,
+                        self.face_labels.c.updated_ts,
+                        self.face_labels.c.face_label_id,
                     )
-                    .mappings()
-                    .all()
+                    .where(self.face_labels.c.face_id.in_(face_ids))
+                    .order_by(
+                        self.face_labels.c.face_id,
+                        self.face_labels.c.person_id,
+                        self.face_labels.c.updated_ts.desc(),
+                        self.face_labels.c.created_ts.desc(),
+                        self.face_labels.c.face_label_id.desc(),
+                    )
                 )
-                for row in label_rows:
-                    person_id = row["person_id"]
-                    face_id = row["face_id"]
-                    if person_id is None or face_id is None:
-                        continue
-                    key = (str(face_id), str(person_id))
-                    if key not in labeled_face_keys or key in provenance_map:
-                        continue
-                    provenance_map[key] = {
-                        "label_source": row["label_source"],
-                        "confidence": row["confidence"],
-                        "model_version": row["model_version"],
-                        "provenance": row["provenance"],
-                        "label_recorded_ts": (
-                            iso_utc(row["updated_ts"])
-                            if row["updated_ts"] is not None
-                            else (iso_utc(row["created_ts"]) if row["created_ts"] is not None else None)
-                        ),
-                    }
+                .mappings()
+                .all()
+            )
+            for row in label_rows:
+                person_id = row["person_id"]
+                face_id = row["face_id"]
+                if person_id is None or face_id is None:
+                    continue
+                key = (str(face_id), str(person_id))
+                if key not in labeled_face_keys or key in provenance_map:
+                    continue
+                provenance_map[key] = {
+                    "label_source": row["label_source"],
+                    "confidence": row["confidence"],
+                    "model_version": row["model_version"],
+                    "provenance": row["provenance"],
+                    "label_recorded_ts": (
+                        iso_utc(row["updated_ts"])
+                        if row["updated_ts"] is not None
+                        else (iso_utc(row["created_ts"]) if row["created_ts"] is not None else None)
+                    ),
+                }
 
         for r in face_rows:
             if r.person_id:
                 ppl_map[r.photo_id].append(r.person_id)
-            face_item = {"person_id": r.person_id}
+            provenance = (
+                provenance_map.get((str(r.face_id), str(r.person_id)))
+                if r.person_id is not None and r.face_id is not None
+                else None
+            )
+            face_item = {
+                "person_id": r.person_id,
+                "label_source": provenance["label_source"] if provenance else None,
+                "confidence": provenance["confidence"] if provenance else None,
+            }
             if include_face_regions:
                 bbox_space_width, bbox_space_height = _extract_bbox_space_dimensions(r.provenance)
-                provenance = (
-                    provenance_map.get((str(r.face_id), str(r.person_id)))
-                    if r.person_id is not None
-                    else None
-                )
                 face_item.update(
                     {
                         "face_id": r.face_id,

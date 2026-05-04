@@ -10,6 +10,7 @@ describe("libraryRouteSearchState", () => {
 
     expect(state.personCertaintyMode).toBe("human_only");
     expect(state.suggestionConfidenceMinDraft).toBe("0.8");
+    expect(state.pageSize).toBe(60);
   });
 
   it("serializes certainty mode and threshold into search filters", () => {
@@ -42,10 +43,12 @@ describe("libraryRouteSearchState", () => {
       locationRadius: null,
       hasFacesFilter: null,
       pathHintFilters: [],
-      page: 1
+      page: 1,
+      pageSize: 24
     });
 
     expect(query).toContain("personCertainty=include_suggestions");
     expect(query).toContain("suggestionMin=0.82");
+    expect(query).toContain("pageSize=24");
   });
 });

@@ -5,6 +5,7 @@ import {
 import { normalizePathHintFilters } from "../search/facetFilters";
 import {
   dedupeTrimmedValues,
+  parsePageSizeParam,
   parseNullableBooleanParam
 } from "./urlSerialization";
 import type {
@@ -12,6 +13,10 @@ import type {
   PersonCertaintyMode,
   SearchUrlState
 } from "./libraryRouteTypes";
+import {
+  DEFAULT_SEARCH_PAGE_LIMIT,
+  SEARCH_PAGE_LIMIT_OPTIONS
+} from "./libraryPageSize";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const DEFAULT_PERSON_CERTAINTY_MODE: PersonCertaintyMode = "human_only";
@@ -147,6 +152,11 @@ export function parseLibraryUrlState(search: string): SearchUrlState {
     queryChips,
     fromDate,
     toDate,
+    pageSize: parsePageSizeParam(
+      params.get("pageSize"),
+      SEARCH_PAGE_LIMIT_OPTIONS,
+      DEFAULT_SEARCH_PAGE_LIMIT
+    ),
     selectedPersonNames,
     personCertaintyMode,
     suggestionConfidenceMinDraft,
@@ -170,6 +180,7 @@ export function buildLibraryUrlQuery(state: {
   hasFacesFilter: boolean | null;
   pathHintFilters: string[];
   page: number;
+  pageSize: number;
 }): string {
   const params = new URLSearchParams();
 
@@ -207,6 +218,9 @@ export function buildLibraryUrlQuery(state: {
   }
   if (state.page > 1) {
     params.set("page", String(state.page));
+  }
+  if (state.pageSize !== DEFAULT_SEARCH_PAGE_LIMIT) {
+    params.set("pageSize", String(state.pageSize));
   }
 
   return params.toString();

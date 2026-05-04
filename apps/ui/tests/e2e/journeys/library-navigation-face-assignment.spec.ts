@@ -146,7 +146,7 @@ test("JRN-P4-library-navigation-state-persists-through-detail @journey", async (
 
   await page.goto("/library");
   await expect(page.getByRole("heading", { name: "Library", level: 1 })).toBeVisible();
-  await page.getByRole("link", { name: "View details", exact: true }).click();
+  await page.getByRole("link", { name: "Open details for /library/photo-1.jpg" }).click();
 
   await expect(page).toHaveURL(/\/library\/photo-1$/);
   await expect(page.getByRole("heading", { name: "Photo detail", level: 1 })).toBeVisible();
@@ -249,7 +249,7 @@ test("JRN-P4-detail-face-assignment-from-suggestions @journey", async ({ page })
   });
 
   await page.goto("/library");
-  await page.getByRole("link", { name: "View details", exact: true }).click();
+  await page.getByRole("link", { name: "Open details for /library/photo-1.jpg" }).click();
 
   await expect(page.getByRole("heading", { name: "Photo detail", level: 1 })).toBeVisible();
   const assignmentTrigger = page.getByRole("button", {
