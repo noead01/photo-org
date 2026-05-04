@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import asdict, dataclass
 from io import BytesIO
 from pathlib import Path
+from typing import Protocol
 from uuid import NAMESPACE_URL, uuid5
 
 FACE_DETECT_PROFILE_ENV = "FACE_DETECT_PROFILE"
 FACE_DETECT_PROFILE_FILE_ENV = "FACE_DETECT_PROFILE_FILE"
+FACE_RECOGNITION_SFACE_MODEL_FILE_ENV = "FACE_RECOGNITION_SFACE_MODEL_FILE"
 DEFAULT_FACE_DETECT_PROFILE = "balanced"
 DEFAULT_FACE_DETECT_PROFILE_FILE = Path(__file__).with_name("face_detect_profiles.json")
 
@@ -40,6 +43,49 @@ class FaceDetection:
         return asdict(self)
 
 
+class FaceEmbeddingExtractor(Protocol):
+    def extract(self, image: object) -> list[float] | None:
+        pass
+
+    def provenance(self) -> dict[str, object]:
+        pass
+
+
+class OpenCvSFaceEmbeddingExtractor:
+    def __init__(
+        self,
+        model_file: str | Path,
+        *,
+        input_size: tuple[int, int] = (112, 112),
+    ) -> None:
+        import cv2  # type: ignore
+
+        self._cv2 = cv2
+        self._model_file = Path(model_file).expanduser()
+        self._input_size = input_size
+        if not self._model_file.is_file():
+            raise FileNotFoundError(f"SFace model file not found: {self._model_file}")
+        self._recognizer = cv2.FaceRecognizerSF_create(str(self._model_file), "")
+
+    def provenance(self) -> dict[str, object]:
+        return {
+            "extractor": "opencv-sface",
+            "model": str(self._model_file),
+            "input_size": list(self._input_size),
+        }
+
+    def extract(self, image: object) -> list[float] | None:
+        import numpy as np  # type: ignore
+
+        if hasattr(image, "convert"):
+            image = image.convert("RGB")
+        rgb = np.array(image)
+        bgr = self._cv2.cvtColor(rgb, self._cv2.COLOR_RGB2BGR)
+        resized = self._cv2.resize(bgr, self._input_size)
+        feature = self._recognizer.feature(resized)
+        return _normalize_feature_vector(feature)
+
+
 class OpenCvFaceDetector:
     def __init__(
         self,
@@ -52,6 +98,7 @@ class OpenCvFaceDetector:
         max_area_ratio: float = 1.0,
         aspect_ratio_min: float = 0.0,
         aspect_ratio_max: float = 100.0,
+        embedding_extractor: FaceEmbeddingExtractor | None = None,
     ) -> None:
         import cv2  # type: ignore
 
@@ -75,6 +122,7 @@ class OpenCvFaceDetector:
         self._max_area_ratio = max_area_ratio
         self._aspect_ratio_min = aspect_ratio_min
         self._aspect_ratio_max = aspect_ratio_max
+        self._embedding_extractor = embedding_extractor
 
         cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
         classifier = cv2.CascadeClassifier(cascade_path)
@@ -130,6 +178,16 @@ class OpenCvFaceDetector:
                 ):
                     continue
                 crop = rgb_image.crop((max(0, x), max(0, y), min(width, x + w), min(height, y + h)))
+                embedding = None
+                provenance = {
+                    **self.detection_settings(),
+                    "bbox_space_width": width,
+                    "bbox_space_height": height,
+                }
+                if self._embedding_extractor is not None:
+                    embedding = self._embedding_extractor.extract(crop)
+                    if embedding is not None:
+                        provenance["embedding"] = self._embedding_extractor.provenance()
                 face_id = str(uuid5(NAMESPACE_URL, f"{path.resolve()}:{x}:{y}:{w}:{h}:{index}"))
                 detections.append(
                     FaceDetection(
@@ -139,12 +197,8 @@ class OpenCvFaceDetector:
                         bbox_w=int(w),
                         bbox_h=int(h),
                         bitmap=_encode_jpeg(crop),
-                        embedding=None,
-                        provenance={
-                            **self.detection_settings(),
-                            "bbox_space_width": width,
-                            "bbox_space_height": height,
-                        },
+                        embedding=embedding,
+                        provenance=provenance,
                     ).as_row()
                 )
 
@@ -191,6 +245,7 @@ def create_default_face_detector() -> OpenCvFaceDetector:
     aspect_ratio_max = _read_float(
         "FACE_DETECT_ASPECT_RATIO_MAX", default=float(profile_defaults["aspect_ratio_max"])
     )
+    embedding_extractor = _create_default_embedding_extractor()
 
     return OpenCvFaceDetector(
         scale_factor=scale_factor,
@@ -201,7 +256,32 @@ def create_default_face_detector() -> OpenCvFaceDetector:
         max_area_ratio=max_area_ratio,
         aspect_ratio_min=aspect_ratio_min,
         aspect_ratio_max=aspect_ratio_max,
+        embedding_extractor=embedding_extractor,
     )
+
+
+def _create_default_embedding_extractor() -> FaceEmbeddingExtractor | None:
+    model_file = os.getenv(FACE_RECOGNITION_SFACE_MODEL_FILE_ENV)
+    if model_file is None or model_file.strip() == "":
+        return None
+    return OpenCvSFaceEmbeddingExtractor(model_file.strip())
+
+
+def _normalize_feature_vector(value: object) -> list[float] | None:
+    if hasattr(value, "tolist"):
+        value = value.tolist()
+    if isinstance(value, list | tuple) and len(value) == 1 and isinstance(value[0], list | tuple):
+        value = value[0]
+    if not isinstance(value, list | tuple):
+        return None
+    try:
+        feature = [float(component) for component in value]
+    except (TypeError, ValueError):
+        return None
+    magnitude = math.sqrt(sum(component * component for component in feature))
+    if magnitude <= 0.0:
+        return None
+    return [component / magnitude for component in feature]
 
 
 def _read_float(name: str, *, default: float) -> float:

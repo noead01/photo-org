@@ -27,6 +27,14 @@ interface PhotoDetailPayload {
     model_version: string | null;
     provenance: Record<string, unknown> | null;
     label_recorded_ts: string | null;
+    suggestions?: Array<{
+      person_id: string;
+      display_name: string;
+      rank: number;
+      confidence: number;
+      model_version: string | null;
+      provenance: Record<string, unknown> | null;
+    }>;
   }>;
   thumbnail: {
     mime_type: string;
@@ -656,6 +664,8 @@ describe("PhotoDetailRoutePage", () => {
 
     await user.click(await screen.findByLabelText("Face region 1 for person-1"));
     expect(await screen.findByRole("dialog", { name: "Face assignment" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Assign person")).not.toHaveAttribute("list");
+    expect(document.querySelector("#face-assignment-known-people")).toBeNull();
   });
 
   it("does not auto-assign from candidates payload and only updates on explicit save", async () => {
@@ -916,6 +926,93 @@ describe("PhotoDetailRoutePage", () => {
       "M"
     );
     expect(screen.getByText("person-2")).toBeInTheDocument();
+  });
+
+  it("shows persisted face suggestions in the assignment modal when candidate lookup is empty", async () => {
+    const user = userEvent.setup();
+
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () =>
+          buildPayload({
+            people: [],
+            faces: [
+              {
+                face_id: "face-1",
+                person_id: null,
+                bbox_x: 10,
+                bbox_y: 10,
+                bbox_w: 20,
+                bbox_h: 20,
+                label_source: null,
+                confidence: null,
+                model_version: null,
+                provenance: null,
+                label_recorded_ts: null,
+                suggestions: [
+                  {
+                    person_id: "person-1",
+                    display_name: "Inez",
+                    rank: 1,
+                    confidence: 0.903,
+                    model_version: "sface-v1",
+                    provenance: { source: "reembed" }
+                  },
+                  {
+                    person_id: "person-2",
+                    display_name: "Mateo",
+                    rank: 2,
+                    confidence: 0.294,
+                    model_version: "sface-v1",
+                    provenance: { source: "reembed" }
+                  }
+                ]
+              }
+            ]
+          })
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            person_id: "person-1",
+            display_name: "Inez",
+            created_ts: "2026-03-28T19:30:00Z",
+            updated_ts: "2026-03-28T19:30:00Z"
+          },
+          {
+            person_id: "person-2",
+            display_name: "Mateo",
+            created_ts: "2026-03-28T19:30:00Z",
+            updated_ts: "2026-03-28T19:30:00Z"
+          }
+        ]
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          face_id: "face-1",
+          candidates: [],
+          suggestion_policy: {
+            decision: "no_suggestion",
+            review_threshold: 0.5,
+            auto_accept_threshold: 0.9,
+            top_candidate_confidence: null
+          },
+          review_needed_suggestion: null
+        })
+      } as Response);
+
+    renderDetail();
+
+    await user.click(
+      await screen.findByRole("button", { name: "Open face assignment for face region 1" })
+    );
+
+    expect(await screen.findByRole("dialog", { name: "Face assignment" })).toBeInTheDocument();
+    expect(await screen.findByText("Inez (90.3%)")).toBeInTheDocument();
+    expect(screen.getByText("Mateo (29.4%)")).toBeInTheDocument();
   });
 
   it("creates a new person name from typed input when no exact match exists", async () => {

@@ -6,6 +6,7 @@ class FaceHit(BaseModel):
     person_id: Optional[str] = None
     label_source: Optional[str] = None
     confidence: Optional[float] = None
+    suggestions: List[Dict[str, Any]] = []
 
 
 class ThumbnailHit(BaseModel):

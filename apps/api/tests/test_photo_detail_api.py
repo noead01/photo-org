@@ -11,6 +11,7 @@ from app.main import app
 from app.migrations import upgrade_database
 from app.storage import (
     face_labels,
+    face_suggestions,
     faces,
     people,
     photo_exif_attributes,
@@ -94,6 +95,7 @@ def test_photo_detail_api_returns_projected_metadata_and_related_fields(tmp_path
             "model_version": None,
             "provenance": None,
             "label_recorded_ts": None,
+            "suggestions": [],
         }
     ]
     assert payload["thumbnail"] is None
@@ -161,6 +163,116 @@ def test_photo_detail_api_exposes_bbox_coordinate_space_dimensions(tmp_path, mon
     payload = response.json()
     assert payload["faces"][0]["bbox_space_width"] == 4000
     assert payload["faces"][0]["bbox_space_height"] == 3000
+
+
+def test_photo_detail_api_exposes_ranked_face_suggestions(tmp_path, monkeypatch):
+    database_url = f"sqlite:///{tmp_path / 'photo-detail-api-face-suggestions.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 5, 4, 12, 0, tzinfo=UTC)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(photos).values(
+                photo_id="photo-1",
+                sha256="sha-1",
+                created_ts=now,
+                updated_ts=now,
+                path="/photos/photo-1.jpg",
+                filesize=1024,
+                ext="jpg",
+                faces_count=1,
+            )
+        )
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id=None,
+                bbox_x=10,
+                bbox_y=20,
+                bbox_w=30,
+                bbox_h=40,
+            )
+        )
+        connection.execute(
+            insert(people),
+            [
+                {
+                    "person_id": "person-inez",
+                    "display_name": "Inez Rivera",
+                    "created_ts": now,
+                    "updated_ts": now,
+                },
+                {
+                    "person_id": "person-mateo",
+                    "display_name": "Mateo Rivera",
+                    "created_ts": now,
+                    "updated_ts": now,
+                },
+            ],
+        )
+        connection.execute(
+            insert(face_suggestions),
+            [
+                {
+                    "face_suggestion_id": "suggestion-1",
+                    "face_id": "face-1",
+                    "person_id": "person-inez",
+                    "rank": 1,
+                    "confidence": 0.903,
+                    "centroid_distance": 0.1,
+                    "knn_distance": 0.09,
+                    "representation_version": 2,
+                    "scoring_version": "hybrid-v1",
+                    "model_version": "sface-v1",
+                    "provenance": {"source": "reembed"},
+                    "created_ts": now,
+                    "updated_ts": now,
+                },
+                {
+                    "face_suggestion_id": "suggestion-2",
+                    "face_id": "face-1",
+                    "person_id": "person-mateo",
+                    "rank": 2,
+                    "confidence": 0.294,
+                    "centroid_distance": 0.7,
+                    "knn_distance": 0.71,
+                    "representation_version": 2,
+                    "scoring_version": "hybrid-v1",
+                    "model_version": "sface-v1",
+                    "provenance": {"source": "reembed"},
+                    "created_ts": now,
+                    "updated_ts": now,
+                },
+            ],
+        )
+
+    client = TestClient(app)
+    response = client.get("/api/v1/photos/photo-1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["faces"][0]["suggestions"] == [
+        {
+            "person_id": "person-inez",
+            "display_name": "Inez Rivera",
+            "rank": 1,
+            "confidence": 0.903,
+            "model_version": "sface-v1",
+            "provenance": {"source": "reembed"},
+        },
+        {
+            "person_id": "person-mateo",
+            "display_name": "Mateo Rivera",
+            "rank": 2,
+            "confidence": 0.294,
+            "model_version": "sface-v1",
+            "provenance": {"source": "reembed"},
+        },
+    ]
 
 
 def test_photo_detail_api_allows_missing_shot_timestamp(tmp_path, monkeypatch):
@@ -351,6 +463,7 @@ def test_photo_detail_api_returns_latest_matching_face_label_provenance(tmp_path
                 "action": "correction",
             },
             "label_recorded_ts": "2026-03-28T19:33:00Z",
+            "suggestions": [],
         }
     ]
 

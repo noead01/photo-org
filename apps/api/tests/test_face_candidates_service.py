@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from app.services import face_candidates as face_candidates_service
 
 
@@ -223,4 +225,113 @@ def test_lookup_nearest_neighbor_candidates_applies_no_suggestion_policy_for_low
             "auto_accept_threshold": 0.95,
             "top_candidate_confidence": 0.8,
         },
+    }
+
+
+def test_lookup_nearest_neighbor_candidates_applies_no_suggestion_for_ambiguous_top_match(monkeypatch):
+    monkeypatch.setenv("PHOTO_ORG_RECOGNITION_REVIEW_THRESHOLD", "0.7")
+    monkeypatch.setenv("PHOTO_ORG_RECOGNITION_AUTO_ACCEPT_THRESHOLD", "0.95")
+    monkeypatch.setenv("PHOTO_ORG_RECOGNITION_MIN_TOP_MARGIN", "0.05")
+    connection = _FakeConnection(dialect_name="sqlite", source_embedding=[1.0, 0.0, 0.0])
+
+    def _fake_postgresql_strategy(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("PostgreSQL strategy should not be used for SQLite")
+
+    def _fake_python_strategy(*args, **kwargs):  # noqa: ANN002, ANN003
+        return [
+            {
+                "person_id": "person-1",
+                "display_name": "Alex",
+                "matched_face_id": "match-face-1",
+                "distance": 0.21,
+            },
+            {
+                "person_id": "person-2",
+                "display_name": "Blair",
+                "matched_face_id": "match-face-2",
+                "distance": 0.23,
+            },
+        ]
+
+    monkeypatch.setattr(
+        face_candidates_service,
+        "_lookup_candidates_postgresql",
+        _fake_postgresql_strategy,
+    )
+    monkeypatch.setattr(
+        face_candidates_service,
+        "_lookup_candidates_python",
+        _fake_python_strategy,
+    )
+
+    result = face_candidates_service.lookup_nearest_neighbor_candidates(
+        connection,
+        face_id="source-face",
+        limit=7,
+    )
+
+    assert result == {
+        "face_id": "source-face",
+        "candidates": [],
+        "suggestion_policy": {
+            "decision": "no_suggestion",
+            "review_threshold": 0.7,
+            "auto_accept_threshold": 0.95,
+            "top_candidate_confidence": 0.79,
+        },
+    }
+
+
+def test_lookup_nearest_neighbor_candidates_keeps_high_confidence_ambiguous_top_match(monkeypatch):
+    monkeypatch.setenv("PHOTO_ORG_RECOGNITION_REVIEW_THRESHOLD", "0.7")
+    monkeypatch.setenv("PHOTO_ORG_RECOGNITION_AUTO_ACCEPT_THRESHOLD", "0.9")
+    monkeypatch.setenv("PHOTO_ORG_RECOGNITION_MIN_TOP_MARGIN", "0.05")
+    connection = _FakeConnection(dialect_name="sqlite", source_embedding=[1.0, 0.0, 0.0])
+
+    def _fake_postgresql_strategy(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("PostgreSQL strategy should not be used for SQLite")
+
+    def _fake_python_strategy(*args, **kwargs):  # noqa: ANN002, ANN003
+        return [
+            {
+                "person_id": "person-1",
+                "display_name": "Alex",
+                "matched_face_id": "match-face-1",
+                "distance": 0.07,
+            },
+            {
+                "person_id": "person-2",
+                "display_name": "Blair",
+                "matched_face_id": "match-face-2",
+                "distance": 0.08,
+            },
+        ]
+
+    monkeypatch.setattr(
+        face_candidates_service,
+        "_lookup_candidates_postgresql",
+        _fake_postgresql_strategy,
+    )
+    monkeypatch.setattr(
+        face_candidates_service,
+        "_lookup_candidates_python",
+        _fake_python_strategy,
+    )
+
+    result = face_candidates_service.lookup_nearest_neighbor_candidates(
+        connection,
+        face_id="source-face",
+        limit=7,
+    )
+
+    assert result["face_id"] == "source-face"
+    assert [candidate["person_id"] for candidate in result["candidates"]] == ["person-1", "person-2"]
+    assert [candidate["display_name"] for candidate in result["candidates"]] == ["Alex", "Blair"]
+    assert [candidate["distance"] for candidate in result["candidates"]] == [0.07, 0.08]
+    assert [candidate["confidence"] for candidate in result["candidates"]] == pytest.approx([0.93, 0.92], abs=1e-6)
+    assert result["suggestion_policy"] == {
+        "decision": "review_needed",
+        "review_threshold": 0.7,
+        "auto_accept_threshold": 0.9,
+        "top_candidate_confidence": pytest.approx(0.93, abs=1e-6),
     }

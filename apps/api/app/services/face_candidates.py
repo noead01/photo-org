@@ -64,7 +64,16 @@ def lookup_nearest_neighbor_candidates(
     top_candidate_confidence = (
         float(candidates_with_confidence[0]["confidence"]) if candidates_with_confidence else None
     )
+    second_candidate_confidence = (
+        float(candidates_with_confidence[1]["confidence"]) if len(candidates_with_confidence) > 1 else None
+    )
     if top_candidate_confidence is None:
+        suggestion_decision = SUGGESTION_DECISION_NO_SUGGESTION
+    elif (
+        second_candidate_confidence is not None
+        and top_candidate_confidence < thresholds["auto_accept_threshold"]
+        and (top_candidate_confidence - second_candidate_confidence) < thresholds["min_top_margin"]
+    ):
         suggestion_decision = SUGGESTION_DECISION_NO_SUGGESTION
     else:
         suggestion_decision = classify_suggestion_confidence(

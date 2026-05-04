@@ -48,7 +48,10 @@ function summarizePhotoFaces(photo: LibraryPhoto): {
     if (face.label_source === "human_confirmed" && face.person_id) {
       humanPeople.add(face.person_id);
     }
-    if (face.label_source === "machine_suggested" && typeof face.confidence === "number") {
+    if (
+      (face.label_source === "machine_suggested" && typeof face.confidence === "number") ||
+      (face.suggestions?.length ?? 0) > 0
+    ) {
       machineSuggestedFaces += 1;
     }
   });

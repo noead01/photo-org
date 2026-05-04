@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import math
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
@@ -456,7 +455,7 @@ def _face_row(photo_id: str, detection: dict) -> dict[str, object]:
         "bbox_w": detection.get("bbox_w"),
         "bbox_h": detection.get("bbox_h"),
         "bitmap": detection.get("bitmap"),
-        "embedding": _normalize_or_generate_embedding(detection),
+        "embedding": _normalize_optional_embedding(detection),
         "provenance": detection.get("provenance", {}),
     }
 
@@ -610,44 +609,8 @@ def _normalize_embedding(value: object) -> list[float] | None:
     return embedding
 
 
-def _normalize_or_generate_embedding(detection: dict) -> list[float]:
-    existing_embedding = _normalize_embedding(detection.get("embedding"))
-    if existing_embedding is not None:
-        return existing_embedding
-    return _generate_embedding_from_detection(detection)
-
-
-def _generate_embedding_from_detection(detection: dict) -> list[float]:
-    seed_bytes = _embedding_seed_bytes(detection)
-    digest_bytes = bytearray()
-    counter = 0
-    while len(digest_bytes) < EMBEDDING_DIMENSION:
-        digest_bytes.extend(hashlib.sha256(seed_bytes + counter.to_bytes(4, "big")).digest())
-        counter += 1
-
-    raw_embedding = [component / 255.0 for component in digest_bytes[:EMBEDDING_DIMENSION]]
-    magnitude = math.sqrt(sum(component * component for component in raw_embedding))
-    if magnitude <= 0.0:
-        return raw_embedding
-    return [component / magnitude for component in raw_embedding]
-
-
-def _embedding_seed_bytes(detection: dict) -> bytes:
-    bitmap = detection.get("bitmap")
-    if isinstance(bitmap, bytes) and bitmap:
-        return bitmap
-
-    fallback_seed = "|".join(
-        [
-            str(detection.get("face_id", "")),
-            str(detection.get("bbox_x", "")),
-            str(detection.get("bbox_y", "")),
-            str(detection.get("bbox_w", "")),
-            str(detection.get("bbox_h", "")),
-            str(detection.get("person_id", "")),
-        ]
-    )
-    return fallback_seed.encode("utf-8")
+def _normalize_optional_embedding(detection: dict) -> list[float] | None:
+    return _normalize_embedding(detection.get("embedding"))
 
 
 def _format_optional_timestamp(value: datetime | None) -> str | None:

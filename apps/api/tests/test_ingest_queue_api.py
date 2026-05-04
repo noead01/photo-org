@@ -10,6 +10,7 @@ from app.db.session import create_session_factory
 from app.dependencies import get_db
 from app.main import app
 from app.migrations import upgrade_database
+from app.services.face_embedding_backfill import FaceEmbeddingModelUnavailableError
 
 
 SAMPLE_PAYLOAD = {
@@ -96,6 +97,13 @@ def test_poll_storage_sources_endpoint_rejects_wrong_worker_role(client: TestCli
     assert response.json() == {"detail": "Worker role required"}
 
 
+def test_reembed_missing_face_embeddings_endpoint_rejects_missing_worker_role(client: TestClient):
+    response = client.post("/api/v1/internal/faces/reembed-missing-embeddings")
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Worker role required"}
+
+
 def test_process_queue_endpoint_forwards_limit_to_processor(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -177,6 +185,84 @@ def test_poll_storage_sources_endpoint_forwards_queue_process_limit(
         "error_count": 4,
         "poll_errors": ["marker mismatch"],
     }
+
+
+def test_reembed_missing_face_embeddings_endpoint_forwards_request_args(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    captured: dict[str, object] = {}
+
+    def fake_reembed(
+        connection,
+        *,
+        limit: int,
+        refresh_related: bool,
+        suggestion_limit: int,
+    ):
+        del connection
+        captured["limit"] = limit
+        captured["refresh_related"] = refresh_related
+        captured["suggestion_limit"] = suggestion_limit
+        return {
+            "scanned": 12,
+            "updated": 9,
+            "skipped_missing_bitmap": 2,
+            "skipped_extraction_failed": 1,
+            "refreshed_people": 3,
+            "refreshed_suggestion_scopes": 3,
+        }
+
+    monkeypatch.setattr(
+        "app.routers.ingest_queue.reembed_missing_face_embeddings",
+        fake_reembed,
+    )
+
+    response = client.post(
+        "/api/v1/internal/faces/reembed-missing-embeddings",
+        headers={"X-Worker-Role": "ingest-processor"},
+        json={
+            "limit": 321,
+            "refresh_related": False,
+            "suggestion_limit": 7,
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured == {
+        "limit": 321,
+        "refresh_related": False,
+        "suggestion_limit": 7,
+    }
+    assert response.json() == {
+        "scanned": 12,
+        "updated": 9,
+        "skipped_missing_bitmap": 2,
+        "skipped_extraction_failed": 1,
+        "refreshed_people": 3,
+        "refreshed_suggestion_scopes": 3,
+    }
+
+
+def test_reembed_missing_face_embeddings_endpoint_returns_409_when_model_unavailable(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def fake_reembed(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise FaceEmbeddingModelUnavailableError("model not configured")
+
+    monkeypatch.setattr(
+        "app.routers.ingest_queue.reembed_missing_face_embeddings",
+        fake_reembed,
+    )
+
+    response = client.post(
+        "/api/v1/internal/faces/reembed-missing-embeddings",
+        headers={"X-Worker-Role": "ingest-processor"},
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "model not configured"}
 
 
 def test_get_db_reuses_cached_session_factory_for_database_url(monkeypatch: pytest.MonkeyPatch):

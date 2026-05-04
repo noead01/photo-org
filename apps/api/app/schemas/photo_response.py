@@ -7,6 +7,23 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.schemas.search_response import OriginalAvailabilityHit, ThumbnailHit
 
 
+class PhotoDetailFaceSuggestion(BaseModel):
+    """Ranked machine suggestion attached to one detected face."""
+
+    person_id: str = Field(description="Suggested person identifier.")
+    display_name: str = Field(description="Suggested person's display name.")
+    rank: int = Field(description="Suggestion rank for this face.")
+    confidence: float = Field(description="Suggestion confidence between 0 and 1.")
+    model_version: str | None = Field(
+        default=None,
+        description="Model version attached to the suggestion.",
+    )
+    provenance: dict[str, object] | None = Field(
+        default=None,
+        description="Raw provenance payload for the suggestion.",
+    )
+
+
 class PhotoDetailFace(BaseModel):
     """Face detection bounding box attached to a photo detail response."""
 
@@ -47,6 +64,10 @@ class PhotoDetailFace(BaseModel):
     label_recorded_ts: str | None = Field(
         default=None,
         description="Timestamp of the latest matching label record.",
+    )
+    suggestions: list[PhotoDetailFaceSuggestion] = Field(
+        default_factory=list,
+        description="Ranked machine suggestions for an unassigned face.",
     )
 
 
