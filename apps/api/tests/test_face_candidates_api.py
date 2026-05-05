@@ -306,6 +306,64 @@ def test_face_candidates_api_returns_no_suggestion_when_best_confidence_is_below
     assert "auto_applied_assignment" not in payload
 
 
+def test_face_candidates_api_returns_low_confidence_candidates_when_enforcement_is_disabled(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("PHOTO_ORG_RECOGNITION_REVIEW_THRESHOLD", "0.95")
+    monkeypatch.setenv("PHOTO_ORG_RECOGNITION_AUTO_ACCEPT_THRESHOLD", "0.99")
+    client = _client(tmp_path, monkeypatch, "face-candidates-threshold-bypass.db")
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'face-candidates-threshold-bypass.db'}", future=True)
+    with engine.begin() as connection:
+        _insert_photo(connection, photo_id="photo-1")
+        _insert_photo(connection, photo_id="photo-2")
+        _insert_person(connection, person_id="person-1", display_name="Alex")
+        connection.execute(
+            insert(faces),
+            [
+                {
+                    "face_id": "source-face",
+                    "photo_id": "photo-1",
+                    "person_id": None,
+                    "embedding": _embedding(1.0, 0.0),
+                },
+                {
+                    "face_id": "candidate-1",
+                    "photo_id": "photo-2",
+                    "person_id": "person-1",
+                    "embedding": _embedding(0.8, 0.6),
+                },
+            ],
+        )
+
+    response = client.get(
+        "/api/v1/faces/source-face/candidates",
+        params={"enforce_min_confidence": "false"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["face_id"] == "source-face"
+    assert payload["candidates"] == [
+        {
+            "person_id": "person-1",
+            "display_name": "Alex",
+            "matched_face_id": "candidate-1",
+            "distance": pytest.approx(0.2, abs=1e-6),
+            "confidence": pytest.approx(0.8, abs=1e-6),
+        }
+    ]
+    assert payload["suggestion_policy"] == {
+        "decision": "no_suggestion",
+        "review_threshold": 0.95,
+        "auto_accept_threshold": 0.99,
+        "top_candidate_confidence": pytest.approx(0.8, abs=1e-6),
+    }
+    assert payload["review_needed_suggestion"] is None
+    assert "auto_applied_assignment" not in payload
+
+
 def test_face_candidates_api_does_not_overwrite_existing_assignment_when_policy_is_review_needed(
     tmp_path,
     monkeypatch,

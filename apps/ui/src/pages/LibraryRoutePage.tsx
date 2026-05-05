@@ -37,6 +37,11 @@ import { INVALID_PAGE_MESSAGE, updateCursorByPage } from "./library/pagination";
 import { useRouteRequestState } from "./library/requestLifecycle";
 import { parsePositiveIntParam } from "./library/urlSerialization";
 import {
+  loadLibraryViewState,
+  saveLastLibraryUrl,
+  saveLibraryViewState
+} from "./library/libraryRouteMemory";
+import {
   normalizePathHintFilters,
   parseHasFacesFacetCounts,
   toPathHintFacetCounts,
@@ -65,8 +70,9 @@ export function LibraryRoutePage() {
   const suppressNextUrlStateSyncRef = useRef(false);
   const applyingParsedUrlStateRef = useRef(false);
   const lastAppliedParsedUrlStateSignatureRef = useRef<string | null>(null);
+  const initialStoredViewStateRef = useRef(loadLibraryViewState(location.search));
   const shouldRestoreInitialViewStateRef = useRef(
-    Boolean(initialReturnState?.libraryViewState)
+    Boolean(initialReturnState?.libraryViewState ?? initialStoredViewStateRef.current)
   );
   const parsedUrlState = useMemo(() => parseLibraryUrlState(location.search), [location.search]);
   const parsedUrlStateSignature = useMemo(
@@ -75,6 +81,7 @@ export function LibraryRoutePage() {
         queryChips: parsedUrlState.queryChips,
         fromDate: parsedUrlState.fromDate,
         toDate: parsedUrlState.toDate,
+        sortDirection: parsedUrlState.sortDirection,
         pageSize: parsedUrlState.pageSize,
         selectedPersonNames: parsedUrlState.selectedPersonNames,
         personCertaintyMode: parsedUrlState.personCertaintyMode,
@@ -113,11 +120,15 @@ export function LibraryRoutePage() {
   const [facetPathHintCounts, setFacetPathHintCounts] = useState<FacetCountEntry[]>([]);
 
   const [sortDirection, setSortDirection] = useState<SortDirection>(
-    initialReturnState?.libraryViewState?.sortDirection ?? "desc"
+    initialReturnState?.libraryViewState?.sortDirection
+      ?? initialStoredViewStateRef.current?.sortDirection
+      ?? parsedUrlState.sortDirection
   );
   const [pageSize, setPageSize] = useState(DEFAULT_SEARCH_PAGE_LIMIT);
   const [cursorByPage, setCursorByPage] = useState<Record<number, string | null>>(
-    initialReturnState?.libraryViewState?.cursorByPage ?? { 1: null }
+    initialReturnState?.libraryViewState?.cursorByPage
+      ?? initialStoredViewStateRef.current?.cursorByPage
+      ?? { 1: null }
   );
   const [photos, setPhotos] = useState<LibraryPhoto[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -269,7 +280,7 @@ export function LibraryRoutePage() {
     if (shouldRestoreInitialViewStateRef.current) {
       shouldRestoreInitialViewStateRef.current = false;
     } else {
-      setSortDirection("desc");
+      setSortDirection(parsedUrlState.sortDirection);
       setCursorByPage({ 1: null });
     }
     setPhotos([]);
@@ -292,6 +303,7 @@ export function LibraryRoutePage() {
       locationRadius: locationRadiusFilter,
       hasFacesFilter,
       pathHintFilters,
+      sortDirection,
       page: requestedPage,
       pageSize
     });
@@ -325,9 +337,18 @@ export function LibraryRoutePage() {
     requestedPage,
     selectedPersonNames,
     personCertaintyMode,
+    sortDirection,
     suggestionConfidenceMinDraft,
     toDate
   ]);
+
+  useEffect(() => {
+    saveLastLibraryUrl(`${location.pathname}${location.search}`);
+  }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    saveLibraryViewState(location.search, libraryViewRouteState);
+  }, [libraryViewRouteState, location.search]);
 
   useEffect(() => {
     dispatchSelection({

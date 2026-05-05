@@ -228,6 +228,64 @@ def test_lookup_nearest_neighbor_candidates_applies_no_suggestion_policy_for_low
     }
 
 
+def test_lookup_nearest_neighbor_candidates_can_return_low_confidence_candidates_when_enforcement_is_disabled(
+    monkeypatch,
+):
+    monkeypatch.setenv("PHOTO_ORG_RECOGNITION_REVIEW_THRESHOLD", "0.9")
+    monkeypatch.setenv("PHOTO_ORG_RECOGNITION_AUTO_ACCEPT_THRESHOLD", "0.95")
+    connection = _FakeConnection(dialect_name="sqlite", source_embedding=[1.0, 0.0, 0.0])
+
+    def _fake_postgresql_strategy(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("PostgreSQL strategy should not be used for SQLite")
+
+    def _fake_python_strategy(*args, **kwargs):  # noqa: ANN002, ANN003
+        return [
+            {
+                "person_id": "person-2",
+                "display_name": "Blair",
+                "matched_face_id": "match-face-2",
+                "distance": 0.2,
+            }
+        ]
+
+    monkeypatch.setattr(
+        face_candidates_service,
+        "_lookup_candidates_postgresql",
+        _fake_postgresql_strategy,
+    )
+    monkeypatch.setattr(
+        face_candidates_service,
+        "_lookup_candidates_python",
+        _fake_python_strategy,
+    )
+
+    result = face_candidates_service.lookup_nearest_neighbor_candidates(
+        connection,
+        face_id="source-face",
+        limit=7,
+        enforce_min_confidence=False,
+    )
+
+    assert result == {
+        "face_id": "source-face",
+        "candidates": [
+            {
+                "person_id": "person-2",
+                "display_name": "Blair",
+                "matched_face_id": "match-face-2",
+                "distance": 0.2,
+                "confidence": 0.8,
+            }
+        ],
+        "suggestion_policy": {
+            "decision": "no_suggestion",
+            "review_threshold": 0.9,
+            "auto_accept_threshold": 0.95,
+            "top_candidate_confidence": 0.8,
+        },
+    }
+
+
 def test_lookup_nearest_neighbor_candidates_applies_no_suggestion_for_ambiguous_top_match(monkeypatch):
     monkeypatch.setenv("PHOTO_ORG_RECOGNITION_REVIEW_THRESHOLD", "0.7")
     monkeypatch.setenv("PHOTO_ORG_RECOGNITION_AUTO_ACCEPT_THRESHOLD", "0.95")
