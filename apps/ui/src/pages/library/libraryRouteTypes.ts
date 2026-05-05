@@ -60,6 +60,7 @@ export type SearchUrlState = {
   queryChips: string[];
   fromDate: string;
   toDate: string;
+  sortDirection: SortDirection;
   pageSize: number;
   selectedPersonNames: string[];
   personCertaintyMode: PersonCertaintyMode;

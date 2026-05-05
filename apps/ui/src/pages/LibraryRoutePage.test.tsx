@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { LibraryRoutePage } from "./LibraryRoutePage";
+import { buildLibraryViewStateStorageKey } from "./library/libraryRouteMemory";
 
 type SearchResponsePayload = {
   hits: {
@@ -124,6 +125,7 @@ describe("LibraryRoutePage", () => {
   beforeEach(() => {
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
+    window.sessionStorage.clear();
     window.__PHOTO_ORG_SESSION__ = {
       userId: "operator-1",
       displayName: "Operator One",
@@ -504,6 +506,79 @@ describe("LibraryRoutePage", () => {
       "page"
     );
     expect(screen.getByRole("checkbox", { name: "Select photo photo-61" })).toBeChecked();
+  });
+
+  it("restores a cursor-backed selected page on fresh reload from session storage", async () => {
+    const pageOneIds = Array.from({ length: 24 }, (_, index) => `photo-${index + 1}`);
+    const pageTwoIds = Array.from({ length: 24 }, (_, index) => `photo-${index + 25}`);
+    const initialSearch = "?page=2&pageSize=24&sort=asc";
+
+    window.sessionStorage.setItem(
+      buildLibraryViewStateStorageKey(initialSearch),
+      JSON.stringify({
+        sortDirection: "asc",
+        cursorByPage: {
+          1: null,
+          2: "cursor-page-2"
+        }
+      })
+    );
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+      if (url === "/api/v1/people") {
+        return {
+          ok: true,
+          json: async () => []
+        } as Response;
+      }
+      if (url !== "/api/v1/search") {
+        throw new Error(`Unhandled fetch: ${url}`);
+      }
+
+      const requestBody = JSON.parse((init?.body as string | undefined) ?? "{}") as {
+        page?: { cursor?: string | null };
+      };
+      const requestCursor = requestBody.page?.cursor ?? null;
+
+      if (requestCursor === "cursor-page-2") {
+        return {
+          ok: true,
+          json: async () => ({
+            hits: {
+              total: 48,
+              cursor: "cursor-page-3",
+              items: buildPayload(pageTwoIds, 48).hits.items
+            }
+          })
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          hits: {
+            total: 48,
+            cursor: "cursor-page-2",
+            items: buildPayload(pageOneIds, 48).hits.items
+          }
+        })
+      } as Response;
+    });
+
+    renderLibraryAt(`/library${initialSearch}`);
+
+    expect(await screen.findByRole("button", { name: "Page 2" })).toHaveAttribute(
+      "aria-current",
+      "page"
+    );
+    expect(screen.getByRole("checkbox", { name: "Select photo photo-25" })).toBeInTheDocument();
   });
 
   it("shows action bar when selection scope is set to page", async () => {

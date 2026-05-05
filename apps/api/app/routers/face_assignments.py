@@ -259,6 +259,10 @@ def confirm_face_assignment_endpoint(
 def lookup_face_candidates_endpoint(
     face_id: str,
     limit: Annotated[int, Query(ge=1, le=50)] = 5,
+    enforce_min_confidence: bool = Query(
+        default=True,
+        description="When false, return nearest candidates even if suggestion policy resolves to no_suggestion.",
+    ),
     db: Session = Depends(get_db),
 ) -> FaceCandidateLookupResponse:
     try:
@@ -266,6 +270,7 @@ def lookup_face_candidates_endpoint(
             db.connection(),
             face_id=face_id,
             limit=limit,
+            enforce_min_confidence=enforce_min_confidence,
         )
     except FaceCandidateNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

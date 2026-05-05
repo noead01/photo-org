@@ -78,6 +78,7 @@ describe("App shell", () => {
       () => new Promise<Response>(() => undefined)
     );
     vi.stubGlobal("fetch", fetchMock);
+    window.sessionStorage.clear();
   });
 
   afterEach(() => {
@@ -248,5 +249,19 @@ describe("App shell", () => {
     expect(await screen.findByRole("heading", { name: "Labeling", level: 1 })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Create person display name" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create person" })).toBeInTheDocument();
+  });
+
+  it("uses remembered library URL for the Library nav link", () => {
+    window.sessionStorage.setItem(
+      "photo-org:library:last-url",
+      "/library?query=lake&page=2&pageSize=24&sort=asc"
+    );
+
+    renderAtPath("/operations");
+
+    expect(screen.getByRole("link", { name: "Library" })).toHaveAttribute(
+      "href",
+      "/library?query=lake&page=2&pageSize=24&sort=asc"
+    );
   });
 });

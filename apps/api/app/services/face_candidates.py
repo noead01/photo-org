@@ -23,6 +23,7 @@ def lookup_nearest_neighbor_candidates(
     *,
     face_id: str,
     limit: int = 5,
+    enforce_min_confidence: bool = True,
 ) -> dict[str, object]:
     source_row = (
         connection.execute(
@@ -81,7 +82,7 @@ def lookup_nearest_neighbor_candidates(
             review_threshold=thresholds["review_threshold"],
             auto_accept_threshold=thresholds["auto_accept_threshold"],
         )
-    if suggestion_decision == SUGGESTION_DECISION_NO_SUGGESTION:
+    if enforce_min_confidence and suggestion_decision == SUGGESTION_DECISION_NO_SUGGESTION:
         candidates = []
     else:
         candidates = candidates_with_confidence[:limit]

@@ -11,6 +11,7 @@ import {
 import type {
   LibraryLocationRadius,
   PersonCertaintyMode,
+  SortDirection,
   SearchUrlState
 } from "./libraryRouteTypes";
 import {
@@ -21,6 +22,7 @@ import {
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const DEFAULT_PERSON_CERTAINTY_MODE: PersonCertaintyMode = "human_only";
 const DEFAULT_SUGGESTION_CONFIDENCE_MIN = "0.8";
+const DEFAULT_SORT_DIRECTION: SortDirection = "desc";
 
 function isValidIsoDate(value: string): boolean {
   if (!DATE_PATTERN.test(value)) {
@@ -78,6 +80,13 @@ function parseSuggestionConfidenceMinDraft(raw: string | null): string {
     return DEFAULT_SUGGESTION_CONFIDENCE_MIN;
   }
   return candidate;
+}
+
+function parseSortDirection(raw: string | null): SortDirection {
+  if (raw === "asc") {
+    return "asc";
+  }
+  return DEFAULT_SORT_DIRECTION;
 }
 
 function normalizeSuggestionConfidenceMin(
@@ -152,6 +161,7 @@ export function parseLibraryUrlState(search: string): SearchUrlState {
     queryChips,
     fromDate,
     toDate,
+    sortDirection: parseSortDirection(params.get("sort")),
     pageSize: parsePageSizeParam(
       params.get("pageSize"),
       SEARCH_PAGE_LIMIT_OPTIONS,
@@ -179,6 +189,7 @@ export function buildLibraryUrlQuery(state: {
   locationRadius: LibraryLocationRadius | null;
   hasFacesFilter: boolean | null;
   pathHintFilters: string[];
+  sortDirection: SortDirection;
   page: number;
   pageSize: number;
 }): string {
@@ -215,6 +226,9 @@ export function buildLibraryUrlQuery(state: {
   }
   for (const pathHint of state.pathHintFilters) {
     params.append("pathHint", pathHint);
+  }
+  if (state.sortDirection !== DEFAULT_SORT_DIRECTION) {
+    params.set("sort", state.sortDirection);
   }
   if (state.page > 1) {
     params.set("page", String(state.page));

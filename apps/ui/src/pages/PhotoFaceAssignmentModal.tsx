@@ -172,7 +172,9 @@ export function PhotoFaceAssignmentModal({
     const controller = new AbortController();
     setIsLoadingCandidates(true);
 
-    fetch(`/api/v1/faces/${face.face_id}/candidates`, { signal: controller.signal })
+    fetch(`/api/v1/faces/${face.face_id}/candidates?enforce_min_confidence=false`, {
+      signal: controller.signal
+    })
       .then(async (response) => {
         if (!response.ok) {
           throw new Error(`Candidate request failed (${response.status})`);

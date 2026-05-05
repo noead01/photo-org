@@ -664,6 +664,10 @@ describe("PhotoDetailRoutePage", () => {
 
     await user.click(await screen.findByLabelText("Face region 1 for person-1"));
     expect(await screen.findByRole("dialog", { name: "Face assignment" })).toBeInTheDocument();
+    const candidateRequestCall = fetchMock.mock.calls.find((call) =>
+      String(call[0]).startsWith("/api/v1/faces/face-1/candidates")
+    );
+    expect(candidateRequestCall?.[0]).toBe("/api/v1/faces/face-1/candidates?enforce_min_confidence=false");
     expect(screen.getByLabelText("Assign person")).not.toHaveAttribute("list");
     expect(document.querySelector("#face-assignment-known-people")).toBeNull();
   });

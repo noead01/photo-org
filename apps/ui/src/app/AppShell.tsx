@@ -5,6 +5,7 @@ import {
   type NavigationState
 } from "../routes/routeDefinitions";
 import type { SessionIdentity } from "../session/sessionIdentity";
+import { loadLastLibraryUrl } from "../pages/library/libraryRouteMemory";
 
 interface AppShellProps {
   navigationState: NavigationState;
@@ -113,6 +114,8 @@ export function AppShell({
   onSignOut,
   children
 }: AppShellProps) {
+  const rememberedLibraryUrl = loadLastLibraryUrl();
+
   return (
     <div className="app-shell" data-shell-route={navigationState.activeRoute.key}>
       <header className="shell-header">
@@ -127,11 +130,12 @@ export function AppShell({
         <ul>
           {PRIMARY_ROUTE_DEFINITIONS.map((route) => {
             const isActive = route.key === navigationState.activeRoute.key;
+            const routeTarget = route.key === "library" ? rememberedLibraryUrl : route.path;
 
             return (
               <li key={route.key}>
                 <Link
-                  to={route.path}
+                  to={routeTarget}
                   className={isActive ? "active" : undefined}
                   aria-current={isActive ? "page" : undefined}
                 >
