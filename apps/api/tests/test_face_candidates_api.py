@@ -9,7 +9,7 @@ from sqlalchemy import create_engine, insert, select
 from app.dependencies import _get_session_factory
 from app.main import app
 from app.migrations import upgrade_database
-from app.storage import face_labels, faces, people, photos
+from app.storage import face_labels, face_suggestions, faces, people, photos
 from photoorg_db_schema import EMBEDDING_DIMENSION
 
 
@@ -153,6 +153,16 @@ def test_face_candidates_api_returns_ranked_person_candidates_with_per_person_be
                 face_labels.c.provenance,
             ).where(face_labels.c.face_id == "source-face")
         ).mappings().one()
+        persisted_suggestions = connection.execute(
+            select(
+                face_suggestions.c.person_id,
+                face_suggestions.c.rank,
+                face_suggestions.c.confidence,
+                face_suggestions.c.scoring_version,
+            )
+            .where(face_suggestions.c.face_id == "source-face")
+            .order_by(face_suggestions.c.rank.asc())
+        ).mappings().all()
     assert persisted_person_id is None
     assert persisted_label["face_id"] == "source-face"
     assert persisted_label["person_id"] == "person-1"
@@ -171,6 +181,10 @@ def test_face_candidates_api_returns_ranked_person_candidates_with_per_person_be
         "candidate_distance": pytest.approx(0.000051, abs=1e-4),
         "candidate_confidence": pytest.approx(0.999949, abs=1e-4),
     }
+    assert persisted_suggestions[0]["person_id"] == "person-1"
+    assert persisted_suggestions[0]["rank"] == 1
+    assert persisted_suggestions[0]["confidence"] == pytest.approx(0.999949, abs=1e-4)
+    assert persisted_suggestions[0]["scoring_version"] == "nearest-neighbor-live-v1"
 
 
 def test_face_candidates_api_returns_review_needed_state_for_medium_confidence_matches(

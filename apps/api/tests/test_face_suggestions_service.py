@@ -220,7 +220,7 @@ def test_refresh_face_suggestions_replaces_stale_snapshot_rows(tmp_path):
 
     assert len(rows) == 1
     assert rows[0]["face_suggestion_id"] != "stale-row"
-    assert rows[0]["scoring_version"] == "hybrid-v1"
+    assert rows[0]["scoring_version"] == "nearest-neighbor-live-v1"
 
 
 def test_refresh_face_suggestions_for_people_in_top_rank_reassesses_target_faces_only(tmp_path):
@@ -364,7 +364,7 @@ def test_refresh_face_suggestions_for_people_in_top_rank_reassesses_target_faces
 
     assert refreshed_count == 1
     assert len(source_a_rows) == 2
-    assert source_a_rows[0]["scoring_version"] == "hybrid-v1"
+    assert source_a_rows[0]["scoring_version"] == "nearest-neighbor-live-v1"
     assert source_a_rows[0]["person_id"] == "person-a"
     assert len(source_b_rows) == 1
     assert source_b_rows[0]["face_suggestion_id"] == "stale-b1"
@@ -524,7 +524,7 @@ def test_refresh_stale_unassigned_face_suggestions_selects_stale_or_missing_with
     assert result.refreshed_face_count == 2
     assert len(stale_rows) == 2
     assert stale_rows[0]["face_suggestion_id"] != "stale-row"
-    assert stale_rows[0]["scoring_version"] == "hybrid-v1"
+    assert stale_rows[0]["scoring_version"] == "nearest-neighbor-live-v1"
     assert len(missing_rows) == 2
     assert len(fresh_rows) == 1
     assert fresh_rows[0]["face_suggestion_id"] == "fresh-row"

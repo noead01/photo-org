@@ -35,6 +35,8 @@ class SuggestedUnassignedFaceResponse(BaseModel):
     bbox_y: int | None = None
     bbox_w: int | None = None
     bbox_h: int | None = None
+    bbox_space_width: int | None = None
+    bbox_space_height: int | None = None
     top_suggestion: TopFaceSuggestionResponse
 
 
@@ -92,12 +94,14 @@ class SuggestionConfirmFacesResponse(BaseModel):
 def list_suggestion_review_faces_endpoint(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 24,
+    min_confidence: Annotated[float, Query(ge=0, le=1)] = 0,
     db: Session = Depends(get_db),
 ) -> SuggestionReviewListResponse:
     result = list_unassigned_face_suggestion_photos(
         db.connection(),
         page=page,
         page_size=page_size,
+        min_confidence=min_confidence,
     )
     return SuggestionReviewListResponse.model_validate(result)
 
