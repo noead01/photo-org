@@ -840,6 +840,207 @@ describe("PhotoDetailRoutePage", () => {
     expect(screen.getByText("person-1")).toBeInTheDocument();
   });
 
+  it("shows a false-positive dismissal action only for unlabeled faces", async () => {
+    const user = userEvent.setup();
+
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () =>
+          buildPayload({
+            people: ["person-1"],
+            faces: [
+              {
+                face_id: "face-1",
+                person_id: "person-1",
+                bbox_x: 10,
+                bbox_y: 10,
+                bbox_w: 20,
+                bbox_h: 20,
+                label_source: "human_confirmed",
+                confidence: null,
+                model_version: null,
+                provenance: {
+                  workflow: "face-labeling",
+                  surface: "api",
+                  action: "assignment"
+                },
+                label_recorded_ts: "2026-03-28T19:33:00Z"
+              }
+            ]
+          })
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            person_id: "person-1",
+            display_name: "Inez",
+            created_ts: "2026-03-28T19:30:00Z",
+            updated_ts: "2026-03-28T19:30:00Z"
+          }
+        ]
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          face_id: "face-1",
+          candidates: [],
+          suggestion_policy: {
+            decision: "no_suggestion",
+            review_threshold: 0.5,
+            auto_accept_threshold: 0.9,
+            top_candidate_confidence: null
+          },
+          review_needed_suggestion: null
+        })
+      } as Response);
+
+    renderDetail();
+
+    await user.click(
+      await screen.findByRole("button", { name: "Open face assignment for face region 1" })
+    );
+
+    expect(await screen.findByRole("dialog", { name: "Face assignment" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Discard false positive" })).not.toBeInTheDocument();
+  });
+
+  it("dismisses an unlabeled false-positive face from the detail modal and removes it locally", async () => {
+    const user = userEvent.setup();
+
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () =>
+          buildPayload({
+            people: [],
+            faces: [
+              {
+                face_id: "face-1",
+                person_id: null,
+                bbox_x: 10,
+                bbox_y: 10,
+                bbox_w: 20,
+                bbox_h: 20,
+                label_source: null,
+                confidence: null,
+                model_version: null,
+                provenance: null,
+                label_recorded_ts: null
+              }
+            ],
+            metadata: {
+              ...buildPayload().metadata,
+              faces_count: 1
+            }
+          })
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => []
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          face_id: "face-1",
+          candidates: [],
+          suggestion_policy: {
+            decision: "no_suggestion",
+            review_threshold: 0.5,
+            auto_accept_threshold: 0.9,
+            top_candidate_confidence: null
+          },
+          review_needed_suggestion: null
+        })
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          face_id: "face-1",
+          photo_id: "photo-1",
+          dismissed_ts: "2026-05-06T12:00:00Z"
+        })
+      } as Response);
+
+    renderDetail();
+
+    expect(await screen.findByRole("heading", { name: "Photo detail", level: 1 })).toBeInTheDocument();
+    await user.click(
+      await screen.findByRole("button", { name: "Open face assignment for face region 1" })
+    );
+    expect(await screen.findByRole("button", { name: "Discard false positive" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Discard false positive" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Face assignment" })).not.toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: "Open face assignment for face region 1" })).not.toBeInTheDocument();
+    expect(screen.getByText("No face regions detected for this photo.")).toBeInTheDocument();
+    expect(screen.getByText("0 detected")).toBeInTheDocument();
+  });
+
+  it("shows the dismissal permission error inline in the detail modal", async () => {
+    const user = userEvent.setup();
+
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () =>
+          buildPayload({
+            people: [],
+            faces: [
+              {
+                face_id: "face-1",
+                person_id: null,
+                bbox_x: 10,
+                bbox_y: 10,
+                bbox_w: 20,
+                bbox_h: 20,
+                label_source: null,
+                confidence: null,
+                model_version: null,
+                provenance: null,
+                label_recorded_ts: null
+              }
+            ]
+          })
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => []
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          face_id: "face-1",
+          candidates: [],
+          suggestion_policy: {
+            decision: "no_suggestion",
+            review_threshold: 0.5,
+            auto_accept_threshold: 0.9,
+            top_candidate_confidence: null
+          },
+          review_needed_suggestion: null
+        })
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        json: async () => ({ detail: "Face validation role required" })
+      } as Response);
+
+    renderDetail();
+
+    await user.click(
+      await screen.findByRole("button", { name: "Open face assignment for face region 1" })
+    );
+    await user.click(await screen.findByRole("button", { name: "Discard false positive" }));
+
+    expect(await screen.findByText("You do not have permission to discard faces.")).toBeInTheDocument();
+  });
+
   it("updates local face state after correction success when saving from the modal", async () => {
     const user = userEvent.setup();
 

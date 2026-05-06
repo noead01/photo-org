@@ -9,12 +9,14 @@ from sqlalchemy.orm import Session
 from app.dependencies import get_db, require_face_validation_role
 from app.services.face_assignment import (
     FaceAlreadyAssignedError,
+    FaceAlreadyDismissedError,
     FaceAlreadyAssignedToPersonError,
     FaceAssignedToDifferentPersonError,
     FaceNotAssignedError,
     FaceNotFoundError,
     PersonNotFoundError,
     confirm_face_assignment,
+    dismiss_false_positive_face,
     record_review_needed_face_suggestion,
     assign_face_to_person,
     reassign_face_to_person,
@@ -23,7 +25,9 @@ from app.services.face_candidates import (
     FaceNotFoundError as FaceCandidateNotFoundError,
     lookup_nearest_neighbor_candidates,
 )
+from app.services.face_suggestions import persist_face_suggestions_from_live_candidates
 from app.services.recognition_policy import (
+    resolve_prediction_metadata,
     SUGGESTION_DECISION_REVIEW_NEEDED,
 )
 
@@ -84,6 +88,18 @@ class FaceConfirmationResponse(BaseModel):
     face_id: str
     photo_id: str
     person_id: str
+
+
+class FaceDismissalResponse(BaseModel):
+    """Dismissal result for one face detected as a false positive."""
+
+    model_config = ConfigDict(
+        json_schema_extra={"description": "Resolved face dismissal details."}
+    )
+
+    face_id: str
+    photo_id: str
+    dismissed_ts: str
 
 
 class FaceCandidateResponse(BaseModel):
@@ -247,6 +263,38 @@ def confirm_face_assignment_endpoint(
     return FaceConfirmationResponse.model_validate(confirmation)
 
 
+@router.post(
+    "/{face_id}/dismissals",
+    summary="Dismiss false-positive face detection",
+    description="Persistently dismiss an unassigned detected face that does not correspond to a real face.",
+    response_model=FaceDismissalResponse,
+    responses={
+        status.HTTP_403_FORBIDDEN: {"description": "Face validation role required"},
+        status.HTTP_404_NOT_FOUND: {"description": "Face not found"},
+        status.HTTP_409_CONFLICT: {"description": "Face already assigned or already dismissed"},
+    },
+)
+def dismiss_face_endpoint(
+    face_id: str,
+    db: Session = Depends(get_db),
+    _: str = Depends(require_face_validation_role),
+) -> FaceDismissalResponse:
+    try:
+        dismissal = dismiss_false_positive_face(
+            db.connection(),
+            face_id=face_id,
+        )
+    except FaceNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except FaceAlreadyAssignedError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except FaceAlreadyDismissedError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    db.commit()
+    return FaceDismissalResponse.model_validate(dismissal)
+
+
 @router.get(
     "/{face_id}/candidates",
     summary="Lookup nearest person candidates",
@@ -277,6 +325,15 @@ def lookup_face_candidates_endpoint(
 
     suggestion_policy = result["suggestion_policy"]
     candidates = result["candidates"]
+    prediction_metadata = resolve_prediction_metadata()
+    persisted_snapshot_count = persist_face_suggestions_from_live_candidates(
+        db.connection(),
+        face_id=face_id,
+        candidates=candidates if isinstance(candidates, list) else [],
+        model_version=prediction_metadata["model_version"],
+        limit=limit,
+    )
+    did_commit = persisted_snapshot_count >= 0
     if (
         suggestion_policy["decision"] == SUGGESTION_DECISION_REVIEW_NEEDED
         and isinstance(candidates, list)
@@ -295,6 +352,9 @@ def lookup_face_candidates_endpoint(
         )
         if review_needed_suggestion is not None:
             result["review_needed_suggestion"] = review_needed_suggestion
-            db.commit()
+            did_commit = True
+
+    if did_commit:
+        db.commit()
 
     return FaceCandidateLookupResponse.model_validate(result)

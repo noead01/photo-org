@@ -327,7 +327,7 @@ class PhotosRepository:
             "updated_ts": row.updated_ts,
             "modified_ts": row.modified_ts,
             "deleted_ts": row.deleted_ts,
-            "faces_count": int(row.faces_count or 0),
+            "faces_count": len(item["faces"]),
             "faces_detected_ts": row.faces_detected_ts,
         }
         return item
@@ -812,7 +812,10 @@ class PhotosRepository:
 
         face_rows = self.db.execute(
             select(*face_columns)
-            .where(self.faces.c.photo_id.in_(pids))
+            .where(
+                self.faces.c.photo_id.in_(pids),
+                self.faces.c.dismissed_ts.is_(None),
+            )
             .order_by(self.faces.c.photo_id, self.faces.c.face_id)
         ).all()
         face_ids = sorted({str(r.face_id) for r in face_rows if r.face_id is not None})

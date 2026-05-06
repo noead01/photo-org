@@ -12,7 +12,7 @@ from app.main import app
 from app.migrations import upgrade_database
 from app.routers import face_assignments as face_assignments_router
 from app.services import face_assignment as face_assignment_service
-from app.storage import face_labels, faces, ingest_queue, people, photos
+from app.storage import face_labels, face_suggestions, faces, ingest_queue, people, photos
 
 
 def _client(tmp_path, monkeypatch, filename: str) -> TestClient:
@@ -199,6 +199,125 @@ def test_face_assignment_api_rejects_missing_face_validation_role(tmp_path, monk
             select(faces.c.person_id).where(faces.c.face_id == "face-1")
         ).scalar_one_or_none()
     assert persisted_person_id is None
+
+
+def test_face_dismissal_api_marks_unassigned_face_as_dismissed_and_clears_suggestions(
+    tmp_path, monkeypatch
+):
+    database_url = _database_url(tmp_path, "face-dismiss.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        _insert_photo(connection, photo_id="photo-1")
+        _insert_person(connection, person_id="person-1", display_name="Jane Doe")
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id=None,
+            )
+        )
+        connection.execute(
+            insert(face_suggestions).values(
+                face_suggestion_id="suggestion-1",
+                face_id="face-1",
+                person_id="person-1",
+                rank=1,
+                confidence=0.91,
+                centroid_distance=0.09,
+                knn_distance=0.09,
+                representation_version=1,
+                scoring_version="hybrid-v1",
+                model_version="recognition-v1",
+            )
+        )
+
+    client = _authorized_client()
+    response = client.post("/api/v1/faces/face-1/dismissals")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["face_id"] == "face-1"
+    assert payload["photo_id"] == "photo-1"
+    assert payload["dismissed_ts"].endswith("Z")
+
+    with engine.connect() as connection:
+        face_row = connection.execute(
+            select(
+                faces.c.dismissed_ts,
+                faces.c.dismissal_provenance,
+            ).where(faces.c.face_id == "face-1")
+        ).mappings().one()
+        persisted_suggestions = connection.execute(
+            select(face_suggestions.c.face_suggestion_id).where(face_suggestions.c.face_id == "face-1")
+        ).all()
+
+    assert face_row["dismissed_ts"] is not None
+    assert face_row["dismissal_provenance"] == {
+        "workflow": "face-labeling",
+        "surface": "api",
+        "action": "dismiss_false_positive",
+    }
+    assert persisted_suggestions == []
+
+
+def test_face_dismissal_api_rejects_already_assigned_face(tmp_path, monkeypatch):
+    database_url = _database_url(tmp_path, "face-dismiss-assigned.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        _insert_photo(connection, photo_id="photo-1")
+        _insert_person(connection, person_id="person-1", display_name="Jane Doe")
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id="person-1",
+            )
+        )
+
+    client = _authorized_client()
+    response = client.post("/api/v1/faces/face-1/dismissals")
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Face already assigned"}
+
+
+def test_face_dismissal_api_rejects_already_dismissed_face(tmp_path, monkeypatch):
+    database_url = _database_url(tmp_path, "face-dismiss-dismissed.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 5, 6, 12, 0, tzinfo=UTC)
+    with engine.begin() as connection:
+        _insert_photo(connection, photo_id="photo-1")
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id=None,
+                dismissed_ts=now,
+                dismissal_provenance={
+                    "workflow": "face-labeling",
+                    "surface": "api",
+                    "action": "dismiss_false_positive",
+                },
+            )
+        )
+
+    client = _authorized_client()
+    response = client.post("/api/v1/faces/face-1/dismissals")
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Face already dismissed"}
 
 
 def test_face_assignment_api_rejects_unrecognized_face_validation_role(tmp_path, monkeypatch):

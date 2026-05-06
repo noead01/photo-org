@@ -285,6 +285,8 @@ def upgrade() -> None:
         sa.Column("detector_name", sa.String(), nullable=True),
         sa.Column("detector_version", sa.String(), nullable=True),
         sa.Column("provenance", sa.JSON(), nullable=True),
+        sa.Column("dismissed_ts", sa.TIMESTAMP(timezone=True), nullable=True),
+        sa.Column("dismissal_provenance", sa.JSON(), nullable=True),
         sa.Column("created_ts", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
     )
     op.create_index("idx_faces_photo_id", "faces", ["photo_id"], unique=False)

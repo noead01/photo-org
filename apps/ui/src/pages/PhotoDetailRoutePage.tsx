@@ -255,6 +255,27 @@ function applyFaceAssignment(
   };
 }
 
+function applyFaceDismissal(detail: PhotoDetailPayload, faceId: string): PhotoDetailPayload {
+  const nextFaces = detail.faces.filter((face) => face.face_id !== faceId);
+  const nextPeople = Array.from(
+    new Set(
+      nextFaces
+        .map((face) => face.person_id)
+        .filter((value): value is string => value !== null)
+    )
+  );
+
+  return {
+    ...detail,
+    faces: nextFaces,
+    people: nextPeople,
+    metadata: {
+      ...detail.metadata,
+      faces_count: nextFaces.length
+    }
+  };
+}
+
 export function PhotoDetailRoutePage() {
   const location = useLocation();
   const { photoId } = useParams<{ photoId: string }>();
@@ -478,6 +499,11 @@ export function PhotoDetailRoutePage() {
 
   function handleFaceAssigned(faceId: string, personId: string) {
     setDetail((current) => (current ? applyFaceAssignment(current, faceId, personId) : current));
+  }
+
+  function handleFaceDismissed(faceId: string) {
+    setDetail((current) => (current ? applyFaceDismissal(current, faceId) : current));
+    setActiveFaceModalId((current) => (current === faceId ? null : current));
   }
 
   function handlePersonCreated(person: {
@@ -880,6 +906,7 @@ export function PhotoDetailRoutePage() {
         }))}
         onClose={() => setActiveFaceModalId(null)}
         onFaceUpdated={handleFaceAssigned}
+        onFaceDismissed={handleFaceDismissed}
         onPersonCreated={handlePersonCreated}
       />
     </section>
