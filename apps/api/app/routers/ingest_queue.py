@@ -7,6 +7,7 @@ from app.services.face_embedding_backfill import (
     FaceEmbeddingModelUnavailableError,
     reembed_missing_face_embeddings,
 )
+from app.services.face_suggestions import refresh_stale_unassigned_face_suggestions
 from app.services.ingest_queue_processor import process_pending_ingest_queue
 from app.services.storage_source_polling import trigger_storage_source_polling
 
@@ -138,6 +139,48 @@ class ReembedMissingFaceEmbeddingsResponse(BaseModel):
     refreshed_suggestion_scopes: int
 
 
+class RefreshStaleFaceSuggestionsRequest(BaseModel):
+    """Request payload for stale/uncomputed unassigned face-suggestion refresh."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "description": (
+                "Recompute suggestions for unassigned faces with missing snapshots or "
+                "snapshots older than the provided staleness threshold."
+            )
+        }
+    )
+
+    stale_after_minutes: int = Field(
+        default=24 * 60,
+        ge=0,
+        le=60 * 24 * 30,
+        description=(
+            "Face suggestions older than this threshold (minutes) are considered stale."
+        ),
+    )
+    face_limit: int = Field(
+        default=500,
+        ge=1,
+        le=10000,
+        description="Maximum number of unassigned faces to refresh in one call.",
+    )
+    suggestion_limit: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        description="Suggestion depth to persist per refreshed face.",
+    )
+
+
+class RefreshStaleFaceSuggestionsResponse(BaseModel):
+    stale_after_minutes: int
+    suggestion_limit: int
+    requested_face_limit: int
+    refreshed_face_count: int
+    stale_cutoff_ts: str
+
+
 @router.post(
     "/internal/ingest-queue/process",
     summary="Process ingest queue",
@@ -178,6 +221,39 @@ def process_face_suggestion_recompute_queue_endpoint(
         processed=result.processed,
         failed=result.failed,
         retryable_errors=result.retryable_errors,
+    )
+
+
+@router.post(
+    "/internal/face-suggestions/recompute/stale",
+    summary="Recompute stale unassigned face suggestions",
+    description=(
+        "Refresh suggestions for unassigned faces that have never been assessed or "
+        "whose persisted suggestions are older than a configurable age."
+    ),
+    response_model=RefreshStaleFaceSuggestionsResponse,
+    responses={403: {"description": "Worker role required"}},
+)
+def recompute_stale_unassigned_face_suggestions_endpoint(
+    body: RefreshStaleFaceSuggestionsRequest = Body(
+        default_factory=RefreshStaleFaceSuggestionsRequest
+    ),
+    _: None = Depends(require_worker_role),
+    db: Session = Depends(get_db),
+) -> RefreshStaleFaceSuggestionsResponse:
+    result = refresh_stale_unassigned_face_suggestions(
+        db.connection(),
+        stale_after_minutes=body.stale_after_minutes,
+        face_limit=body.face_limit,
+        suggestion_limit=body.suggestion_limit,
+    )
+    db.commit()
+    return RefreshStaleFaceSuggestionsResponse(
+        stale_after_minutes=result.stale_after_minutes,
+        suggestion_limit=result.suggestion_limit,
+        requested_face_limit=result.requested_face_limit,
+        refreshed_face_count=result.refreshed_face_count,
+        stale_cutoff_ts=result.stale_cutoff_ts.isoformat(),
     )
 
 

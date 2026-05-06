@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -90,6 +91,23 @@ def test_face_suggestion_recompute_queue_endpoint_rejects_missing_worker_role(cl
 def test_face_suggestion_recompute_queue_endpoint_rejects_wrong_worker_role(client: TestClient):
     response = client.post(
         "/api/v1/internal/face-suggestions/recompute/process",
+        headers={"X-Worker-Role": "wrong-role"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Worker role required"}
+
+
+def test_recompute_stale_face_suggestions_endpoint_rejects_missing_worker_role(client: TestClient):
+    response = client.post("/api/v1/internal/face-suggestions/recompute/stale")
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Worker role required"}
+
+
+def test_recompute_stale_face_suggestions_endpoint_rejects_wrong_worker_role(client: TestClient):
+    response = client.post(
+        "/api/v1/internal/face-suggestions/recompute/stale",
         headers={"X-Worker-Role": "wrong-role"},
     )
 
@@ -198,6 +216,56 @@ def test_face_suggestion_recompute_queue_endpoint_forwards_limit_with_payload_fi
         "processed": 0,
         "failed": 0,
         "retryable_errors": 0,
+    }
+
+
+def test_recompute_stale_face_suggestions_endpoint_forwards_args(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    captured: dict[str, int] = {}
+
+    class Result:
+        stale_after_minutes = 90
+        suggestion_limit = 4
+        requested_face_limit = 222
+        refreshed_face_count = 17
+        stale_cutoff_ts = datetime(2026, 5, 1, 10, 20, 30, tzinfo=UTC)
+
+    def fake_refresh(connection, *, stale_after_minutes: int, face_limit: int, suggestion_limit: int):
+        del connection
+        captured["stale_after_minutes"] = stale_after_minutes
+        captured["face_limit"] = face_limit
+        captured["suggestion_limit"] = suggestion_limit
+        return Result()
+
+    monkeypatch.setattr(
+        "app.routers.ingest_queue.refresh_stale_unassigned_face_suggestions",
+        fake_refresh,
+    )
+
+    response = client.post(
+        "/api/v1/internal/face-suggestions/recompute/stale",
+        headers={"X-Worker-Role": "ingest-processor"},
+        json={
+            "stale_after_minutes": 90,
+            "face_limit": 222,
+            "suggestion_limit": 4,
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured == {
+        "stale_after_minutes": 90,
+        "face_limit": 222,
+        "suggestion_limit": 4,
+    }
+    assert response.json() == {
+        "stale_after_minutes": 90,
+        "suggestion_limit": 4,
+        "requested_face_limit": 222,
+        "refreshed_face_count": 17,
+        "stale_cutoff_ts": "2026-05-01T10:20:30+00:00",
     }
 
 

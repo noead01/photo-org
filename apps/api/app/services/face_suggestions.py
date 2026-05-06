@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from math import sqrt
 from uuid import uuid4
 
@@ -25,6 +26,15 @@ class _SuggestionCandidate:
     model_version: str
     confirmed_face_count: int
     dispersion_score: float | None
+
+
+@dataclass(frozen=True)
+class StaleUnassignedRefreshResult:
+    stale_after_minutes: int
+    suggestion_limit: int
+    requested_face_limit: int
+    refreshed_face_count: int
+    stale_cutoff_ts: datetime
 
 
 def refresh_face_suggestions_for_person_scope(
@@ -113,6 +123,81 @@ def refresh_face_suggestions_for_people_in_top_rank(
             limit=limit,
         )
     return len(target_face_rows)
+
+
+def refresh_stale_unassigned_face_suggestions(
+    connection: Connection,
+    *,
+    stale_after_minutes: int,
+    face_limit: int,
+    suggestion_limit: int = 5,
+) -> StaleUnassignedRefreshResult:
+    normalized_stale_after_minutes = max(0, stale_after_minutes)
+    normalized_face_limit = max(0, face_limit)
+    normalized_suggestion_limit = max(1, suggestion_limit)
+    stale_cutoff_ts = datetime.now(tz=UTC) - timedelta(
+        minutes=normalized_stale_after_minutes
+    )
+
+    if normalized_face_limit == 0:
+        return StaleUnassignedRefreshResult(
+            stale_after_minutes=normalized_stale_after_minutes,
+            suggestion_limit=normalized_suggestion_limit,
+            requested_face_limit=0,
+            refreshed_face_count=0,
+            stale_cutoff_ts=stale_cutoff_ts,
+        )
+
+    latest_suggestion_snapshot = (
+        select(
+            face_suggestions.c.face_id.label("face_id"),
+            func.max(face_suggestions.c.updated_ts).label("last_suggestion_ts"),
+        )
+        .group_by(face_suggestions.c.face_id)
+        .subquery()
+    )
+
+    target_face_ids = (
+        connection.execute(
+            select(faces.c.face_id)
+            .select_from(
+                faces.outerjoin(
+                    latest_suggestion_snapshot,
+                    latest_suggestion_snapshot.c.face_id == faces.c.face_id,
+                )
+            )
+            .where(
+                faces.c.person_id.is_(None),
+                faces.c.embedding.is_not(None),
+                (
+                    latest_suggestion_snapshot.c.face_id.is_(None)
+                    | (
+                        latest_suggestion_snapshot.c.last_suggestion_ts
+                        <= stale_cutoff_ts
+                    )
+                ),
+            )
+            .order_by(faces.c.face_id.asc())
+            .limit(normalized_face_limit)
+        )
+        .scalars()
+        .all()
+    )
+
+    for face_id in target_face_ids:
+        refresh_face_suggestions_for_face(
+            connection,
+            face_id=str(face_id),
+            limit=normalized_suggestion_limit,
+        )
+
+    return StaleUnassignedRefreshResult(
+        stale_after_minutes=normalized_stale_after_minutes,
+        suggestion_limit=normalized_suggestion_limit,
+        requested_face_limit=normalized_face_limit,
+        refreshed_face_count=len(target_face_ids),
+        stale_cutoff_ts=stale_cutoff_ts,
+    )
 
 
 def refresh_face_suggestions_for_face(
