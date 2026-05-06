@@ -9,6 +9,7 @@ from app.routers.operations import router as operations_router
 from app.routers.people import router as people_router
 from app.routers.photos import router as photos_router
 from app.routers.search import router as search_router
+from app.routers.suggestions import router as suggestions_router
 from app.routers.storage_sources import router as storage_sources_router
 from app.openapi_docs import openapi_yaml_response
 
@@ -45,6 +46,10 @@ def create_app() -> FastAPI:
                 "description": "Search photos using text, filters, and similarity signals.",
             },
             {
+                "name": "suggestions",
+                "description": "Review and confirm face suggestions for unassigned detected faces.",
+            },
+            {
                 "name": "storage-sources",
                 "description": "Register storage roots and manage watched folders.",
             },
@@ -78,6 +83,7 @@ def create_app() -> FastAPI:
     app.include_router(people_router, prefix="/api/v1")
     app.include_router(photos_router, prefix="/api/v1")
     app.include_router(search_router, prefix="/api/v1")
+    app.include_router(suggestions_router, prefix="/api/v1")
     app.include_router(storage_sources_router, prefix="/api/v1")
 
     @app.get("/openapi.yaml", include_in_schema=False)

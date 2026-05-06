@@ -126,6 +126,23 @@ class TestHealthEndpoint:
         assert response.status_code == 200
         assert "Swagger UI" in response.text
 
+    def test_given_openapi_schema_when_fetching_then_documents_cursor_offset_mutual_exclusivity(self):
+        client = TestClient(app)
+
+        response = client.get("/openapi.json")
+
+        assert response.status_code == 200
+        schema = response.json()
+        page_spec = schema["components"]["schemas"]["PageSpec"]
+
+        assert "offset" in page_spec["properties"]
+        offset_schema = page_spec["properties"]["offset"]["anyOf"][0]
+        assert offset_schema["minimum"] == 0
+        assert page_spec["properties"]["offset"]["description"] == (
+            "Zero-based row offset. Mutually exclusive with cursor."
+        )
+        assert page_spec["not"]["required"] == ["cursor", "offset"]
+
     def test_given_allowed_origin_when_cors_preflight_then_returns_allow_origin_header(
         self, monkeypatch
     ):

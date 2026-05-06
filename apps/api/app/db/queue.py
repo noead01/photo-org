@@ -182,17 +182,28 @@ class IngestQueueStore:
     def list_pending(self) -> list[QueueRow]:
         return self.list_by_status("pending")
 
-    def list_processable(self, *, limit: int) -> list[QueueRow]:
+    def list_processable(
+        self,
+        *,
+        limit: int,
+        payload_types: set[str] | None = None,
+    ) -> list[QueueRow]:
         reclaim_before = _processing_lease_cutoff()
         payload_type_priority = case(
             (ingest_queue.c.payload_type == "extracted_photo", 0),
             (ingest_queue.c.payload_type == "ingest_candidate", 1),
             else_=2,
         )
+        payload_filter = (
+            ingest_queue.c.payload_type.in_(sorted(payload_types))
+            if payload_types
+            else True
+        )
         with self._session_factory() as session:
             rows = session.execute(
                 select(ingest_queue)
                 .where(
+                    payload_filter,
                     (ingest_queue.c.status == "pending")
                     | (
                         (ingest_queue.c.status == "processing")

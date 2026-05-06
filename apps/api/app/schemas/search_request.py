@@ -1,6 +1,6 @@
 import math
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import List, Optional, Literal
 
 from app.core.enums import FilesizeRange
@@ -21,6 +21,25 @@ class SortSpec(BaseModel):
 class PageSpec(BaseModel):
     limit: Optional[int] = 50
     cursor: Optional[str] = None
+    offset: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Zero-based row offset. Mutually exclusive with cursor."
+    )
+    model_config = ConfigDict(
+        json_schema_extra={
+            "description": "Pagination options. Provide either cursor or offset, but not both.",
+            "not": {
+                "required": ["cursor", "offset"]
+            }
+        }
+    )
+
+    @model_validator(mode="after")
+    def validate_cursor_offset_exclusivity(self) -> "PageSpec":
+        if self.cursor is not None and self.offset is not None:
+            raise ValueError("page.cursor and page.offset are mutually exclusive")
+        return self
 
 
 class LocationRadiusFilter(BaseModel):

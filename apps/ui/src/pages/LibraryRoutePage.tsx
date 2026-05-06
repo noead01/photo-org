@@ -21,10 +21,10 @@ import { LibrarySearchForm } from "./library/LibrarySearchForm";
 import { LibrarySelectionPanel } from "./library/LibrarySelectionPanel";
 import { resolveLibraryActionState } from "./library/libraryActionBarState";
 import {
-  consumePendingBrowseFocusPhotoId,
-  resolveBrowseReturnState,
+  consumePendingLibraryFocusPhotoId,
+  resolveLibraryReturnState,
   type LibraryViewRouteState
-} from "./browseFocusState";
+} from "./libraryRouteState";
 import { isFuzzyNameMatch, parseLibraryUrlState, validateDateRange, buildLibraryUrlQuery } from "./library/libraryRouteSearchState";
 import {
   createLibrarySelectionState,
@@ -33,7 +33,6 @@ import {
   resolveSelectionScopeCount,
   serializeLibrarySelectionState
 } from "./library/librarySelection";
-import { INVALID_PAGE_MESSAGE, updateCursorByPage } from "./library/pagination";
 import { useRouteRequestState } from "./library/requestLifecycle";
 import { parsePositiveIntParam } from "./library/urlSerialization";
 import {
@@ -65,7 +64,7 @@ const LIBRARY_FILTER_FINGERPRINT = "library:route";
 export function LibraryRoutePage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const initialReturnState = resolveBrowseReturnState(location.state);
+  const initialReturnState = resolveLibraryReturnState(location.state);
   const requestedPage = parsePositiveIntParam(location.search, "page");
   const suppressNextUrlStateSyncRef = useRef(false);
   const applyingParsedUrlStateRef = useRef(false);
@@ -124,11 +123,10 @@ export function LibraryRoutePage() {
       ?? initialStoredViewStateRef.current?.sortDirection
       ?? parsedUrlState.sortDirection
   );
-  const [pageSize, setPageSize] = useState(DEFAULT_SEARCH_PAGE_LIMIT);
-  const [cursorByPage, setCursorByPage] = useState<Record<number, string | null>>(
-    initialReturnState?.libraryViewState?.cursorByPage
-      ?? initialStoredViewStateRef.current?.cursorByPage
-      ?? { 1: null }
+  const [pageSize, setPageSize] = useState(
+    initialReturnState?.libraryViewState?.pageSize
+      ?? initialStoredViewStateRef.current?.pageSize
+      ?? parsedUrlState.pageSize
   );
   const [photos, setPhotos] = useState<LibraryPhoto[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -149,7 +147,7 @@ export function LibraryRoutePage() {
     requestRetry
   } = useRouteRequestState();
   const pendingReturnFocusPhotoIdRef = useRef<string | null>(
-    initialReturnState?.restoreFocusPhotoId ?? consumePendingBrowseFocusPhotoId()
+    initialReturnState?.restoreFocusPhotoId ?? consumePendingLibraryFocusPhotoId()
   );
 
   const dateRangeError = useMemo(() => validateDateRange(fromDate, toDate), [fromDate, toDate]);
@@ -182,12 +180,11 @@ export function LibraryRoutePage() {
   const libraryViewRouteState = useMemo<LibraryViewRouteState>(
     () => ({
       sortDirection,
-      cursorByPage: normalizeCursorByPageState(cursorByPage)
+      pageSize,
+      page: requestedPage
     }),
-    [cursorByPage, sortDirection]
+    [pageSize, requestedPage, sortDirection]
   );
-
-  const cursorForPage = cursorByPage[requestedPage];
 
   function setPage(pageNumber: number, replace = false) {
     const nextParams = new URLSearchParams(location.search);
@@ -206,16 +203,7 @@ export function LibraryRoutePage() {
     }
   }
 
-  function pushWarning(message: string) {
-    setNotifications((current) => [
-      {
-        id: "library-warning",
-        tone: "warning",
-        message
-      },
-      ...current.filter((entry) => entry.id !== "library-warning")
-    ]);
-  }
+  const requestOffset = Math.max(0, (requestedPage - 1) * pageSize);
 
   useEffect(() => {
     let isCanceled = false;
@@ -258,7 +246,6 @@ export function LibraryRoutePage() {
     setCommittedQuery(parsedQuery);
     setFromDate(parsedUrlState.fromDate);
     setToDate(parsedUrlState.toDate);
-    setPageSize(parsedUrlState.pageSize);
     setSelectedPersonNames(parsedUrlState.selectedPersonNames);
     setPersonCertaintyMode(parsedUrlState.personCertaintyMode);
     setSuggestionConfidenceMinDraft(parsedUrlState.suggestionConfidenceMinDraft);
@@ -281,7 +268,7 @@ export function LibraryRoutePage() {
       shouldRestoreInitialViewStateRef.current = false;
     } else {
       setSortDirection(parsedUrlState.sortDirection);
-      setCursorByPage({ 1: null });
+      setPageSize(parsedUrlState.pageSize);
     }
     setPhotos([]);
     setTotalCount(0);
@@ -358,7 +345,7 @@ export function LibraryRoutePage() {
   }, []);
 
   useEffect(() => {
-    const currentRouteState = resolveBrowseReturnState(location.state);
+    const currentRouteState = resolveLibraryReturnState(location.state);
     const currentRouteSelection = currentRouteState?.librarySelection ?? null;
     const currentRouteViewState = currentRouteState?.libraryViewState ?? null;
 
@@ -394,12 +381,6 @@ export function LibraryRoutePage() {
   ]);
 
   useEffect(() => {
-    if (requestedPage > 1 && cursorForPage === undefined) {
-      pushWarning(INVALID_PAGE_MESSAGE);
-      setPage(1, true);
-      return;
-    }
-
     if (dateRangeError || locationError) {
       setPhotos([]);
       setTotalCount(0);
@@ -420,7 +401,7 @@ export function LibraryRoutePage() {
       hasFacesFilter,
       pathHintFilters,
       sortDirection,
-      cursorForPage ?? null,
+      requestOffset,
       pageSize
     )
       .then((payload) => {
@@ -428,19 +409,10 @@ export function LibraryRoutePage() {
           return;
         }
 
-        if (requestedPage > 1 && payload.hits.items.length === 0) {
-          pushWarning(INVALID_PAGE_MESSAGE);
-          setPage(1, true);
-          return;
-        }
-
         setPhotos(payload.hits.items);
         setTotalCount(payload.hits.total);
         setFacetHasFacesCounts(parseHasFacesFacetCounts(payload.facets));
         setFacetPathHintCounts(toPathHintFacetCounts(payload.facets, pathHintFilters));
-        setCursorByPage((current) =>
-          updateCursorByPage(current, requestedPage, cursorForPage ?? null, payload.hits.cursor)
-        );
         completeRequest();
       })
       .catch((caughtError: unknown) => {
@@ -455,7 +427,6 @@ export function LibraryRoutePage() {
     };
   }, [
     committedQuery,
-    cursorForPage,
     dateRangeError,
     fromDate,
     hasFacesFilter,
@@ -463,6 +434,7 @@ export function LibraryRoutePage() {
     locationRadiusFilter,
     pathHintFilters,
     reloadToken,
+    requestOffset,
     requestedPage,
     selectedPersonNames,
     personCertaintyMode,
@@ -563,7 +535,6 @@ export function LibraryRoutePage() {
     }
 
     setCommittedQuery(queryInput.trim());
-    setCursorByPage({ 1: null });
     setPage(1);
   }
 
@@ -577,7 +548,6 @@ export function LibraryRoutePage() {
     setSelectedPersonNames((current) => [...current, displayName]);
     setPersonDraft("");
     setPersonMessage(null);
-    setCursorByPage({ 1: null });
     setPage(1);
   }
 
@@ -603,7 +573,6 @@ export function LibraryRoutePage() {
   function handleRemovePersonFilter(displayName: string) {
     setSelectedPersonNames((current) => current.filter((name) => name !== displayName));
     setPersonMessage(null);
-    setCursorByPage({ 1: null });
     setPage(1);
   }
 
@@ -612,7 +581,6 @@ export function LibraryRoutePage() {
     setLongitudeDraft(String(locationValue.longitude));
     setRadiusDraft(String(Number(locationValue.radiusKm.toFixed(3))));
     setMapMessage(null);
-    setCursorByPage({ 1: null });
     setPage(1);
   }
 
@@ -620,14 +588,12 @@ export function LibraryRoutePage() {
     setLatitudeDraft("");
     setLongitudeDraft("");
     setRadiusDraft("");
-    setCursorByPage({ 1: null });
     setPage(1);
   }
 
   function handleToggleHasFacesFilter(nextValue: boolean) {
     const resolvedValue = hasFacesFilter === nextValue ? null : nextValue;
     setHasFacesFilter(resolvedValue);
-    setCursorByPage({ 1: null });
     setPage(1);
   }
 
@@ -637,7 +603,6 @@ export function LibraryRoutePage() {
     }
 
     setHasFacesFilter(null);
-    setCursorByPage({ 1: null });
     setPage(1);
   }
 
@@ -647,7 +612,6 @@ export function LibraryRoutePage() {
       : normalizePathHintFilters([...pathHintFilters, pathHint]);
 
     setPathHintFilters(nextHints);
-    setCursorByPage({ 1: null });
     setPage(1);
   }
 
@@ -658,7 +622,6 @@ export function LibraryRoutePage() {
     }
 
     setPathHintFilters(nextHints);
-    setCursorByPage({ 1: null });
     setPage(1);
   }
 
@@ -668,23 +631,20 @@ export function LibraryRoutePage() {
     }
 
     setPathHintFilters([]);
-    setCursorByPage({ 1: null });
     setPage(1);
   }
 
   function handleClearFromDate() {
     setFromDate("");
-    setCursorByPage({ 1: null });
     setPage(1);
   }
 
   function handleClearToDate() {
     setToDate("");
-    setCursorByPage({ 1: null });
     setPage(1);
   }
 
-  async function handleSelectPage(pageNumber: number) {
+  function handleSelectPage(pageNumber: number) {
     if (isLoading) {
       return;
     }
@@ -694,53 +654,6 @@ export function LibraryRoutePage() {
       return;
     }
 
-    if (nextPage === 1 || cursorByPage[nextPage] !== undefined) {
-      setPage(nextPage);
-      return;
-    }
-
-    let nextCursorMap: Record<number, string | null> = { ...cursorByPage };
-
-    for (let currentPage = 2; currentPage <= nextPage; currentPage += 1) {
-      if (nextCursorMap[currentPage] !== undefined) {
-        continue;
-      }
-
-      const previousPage = currentPage - 1;
-      const previousCursor = nextCursorMap[previousPage];
-      if (previousCursor === undefined) {
-        pushWarning(INVALID_PAGE_MESSAGE);
-        return;
-      }
-
-      const payload = await fetchLibraryPage(
-        committedQuery,
-        fromDate,
-        toDate,
-        selectedPersonNames,
-        personCertaintyMode,
-        suggestionConfidenceMinDraft,
-        locationRadiusFilter,
-        hasFacesFilter,
-        pathHintFilters,
-        sortDirection,
-        previousCursor,
-        pageSize
-      );
-      nextCursorMap = updateCursorByPage(
-        nextCursorMap,
-        previousPage,
-        previousCursor,
-        payload.hits.cursor
-      );
-
-      if (nextCursorMap[currentPage] === undefined) {
-        pushWarning(INVALID_PAGE_MESSAGE);
-        return;
-      }
-    }
-
-    setCursorByPage((current) => ({ ...current, ...nextCursorMap }));
     setPage(nextPage);
   }
 
@@ -757,19 +670,24 @@ export function LibraryRoutePage() {
         pageSizeOptions={SEARCH_PAGE_LIMIT_OPTIONS}
         onSortDirectionChange={(nextDirection) => {
           setSortDirection(nextDirection);
-          setCursorByPage({ 1: null });
           setPage(1);
         }}
         onPageSizeChange={(nextPageSize) => {
           if (nextPageSize === pageSize) {
             return;
           }
+          const nextPage = resolvePageAfterPageSizeChange(
+            requestedPage,
+            pageSize,
+            nextPageSize
+          );
           setPageSize(nextPageSize);
-          setCursorByPage({ 1: null });
-          setPage(1);
+          window.setTimeout(() => {
+            setPage(nextPage);
+          }, 0);
         }}
         onSelectPage={(pageNumber) => {
-          void handleSelectPage(pageNumber);
+          handleSelectPage(pageNumber);
         }}
       />
 
@@ -806,12 +724,10 @@ export function LibraryRoutePage() {
         onQueryInputChange={setQueryInput}
         onFromDateChange={(value) => {
           setFromDate(value);
-          setCursorByPage({ 1: null });
           setPage(1);
         }}
         onToDateChange={(value) => {
           setToDate(value);
-          setCursorByPage({ 1: null });
           setPage(1);
         }}
         onPersonDraftChange={setPersonDraft}
@@ -819,27 +735,22 @@ export function LibraryRoutePage() {
         onAddPersonByName={handleAddPersonByName}
         onPersonCertaintyModeChange={(value) => {
           setPersonCertaintyMode(value);
-          setCursorByPage({ 1: null });
           setPage(1);
         }}
         onSuggestionConfidenceMinDraftChange={(value) => {
           setSuggestionConfidenceMinDraft(value);
-          setCursorByPage({ 1: null });
           setPage(1);
         }}
         onLatitudeDraftChange={(value) => {
           setLatitudeDraft(value);
-          setCursorByPage({ 1: null });
           setPage(1);
         }}
         onLongitudeDraftChange={(value) => {
           setLongitudeDraft(value);
-          setCursorByPage({ 1: null });
           setPage(1);
         }}
         onRadiusDraftChange={(value) => {
           setRadiusDraft(value);
-          setCursorByPage({ 1: null });
           setPage(1);
         }}
         onMapLocationChange={handleMapLocationChange}
@@ -867,7 +778,6 @@ export function LibraryRoutePage() {
         onClearCommittedQuery={() => {
           setCommittedQuery("");
           setQueryInput("");
-          setCursorByPage({ 1: null });
           setPage(1);
         }}
       />
@@ -958,24 +868,20 @@ function areSelectionRouteStatesEqual(
   return left.selectedPhotoIds.every((photoId, index) => photoId === right.selectedPhotoIds[index]);
 }
 
-function normalizeCursorByPageState(
-  cursorByPage: Record<number, string | null>
-): Record<number, string | null> {
-  const normalized: Record<number, string | null> = {};
-  for (const [pageKey, cursor] of Object.entries(cursorByPage)) {
-    const pageNumber = Number.parseInt(pageKey, 10);
-    if (!Number.isInteger(pageNumber) || pageNumber < 1) {
-      continue;
-    }
-    if (typeof cursor !== "string" && cursor !== null) {
-      continue;
-    }
-    normalized[pageNumber] = cursor;
-  }
-  if (normalized[1] === undefined) {
-    normalized[1] = null;
-  }
-  return normalized;
+function resolvePageAfterPageSizeChange(
+  currentPage: number,
+  currentPageSize: number,
+  nextPageSize: number
+): number {
+  const safeCurrentPage = Number.isInteger(currentPage) && currentPage > 0 ? currentPage : 1;
+  const safeCurrentPageSize = Number.isInteger(currentPageSize) && currentPageSize > 0
+    ? currentPageSize
+    : DEFAULT_SEARCH_PAGE_LIMIT;
+  const safeNextPageSize = Number.isInteger(nextPageSize) && nextPageSize > 0
+    ? nextPageSize
+    : DEFAULT_SEARCH_PAGE_LIMIT;
+  const firstVisibleIndex = (safeCurrentPage - 1) * safeCurrentPageSize;
+  return Math.floor(firstVisibleIndex / safeNextPageSize) + 1;
 }
 
 function areLibraryViewRouteStatesEqual(
@@ -988,21 +894,10 @@ function areLibraryViewRouteStatesEqual(
   if (left.sortDirection !== right.sortDirection) {
     return false;
   }
-
-  const leftCursorEntries = Object.entries(normalizeCursorByPageState(left.cursorByPage)).sort(
-    ([leftPage], [rightPage]) => Number(leftPage) - Number(rightPage)
-  );
-  const rightCursorEntries = Object.entries(normalizeCursorByPageState(right.cursorByPage)).sort(
-    ([leftPage], [rightPage]) => Number(leftPage) - Number(rightPage)
-  );
-  if (leftCursorEntries.length !== rightCursorEntries.length) {
+  if (left.pageSize !== right.pageSize) {
     return false;
   }
-
-  return leftCursorEntries.every(([leftPage, leftCursor], index) => {
-    const [rightPage, rightCursor] = rightCursorEntries[index];
-    return leftPage === rightPage && leftCursor === rightCursor;
-  });
+  return left.page === right.page;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -13,7 +13,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from sqlalchemy import create_engine, insert
+from sqlalchemy import create_engine, insert, select
 from sqlalchemy.orm import Session
 
 from app.migrations import upgrade_database
@@ -115,6 +115,37 @@ def test_location_radius_validation_rejects_non_positive_radius_km():
 def test_location_radius_validation_rejects_non_finite_values(location_radius):
     with pytest.raises(ValidationError):
         SearchFilters(location_radius=location_radius)
+
+
+def test_page_spec_validation_supports_offset_and_rejects_cursor_offset_conflict():
+    page = PageSpec(limit=50, offset=120)
+    assert page.offset == 120
+    assert page.cursor is None
+
+    with pytest.raises(ValidationError) as exc_info:
+        PageSpec(limit=50, cursor="cursor-1", offset=120)
+
+    assert "page.cursor and page.offset are mutually exclusive" in str(exc_info.value)
+
+
+def test_page_spec_offset_pagination_applies_sql_offset_clause(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'page-spec-offset.db'}"
+    upgrade_database(database_url)
+    engine = create_engine(database_url, future=True)
+
+    with Session(engine) as db:
+        repo = PhotosRepository(db)
+        query = select(repo.photos.c.photo_id).where(repo.photos.c.deleted_ts.is_(None))
+
+        paginated_query = repo._apply_pagination(
+            query,
+            PageSpec(limit=25, offset=75),
+            SortSpec(by="shot_ts", dir="desc"),
+        )
+        sql = str(paginated_query.compile(compile_kwargs={"literal_binds": True}))
+
+    assert "OFFSET 75" in sql
+    assert "LIMIT 25" in sql
 
 
 def _seed_search_fixture_catalog(connection) -> None:

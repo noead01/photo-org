@@ -5,7 +5,8 @@ const LIBRARY_VIEW_STATE_KEY_PREFIX = "photo-org:library:view-state:";
 
 export interface StoredLibraryViewState {
   sortDirection: SortDirection;
-  cursorByPage: Record<number, string | null>;
+  page: number;
+  pageSize: number;
 }
 
 function resolveSessionStorage(): Storage | null {
@@ -70,37 +71,25 @@ export function loadLibraryViewState(search: string): StoredLibraryViewState | n
   try {
     const parsed = JSON.parse(rawValue) as {
       sortDirection?: unknown;
-      cursorByPage?: unknown;
+      page?: unknown;
+      pageSize?: unknown;
     };
     if (parsed.sortDirection !== "asc" && parsed.sortDirection !== "desc") {
       return null;
     }
-    if (
-      typeof parsed.cursorByPage !== "object"
-      || parsed.cursorByPage === null
-      || Array.isArray(parsed.cursorByPage)
-    ) {
+    const page = parsed.page;
+    if (typeof page !== "number" || !Number.isInteger(page) || page < 1) {
       return null;
     }
-
-    const cursorByPage: Record<number, string | null> = {};
-    for (const [key, cursor] of Object.entries(parsed.cursorByPage)) {
-      const pageNumber = Number.parseInt(key, 10);
-      if (!Number.isInteger(pageNumber) || pageNumber < 1) {
-        continue;
-      }
-      if (typeof cursor !== "string" && cursor !== null) {
-        continue;
-      }
-      cursorByPage[pageNumber] = cursor;
-    }
-    if (cursorByPage[1] === undefined) {
-      cursorByPage[1] = null;
+    const pageSize = parsed.pageSize;
+    if (typeof pageSize !== "number" || !Number.isInteger(pageSize) || pageSize < 1) {
+      return null;
     }
 
     return {
       sortDirection: parsed.sortDirection,
-      cursorByPage
+      page,
+      pageSize
     };
   } catch {
     return null;

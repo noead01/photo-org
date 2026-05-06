@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { LibraryRoutePage } from "./LibraryRoutePage";
@@ -19,6 +19,14 @@ type SearchResponsePayload = {
         person_id: string | null;
         label_source?: "human_confirmed" | "machine_suggested" | null;
         confidence?: number | null;
+        suggestions?: Array<{
+          person_id: string;
+          display_name: string;
+          rank: number;
+          confidence: number;
+          model_version: string | null;
+          provenance: Record<string, unknown> | null;
+        }>;
       }>;
       thumbnail: {
         mime_type: string;
@@ -235,7 +243,7 @@ describe("LibraryRoutePage", () => {
     expect(screen.queryByText(/\/storage-sources\/1f9a5c89/)).not.toBeInTheDocument();
   });
 
-  it("shows face metrics on cards", async () => {
+  it("shows consolidated face summary on cards", async () => {
     fetchMock.mockImplementation(async (input: string) => {
       if (input === "/api/v1/operations/activity") {
         return {
@@ -247,9 +255,37 @@ describe("LibraryRoutePage", () => {
       const payload = buildPayload(["photo-a"]);
       payload.hits.items[0].faces = [
         { person_id: "person-1", label_source: "human_confirmed", confidence: null },
-        { person_id: "person-1", label_source: "machine_suggested", confidence: 0.91 },
-        { person_id: "person-2", label_source: "machine_suggested", confidence: 0.77 },
-        { person_id: null, label_source: null, confidence: null }
+        { person_id: "person-2", label_source: "human_confirmed", confidence: null },
+        {
+          person_id: null,
+          label_source: null,
+          confidence: null,
+          suggestions: [
+            {
+              person_id: "person-1",
+              display_name: "Alex",
+              rank: 1,
+              confidence: 0.82,
+              model_version: "recognition-v1",
+              provenance: null
+            }
+          ]
+        },
+        {
+          person_id: null,
+          label_source: null,
+          confidence: null,
+          suggestions: [
+            {
+              person_id: "person-2",
+              display_name: "Blair",
+              rank: 1,
+              confidence: 0.79,
+              model_version: "recognition-v1",
+              provenance: null
+            }
+          ]
+        }
       ];
       return {
         ok: true,
@@ -260,15 +296,12 @@ describe("LibraryRoutePage", () => {
     renderLibraryAt("/library");
     expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
 
-    expect(screen.getByText("Faces detected")).toBeInTheDocument();
-    expect(screen.getByText("People assigned (human)")).toBeInTheDocument();
-    expect(screen.getByText("Machine suggestions")).toBeInTheDocument();
-    expect(screen.getByText("4")).toBeInTheDocument();
-    expect(screen.getByText("1")).toBeInTheDocument();
-    expect(screen.getByText("2")).toBeInTheDocument();
+    expect(screen.getByText("Faces detected/assigned: 4/2 - 2 suggestions")).toBeInTheDocument();
+    expect(screen.queryByText("People assigned (human)")).not.toBeInTheDocument();
+    expect(screen.queryByText("Machine suggestions")).not.toBeInTheDocument();
   });
 
-  it("advances to the next cursor-backed page when Next is clicked", async () => {
+  it("advances to the next offset-backed page when Next is clicked", async () => {
     const user = userEvent.setup();
 
     const pageOneIds = Array.from({ length: 60 }, (_, index) => `photo-${index + 1}`);
@@ -296,30 +329,30 @@ describe("LibraryRoutePage", () => {
       }
 
       const requestBody = JSON.parse((init?.body as string | undefined) ?? "{}") as {
-        page?: { cursor?: string | null };
+        page?: { offset?: number };
       };
-      const requestCursor = requestBody.page?.cursor ?? null;
+      const requestOffset = requestBody.page?.offset ?? 0;
 
-      if (requestCursor === "cursor-page-2") {
+      if (requestOffset === 60) {
         return {
           ok: true,
           json: async () => ({
             hits: {
               total: 181,
-              cursor: "cursor-page-3",
+              cursor: null,
               items: buildPayload(pageTwoIds, 181).hits.items
             }
           })
         } as Response;
       }
 
-      if (requestCursor === "cursor-page-3") {
+      if (requestOffset === 120) {
         return {
           ok: true,
           json: async () => ({
             hits: {
               total: 181,
-              cursor: "cursor-page-4",
+              cursor: null,
               items: buildPayload(pageThreeIds, 181).hits.items
             }
           })
@@ -331,7 +364,7 @@ describe("LibraryRoutePage", () => {
         json: async () => ({
           hits: {
             total: 181,
-            cursor: "cursor-page-2",
+            cursor: null,
             items: buildPayload(pageOneIds, 181).hits.items
           }
         })
@@ -363,28 +396,103 @@ describe("LibraryRoutePage", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Page 3" }));
+    const pageThreeButton = await screen.findByRole("button", { name: "Page 3" });
+    await waitFor(() => {
+      expect(pageThreeButton).toHaveAttribute("aria-current", "page");
+    });
+
+    const searchRequestOffsets = fetchMock.mock.calls
+      .filter(([input]) => String(input) === "/api/v1/search")
+      .map(([, init]) => {
+        const parsedBody = JSON.parse((init?.body as string | undefined) ?? "{}") as {
+          page?: { offset?: number };
+        };
+        return parsedBody.page?.offset ?? 0;
+      });
+
+    expect(searchRequestOffsets).toContain(60);
+    expect(searchRequestOffsets).toContain(120);
+  });
+
+  it("jumps directly to a requested page using offset", async () => {
+    const user = userEvent.setup();
+    const pageOneIds = Array.from({ length: 60 }, (_, index) => `photo-${index + 1}`);
+    const pageThreeIds = Array.from({ length: 60 }, (_, index) => `photo-${index + 121}`);
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+
+      if (url === "/api/v1/people") {
+        return {
+          ok: true,
+          json: async () => []
+        } as Response;
+      }
+
+      if (url !== "/api/v1/search") {
+        throw new Error(`Unhandled fetch: ${url}`);
+      }
+
+      const requestBody = JSON.parse((init?.body as string | undefined) ?? "{}") as {
+        page?: { offset?: number };
+      };
+      const requestOffset = requestBody.page?.offset ?? 0;
+      if (requestOffset === 120) {
+        return {
+          ok: true,
+          json: async () => ({
+            hits: {
+              total: 241,
+              cursor: null,
+              items: buildPayload(pageThreeIds, 241).hits.items
+            }
+          })
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          hits: {
+            total: 241,
+            cursor: null,
+            items: buildPayload(pageOneIds, 241).hits.items
+          }
+        })
+      } as Response;
+    });
+
+    renderLibraryAt("/library");
+    expect(await screen.findByText("Showing 60 of 241 photos")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Page 3" }));
     expect(await screen.findByRole("button", { name: "Page 3" })).toHaveAttribute(
       "aria-current",
       "page"
     );
 
-    const searchRequestCursors = fetchMock.mock.calls
+    const searchRequestOffsets = fetchMock.mock.calls
       .filter(([input]) => String(input) === "/api/v1/search")
       .map(([, init]) => {
         const parsedBody = JSON.parse((init?.body as string | undefined) ?? "{}") as {
-          page?: { cursor?: string | null };
+          page?: { offset?: number };
         };
-        return parsedBody.page?.cursor ?? null;
+        return parsedBody.page?.offset ?? 0;
       });
 
-    expect(searchRequestCursors).toContain("cursor-page-2");
-    expect(searchRequestCursors).toContain("cursor-page-3");
+    expect(searchRequestOffsets).toContain(120);
+    expect(searchRequestOffsets.filter((offset) => offset === 120)).toHaveLength(1);
   });
 
   it("updates search page limit when photos-per-page selector changes", async () => {
     const user = userEvent.setup();
 
-    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === "/api/v1/operations/activity") {
         return {
@@ -402,22 +510,48 @@ describe("LibraryRoutePage", () => {
         throw new Error(`Unhandled fetch: ${url}`);
       }
 
+      const requestBody = JSON.parse((init?.body as string | undefined) ?? "{}") as {
+        page?: { offset?: number };
+      };
+      const requestOffset = requestBody.page?.offset ?? 0;
+      if (requestOffset === 60) {
+        return {
+          ok: true,
+          json: async () => ({
+            hits: {
+              total: 121,
+              cursor: null,
+              items: buildPayload(Array.from({ length: 60 }, (_, index) => `photo-${index + 61}`), 121).hits.items
+            }
+          })
+        } as Response;
+      }
+
       return {
         ok: true,
         json: async () => ({
           hits: {
-            total: 3,
+            total: 121,
             cursor: null,
-            items: buildPayload(["photo-a", "photo-b", "photo-c"], 3).hits.items
+            items: buildPayload(Array.from({ length: 60 }, (_, index) => `photo-${index + 1}`), 121).hits.items
           }
         })
       } as Response;
     });
 
     renderLibraryAt("/library");
-    expect(await screen.findByText("Showing 3 of 3 photos")).toBeInTheDocument();
+    expect(await screen.findByText("Showing 60 of 121 photos")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    expect(await screen.findByRole("button", { name: "Page 2" })).toHaveAttribute(
+      "aria-current",
+      "page"
+    );
 
     await user.selectOptions(screen.getByRole("combobox", { name: "Photos per page" }), "24");
+    const pageThreeButton = await screen.findByRole("button", { name: "Page 3" });
+    await waitFor(() => {
+      expect(pageThreeButton).toHaveAttribute("aria-current", "page");
+    });
 
     const searchRequests = fetchMock.mock.calls.filter(([input]) => String(input) === "/api/v1/search");
     const limits = searchRequests.map(([, init]) => {
@@ -455,17 +589,17 @@ describe("LibraryRoutePage", () => {
       }
 
       const requestBody = JSON.parse((init?.body as string | undefined) ?? "{}") as {
-        page?: { cursor?: string | null };
+        page?: { offset?: number };
       };
-      const requestCursor = requestBody.page?.cursor ?? null;
+      const requestOffset = requestBody.page?.offset ?? 0;
 
-      if (requestCursor === "cursor-page-2") {
+      if (requestOffset === 60) {
         return {
           ok: true,
           json: async () => ({
             hits: {
               total: 121,
-              cursor: "cursor-page-3",
+              cursor: null,
               items: buildPayload(pageTwoIds, 121).hits.items
             }
           })
@@ -477,7 +611,7 @@ describe("LibraryRoutePage", () => {
         json: async () => ({
           hits: {
             total: 121,
-            cursor: "cursor-page-2",
+            cursor: null,
             items: buildPayload(pageOneIds, 121).hits.items
           }
         })
@@ -508,7 +642,101 @@ describe("LibraryRoutePage", () => {
     expect(screen.getByRole("checkbox", { name: "Select photo photo-61" })).toBeChecked();
   });
 
-  it("restores a cursor-backed selected page on fresh reload from session storage", async () => {
+  it("keeps selected page size when navigating to detail and back", async () => {
+    const user = userEvent.setup();
+    const pageOneIds = Array.from({ length: 60 }, (_, index) => `photo-${index + 1}`);
+    const pageTwoIds = Array.from({ length: 60 }, (_, index) => `photo-${index + 61}`);
+    const pageThreeIds = Array.from({ length: 24 }, (_, index) => `photo-${index + 49}`);
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+      if (url === "/api/v1/people") {
+        return {
+          ok: true,
+          json: async () => []
+        } as Response;
+      }
+      if (url !== "/api/v1/search") {
+        throw new Error(`Unhandled fetch: ${url}`);
+      }
+
+      const requestBody = JSON.parse((init?.body as string | undefined) ?? "{}") as {
+        page?: { offset?: number };
+      };
+      const requestOffset = requestBody.page?.offset ?? 0;
+
+      if (requestOffset === 60) {
+        return {
+          ok: true,
+          json: async () => ({
+            hits: {
+              total: 121,
+              cursor: null,
+              items: buildPayload(pageTwoIds, 121).hits.items
+            }
+          })
+        } as Response;
+      }
+
+      if (requestOffset === 48) {
+        return {
+          ok: true,
+          json: async () => ({
+            hits: {
+              total: 121,
+              cursor: null,
+              items: buildPayload(pageThreeIds, 121).hits.items
+            }
+          })
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          hits: {
+            total: 121,
+            cursor: null,
+            items: buildPayload(pageOneIds, 121).hits.items
+          }
+        })
+      } as Response;
+    });
+
+    renderLibraryWithDetailAt("/library");
+
+    expect(await screen.findByText("Showing 60 of 121 photos")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    expect(await screen.findByRole("button", { name: "Page 2" })).toHaveAttribute(
+      "aria-current",
+      "page"
+    );
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Photos per page" }), "24");
+    expect(await screen.findByRole("button", { name: "Page 3" })).toHaveAttribute(
+      "aria-current",
+      "page"
+    );
+
+    await user.click(screen.getByRole("link", { name: "Open details for /library/photo-61.jpg" }));
+    expect(await screen.findByRole("heading", { name: "Library test detail", level: 1 })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("link", { name: "Back to library" }));
+
+    expect(await screen.findByRole("button", { name: "Page 3" })).toHaveAttribute(
+      "aria-current",
+      "page"
+    );
+    expect(screen.getByRole("combobox", { name: "Photos per page" })).toHaveValue("24");
+  });
+
+  it("restores a selected page on fresh reload from session storage", async () => {
     const pageOneIds = Array.from({ length: 24 }, (_, index) => `photo-${index + 1}`);
     const pageTwoIds = Array.from({ length: 24 }, (_, index) => `photo-${index + 25}`);
     const initialSearch = "?page=2&pageSize=24&sort=asc";
@@ -517,10 +745,8 @@ describe("LibraryRoutePage", () => {
       buildLibraryViewStateStorageKey(initialSearch),
       JSON.stringify({
         sortDirection: "asc",
-        cursorByPage: {
-          1: null,
-          2: "cursor-page-2"
-        }
+        page: 2,
+        pageSize: 24
       })
     );
 
@@ -543,17 +769,17 @@ describe("LibraryRoutePage", () => {
       }
 
       const requestBody = JSON.parse((init?.body as string | undefined) ?? "{}") as {
-        page?: { cursor?: string | null };
+        page?: { offset?: number };
       };
-      const requestCursor = requestBody.page?.cursor ?? null;
+      const requestOffset = requestBody.page?.offset ?? 0;
 
-      if (requestCursor === "cursor-page-2") {
+      if (requestOffset === 24) {
         return {
           ok: true,
           json: async () => ({
             hits: {
               total: 48,
-              cursor: "cursor-page-3",
+              cursor: null,
               items: buildPayload(pageTwoIds, 48).hits.items
             }
           })
@@ -565,7 +791,7 @@ describe("LibraryRoutePage", () => {
         json: async () => ({
           hits: {
             total: 48,
-            cursor: "cursor-page-2",
+            cursor: null,
             items: buildPayload(pageOneIds, 48).hits.items
           }
         })

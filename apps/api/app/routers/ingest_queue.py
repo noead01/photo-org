@@ -12,6 +12,7 @@ from app.services.storage_source_polling import trigger_storage_source_polling
 
 
 router = APIRouter(tags=["internal-ingest-queue"])
+FACE_SUGGESTION_RECOMPUTE_PAYLOAD_TYPE = "face_suggestion_recompute"
 
 
 class ProcessQueueRequest(BaseModel):
@@ -149,6 +150,30 @@ def process_ingest_queue_endpoint(
     _: None = Depends(require_worker_role),
 ) -> ProcessQueueResponse:
     result = process_pending_ingest_queue(limit=body.limit)
+    return ProcessQueueResponse(
+        processed=result.processed,
+        failed=result.failed,
+        retryable_errors=result.retryable_errors,
+    )
+
+
+@router.post(
+    "/internal/face-suggestions/recompute/process",
+    summary="Process face suggestion recompute queue",
+    description=(
+        "Claim and process pending face suggestion recompute queue items only."
+    ),
+    response_model=ProcessQueueResponse,
+    responses={403: {"description": "Worker role required"}},
+)
+def process_face_suggestion_recompute_queue_endpoint(
+    body: ProcessQueueRequest = Body(default_factory=ProcessQueueRequest),
+    _: None = Depends(require_worker_role),
+) -> ProcessQueueResponse:
+    result = process_pending_ingest_queue(
+        limit=body.limit,
+        payload_types={FACE_SUGGESTION_RECOMPUTE_PAYLOAD_TYPE},
+    )
     return ProcessQueueResponse(
         processed=result.processed,
         failed=result.failed,

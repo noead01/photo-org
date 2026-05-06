@@ -10,7 +10,8 @@ interface LibraryPhotoGridProps {
   onTogglePhotoSelection: (photoId: string) => void;
   libraryViewRouteState: {
     sortDirection: "asc" | "desc";
-    cursorByPage: Record<number, string | null>;
+    page: number;
+    pageSize: number;
   };
 }
 
@@ -37,30 +38,44 @@ function formatDisplayPath(path: string): string {
 
 function summarizePhotoFaces(photo: LibraryPhoto): {
   detectedFaces: number;
-  humanAssignedPeople: number;
-  machineSuggestedFaces: number;
+  assignedFaces: number;
+  suggestedFaces: number;
 } {
   const faces = photo.faces ?? [];
-  const humanPeople = new Set<string>();
-  let machineSuggestedFaces = 0;
+  let assignedFaces = 0;
+  let suggestedFaces = 0;
 
   faces.forEach((face) => {
-    if (face.label_source === "human_confirmed" && face.person_id) {
-      humanPeople.add(face.person_id);
+    if (face.person_id) {
+      assignedFaces += 1;
     }
-    if (
-      (face.label_source === "machine_suggested" && typeof face.confidence === "number") ||
-      (face.suggestions?.length ?? 0) > 0
-    ) {
-      machineSuggestedFaces += 1;
+
+    if (face.person_id === null) {
+      const hasSuggestions =
+        (face.suggestions?.length ?? 0) > 0
+        || (face.label_source === "machine_suggested" && typeof face.confidence === "number");
+      if (hasSuggestions) {
+        suggestedFaces += 1;
+      }
     }
   });
 
   return {
     detectedFaces: faces.length,
-    humanAssignedPeople: humanPeople.size,
-    machineSuggestedFaces
+    assignedFaces,
+    suggestedFaces
   };
+}
+
+function formatFaceSummary(
+  metrics: ReturnType<typeof summarizePhotoFaces>
+): string {
+  const base = `Faces detected/assigned: ${metrics.detectedFaces}/${metrics.assignedFaces}`;
+  if (metrics.suggestedFaces <= 0) {
+    return base;
+  }
+  const noun = metrics.suggestedFaces === 1 ? "suggestion" : "suggestions";
+  return `${base} - ${metrics.suggestedFaces} ${noun}`;
 }
 
 export function LibraryPhotoGrid({
@@ -124,20 +139,7 @@ export function LibraryPhotoGrid({
               <p className="browse-path" title={photo.path}>
                 {displayPath}
               </p>
-              <dl className="browse-card-metrics">
-                <div>
-                  <dt>Faces detected</dt>
-                  <dd>{metrics.detectedFaces}</dd>
-                </div>
-                <div>
-                  <dt>People assigned (human)</dt>
-                  <dd>{metrics.humanAssignedPeople}</dd>
-                </div>
-                <div>
-                  <dt>Machine suggestions</dt>
-                  <dd>{metrics.machineSuggestedFaces}</dd>
-                </div>
-              </dl>
+              <p className="browse-card-summary">{formatFaceSummary(metrics)}</p>
             </div>
           </li>
         );

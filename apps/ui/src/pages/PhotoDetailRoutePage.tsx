@@ -9,8 +9,8 @@ import {
 import { PhotoFaceAssignmentModal } from "./PhotoFaceAssignmentModal";
 import {
   resolveDetailReturnState,
-  setPendingBrowseFocusPhotoId
-} from "./browseFocusState";
+  setPendingLibraryFocusPhotoId
+} from "./libraryRouteState";
 
 type PhotoDetailPayload = {
   photo_id: string;
@@ -565,7 +565,7 @@ export function PhotoDetailRoutePage() {
           }
           onClick={() => {
             if (backLinkFocusPhotoId) {
-              setPendingBrowseFocusPhotoId(backLinkFocusPhotoId);
+              setPendingLibraryFocusPhotoId(backLinkFocusPhotoId);
             }
           }}
         >

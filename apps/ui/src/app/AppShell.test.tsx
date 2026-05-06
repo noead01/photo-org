@@ -66,7 +66,10 @@ function expectShellContextText(text: string) {
 }
 
 const ROUTES_WITH_PRIMARY_PAGE_FEEDBACK = PRIMARY_ROUTE_DEFINITIONS.filter(
-  (route) => route.key !== "library" && route.key !== "labeling"
+  (route) =>
+    route.key !== "library" &&
+    route.key !== "labeling" &&
+    route.key !== "suggestions"
 );
 
 describe("App shell", () => {

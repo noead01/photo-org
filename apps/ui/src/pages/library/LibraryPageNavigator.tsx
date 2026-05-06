@@ -21,6 +21,14 @@ export function LibraryPageNavigator({
   onSelectPage,
   onPageSizeChange
 }: LibraryPageNavigatorProps) {
+  const normalizedLastKnownPage = Number.isInteger(lastKnownPage) && lastKnownPage > 0
+    ? lastKnownPage
+    : 1;
+  const normalizedRequestedPage = Number.isInteger(requestedPage) && requestedPage > 0
+    ? requestedPage
+    : 1;
+  const clampedRequestedPage = Math.min(normalizedRequestedPage, normalizedLastKnownPage);
+
   return (
     <div className="browse-pagination" aria-label="Pagination controls">
       <label className="browse-page-size-control">
@@ -42,10 +50,10 @@ export function LibraryPageNavigator({
         nextLabel=">"
         breakLabel="..."
         breakAriaLabels={{ backward: "Jump backward", forward: "Jump forward" }}
-        pageCount={lastKnownPage}
+        pageCount={normalizedLastKnownPage}
         pageRangeDisplayed={3}
         marginPagesDisplayed={1}
-        forcePage={Math.max(0, requestedPage - 1)}
+        forcePage={clampedRequestedPage - 1}
         disableInitialCallback
         renderOnZeroPageCount={null}
         onClick={(clickEvent) => {

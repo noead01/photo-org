@@ -397,6 +397,7 @@ def _enqueue_face_suggestion_recompute(
                 "person_id": person_id,
                 "reason": "human_confirmed_event",
                 "debounce_until_ts": debounce_until_ts,
+                "top_rank_cutoff": 3,
             }
             idempotency_key = f"face_suggestion_recompute:{person_id}"
             enqueue_result = queue_store.enqueue_in_transaction(
