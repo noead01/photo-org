@@ -75,4 +75,22 @@ describe("LibraryPageNavigator", () => {
     );
     expect(screen.getByRole("button", { name: "Next page" })).toHaveAttribute("aria-disabled", "true");
   });
+
+  it("clamps out-of-range requested pages to the known page count", () => {
+    render(
+      <LibraryPageNavigator
+        requestedPage={7}
+        lastKnownPage={1}
+        canGoPrevious={false}
+        canGoNext={false}
+        pageSize={60}
+        pageSizeOptions={[24, 60, 120]}
+        onSelectPage={vi.fn()}
+        onPageSizeChange={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Page 1" })).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByRole("button", { name: "Page 7" })).not.toBeInTheDocument();
+  });
 });

@@ -550,6 +550,20 @@ def test_process_pending_queue_handles_face_suggestion_recompute_payload(tmp_pat
                 model_version="nearest-neighbor-cosine-v1",
             )
         )
+        connection.execute(
+            insert(face_suggestions).values(
+                face_suggestion_id="stale-suggestion",
+                face_id="face-source",
+                person_id="person-1",
+                rank=1,
+                confidence=0.1,
+                centroid_distance=0.9,
+                knn_distance=0.9,
+                representation_version=1,
+                scoring_version="hybrid-v0",
+                model_version="legacy-v0",
+            )
+        )
 
     queue_store.enqueue(
         payload_type="face_suggestion_recompute",
@@ -557,6 +571,7 @@ def test_process_pending_queue_handles_face_suggestion_recompute_payload(tmp_pat
             "person_id": "person-1",
             "reason": "human_confirmed_event",
             "debounce_until_ts": "2026-05-03T12:00:00+00:00",
+            "top_rank_cutoff": 3,
         },
         idempotency_key="face_suggestion_recompute:person-1",
     )

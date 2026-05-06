@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from math import sqrt
 from uuid import uuid4
 
-from sqlalchemy import delete, insert, select
+from sqlalchemy import delete, func, insert, select
 from sqlalchemy.engine import Connection
 
 from photoorg_db_schema import FACE_LABEL_SOURCE_HUMAN_CONFIRMED
@@ -52,6 +52,67 @@ def refresh_face_suggestions_for_person_scope(
             face_id=str(face_id),
             limit=limit,
         )
+
+
+def refresh_face_suggestions_for_people_in_top_rank(
+    connection: Connection,
+    *,
+    person_ids: list[str],
+    top_rank_cutoff: int = 3,
+    limit: int = 5,
+) -> int:
+    normalized_person_ids = sorted({person_id for person_id in person_ids if person_id})
+    if not normalized_person_ids:
+        return 0
+    if top_rank_cutoff < 1:
+        return 0
+
+    ranked_suggestions = (
+        select(
+            face_suggestions.c.face_id.label("face_id"),
+            face_suggestions.c.person_id.label("person_id"),
+            func.row_number()
+            .over(
+                partition_by=face_suggestions.c.face_id,
+                order_by=(
+                    face_suggestions.c.rank.asc(),
+                    face_suggestions.c.confidence.desc(),
+                    face_suggestions.c.person_id.asc(),
+                ),
+            )
+            .label("suggestion_rank"),
+        )
+        .subquery()
+    )
+    target_face_rows = (
+        connection.execute(
+            select(ranked_suggestions.c.face_id)
+            .select_from(
+                ranked_suggestions.join(
+                    faces,
+                    faces.c.face_id == ranked_suggestions.c.face_id,
+                )
+            )
+            .where(
+                ranked_suggestions.c.suggestion_rank <= top_rank_cutoff,
+                ranked_suggestions.c.person_id.in_(normalized_person_ids),
+                faces.c.person_id.is_(None),
+                faces.c.embedding.is_not(None),
+            )
+            .distinct()
+            .order_by(ranked_suggestions.c.face_id.asc())
+        )
+        .scalars()
+        .all()
+    )
+
+    for face_id in target_face_rows:
+        refresh_face_suggestions_for_face(
+            connection,
+            face_id=str(face_id),
+            limit=limit,
+        )
+    return len(target_face_rows)
 
 
 def refresh_face_suggestions_for_face(

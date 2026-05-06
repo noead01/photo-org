@@ -715,7 +715,9 @@ class PhotosRepository:
 
     def _apply_pagination(self, query: Select, page: PageSpec, sort: SortSpec) -> Select:
         """Apply pagination to the query."""
-        if page.cursor:
+        if page.offset is not None:
+            query = query.offset(page.offset)
+        elif page.cursor:
             from app.core.pagination import decode_cursor
             last_ts, last_pid = decode_cursor(page.cursor)
 

@@ -26,7 +26,7 @@ export async function fetchLibraryPage(
   hasFaces: boolean | null,
   pathHints: string[],
   sortDirection: SortDirection,
-  cursor: string | null,
+  offset: number,
   pageLimit: number
 ): Promise<SearchResponsePayload> {
   const searchFilters = buildSearchFilters(
@@ -54,7 +54,7 @@ export async function fetchLibraryPage(
       },
       page: {
         limit: pageLimit,
-        cursor
+        offset
       }
     })
   });

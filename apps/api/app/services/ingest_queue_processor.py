@@ -20,7 +20,9 @@ from app.processing.ingest_persistence import (
     upsert_photo,
     upsert_source_photo,
 )
-from app.services.face_suggestions import refresh_face_suggestions_for_person_scope
+from app.services.face_suggestions import (
+    refresh_face_suggestions_for_people_in_top_rank,
+)
 from app.services.file_reconciliation import activate_observed_file
 from app.services.ingest_extraction_worker import CandidateFileMissingError, process_candidate_payload
 from app.services.person_representations import refresh_person_representation
@@ -44,10 +46,11 @@ def process_pending_ingest_queue(
     database_url: str | Path | None = None,
     *,
     limit: int = 100,
+    payload_types: set[str] | None = None,
     face_detector=None,
 ) -> ProcessQueueResult:
     queue_store = IngestQueueStore(database_url)
-    processable_rows = queue_store.list_processable(limit=limit)
+    processable_rows = queue_store.list_processable(limit=limit, payload_types=payload_types)
     result = ProcessQueueResult()
 
     if not processable_rows:
@@ -269,11 +272,30 @@ def _process_claimed_row(
     detector,
 ) -> tuple[bool | None, str | None]:
     if claimed_row.payload_type == "face_suggestion_recompute":
-        person_id = str(claimed_row.payload_json["person_id"])
-        refresh_person_representation(connection, person_id=person_id)
-        refresh_face_suggestions_for_person_scope(
+        payload_json = (
+            claimed_row.payload_json if isinstance(claimed_row.payload_json, dict) else {}
+        )
+        payload_person_ids = payload_json.get("person_ids")
+        if isinstance(payload_person_ids, list):
+            person_ids = [str(person_id) for person_id in payload_person_ids if str(person_id)]
+        else:
+            person_id = payload_json.get("person_id")
+            person_ids = [str(person_id)] if person_id else []
+
+        top_rank_cutoff_raw = payload_json.get("top_rank_cutoff", 3)
+        try:
+            top_rank_cutoff = int(top_rank_cutoff_raw)
+        except (TypeError, ValueError):
+            top_rank_cutoff = 3
+        top_rank_cutoff = max(1, min(top_rank_cutoff, 10))
+
+        for person_id in sorted(set(person_ids)):
+            refresh_person_representation(connection, person_id=person_id)
+
+        refresh_face_suggestions_for_people_in_top_rank(
             connection,
-            person_id=person_id,
+            person_ids=person_ids,
+            top_rank_cutoff=top_rank_cutoff,
             limit=5,
         )
         return None, None

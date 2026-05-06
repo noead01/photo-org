@@ -4,6 +4,128 @@
   background: #f4f7fb;
 }
 
+.suggestions-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.suggestions-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.suggestions-header p {
+  margin: 0.3rem 0 0;
+  color: #334155;
+}
+
+.suggestions-header-actions button {
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 0.45rem;
+  padding: 0.45rem 0.7rem;
+  font: inherit;
+}
+
+.suggestions-header-actions button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.suggestions-grid {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  gap: 0.8rem;
+}
+
+.suggestions-card {
+  border: 1px solid #dbe4ee;
+  border-radius: 0.65rem;
+  background: #fff;
+  overflow: hidden;
+}
+
+.suggestions-thumbnail-shell {
+  aspect-ratio: 4 / 3;
+  background: #e2e8f0;
+}
+
+.suggestions-thumbnail {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.suggestions-thumbnail-placeholder {
+  display: grid;
+  place-items: center;
+  color: #475569;
+  font-size: 0.85rem;
+}
+
+.suggestions-card-body {
+  padding: 0.65rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.suggestions-path {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #1e293b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggestions-face-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.suggestions-face-list label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.88rem;
+  color: #0f172a;
+}
+
+.suggestions-pagination {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.suggestions-pagination button {
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 0.45rem;
+  padding: 0.3rem 0.55rem;
+  font: inherit;
+}
+
+.suggestions-pagination button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.suggestions-empty {
+  margin: 0;
+  color: #334155;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -549,28 +671,10 @@ body {
   justify-content: flex-end;
 }
 
-.browse-card-body dl {
-  margin: 0;
-  display: grid;
-  gap: 0.25rem;
-}
-
-.browse-card-body dl div {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.browse-card-body dt {
-  font-size: 0.74rem;
-  color: #475569;
-}
-
-.browse-card-body dd {
+.browse-card-summary {
   margin: 0;
   font-size: 0.74rem;
   color: #0f172a;
-  text-align: right;
 }
 
 .library-face-panel {

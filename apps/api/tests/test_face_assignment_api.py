@@ -164,6 +164,7 @@ def test_face_assignment_api_enqueues_face_suggestion_recompute_after_human_assi
     assert recompute_rows[0]["status"] == "pending"
     assert recompute_rows[0]["payload_json"]["person_id"] == "person-1"
     assert recompute_rows[0]["payload_json"]["reason"] == "human_confirmed_event"
+    assert recompute_rows[0]["payload_json"]["top_rank_cutoff"] == 3
     assert "debounce_until_ts" in recompute_rows[0]["payload_json"]
 
 

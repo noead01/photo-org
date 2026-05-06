@@ -1,0 +1,282 @@
+from __future__ import annotations
+
+from math import ceil
+
+from sqlalchemy import case, func, select
+from sqlalchemy.engine import Connection
+
+from app.services.face_assignment import (
+    FaceAlreadyAssignedError,
+    FaceNotFoundError,
+    PersonNotFoundError,
+    assign_face_to_person,
+)
+from app.storage import face_suggestions, faces, people, photos
+
+
+SUGGESTION_SKIP_FACE_NOT_FOUND = "face_not_found"
+SUGGESTION_SKIP_ALREADY_ASSIGNED = "already_assigned"
+SUGGESTION_SKIP_NO_TOP_SUGGESTION = "no_top_suggestion"
+SUGGESTION_SKIP_SUGGESTED_PERSON_NOT_FOUND = "suggested_person_not_found"
+
+
+def _top_suggestion_subquery():
+    ranked = (
+        select(
+            face_suggestions.c.face_id.label("face_id"),
+            face_suggestions.c.person_id.label("person_id"),
+            face_suggestions.c.confidence.label("confidence"),
+            func.row_number()
+            .over(
+                partition_by=face_suggestions.c.face_id,
+                order_by=(
+                    face_suggestions.c.rank.asc(),
+                    face_suggestions.c.confidence.desc(),
+                    face_suggestions.c.person_id.asc(),
+                ),
+            )
+            .label("suggestion_rank"),
+        )
+        .subquery()
+    )
+    return (
+        select(
+            ranked.c.face_id,
+            ranked.c.person_id,
+            ranked.c.confidence,
+        )
+        .where(ranked.c.suggestion_rank == 1)
+        .subquery()
+    )
+
+
+def list_unassigned_face_suggestion_photos(
+    connection: Connection,
+    *,
+    page: int,
+    page_size: int,
+) -> dict[str, object]:
+    top_suggestion = _top_suggestion_subquery()
+    eligible_photo_ids = (
+        select(faces.c.photo_id)
+        .select_from(
+            faces.join(top_suggestion, top_suggestion.c.face_id == faces.c.face_id).join(
+                photos, photos.c.photo_id == faces.c.photo_id
+            )
+        )
+        .where(
+            faces.c.person_id.is_(None),
+            photos.c.deleted_ts.is_(None),
+        )
+        .distinct()
+        .subquery()
+    )
+
+    total_items = int(
+        connection.execute(select(func.count()).select_from(eligible_photo_ids)).scalar_one()
+    )
+    total_pages = ceil(total_items / page_size) if total_items > 0 else 0
+
+    photo_rows = (
+        connection.execute(
+            select(
+                photos.c.photo_id,
+                photos.c.path,
+                photos.c.thumbnail_jpeg,
+                photos.c.thumbnail_mime_type,
+                photos.c.thumbnail_width,
+                photos.c.thumbnail_height,
+                photos.c.shot_ts,
+            )
+            .select_from(photos.join(eligible_photo_ids, eligible_photo_ids.c.photo_id == photos.c.photo_id))
+            .order_by(
+                case((photos.c.shot_ts.is_(None), 1), else_=0).asc(),
+                photos.c.shot_ts.desc(),
+                photos.c.photo_id.desc(),
+            )
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        .mappings()
+        .all()
+    )
+
+    photo_ids = [str(row["photo_id"]) for row in photo_rows]
+    if not photo_ids:
+        return {
+            "page": {
+                "page": page,
+                "page_size": page_size,
+                "total_items": total_items,
+                "total_pages": total_pages,
+            },
+            "items": [],
+        }
+
+    face_rows = (
+        connection.execute(
+            select(
+                faces.c.photo_id,
+                faces.c.face_id,
+                faces.c.bbox_x,
+                faces.c.bbox_y,
+                faces.c.bbox_w,
+                faces.c.bbox_h,
+                top_suggestion.c.person_id.label("suggested_person_id"),
+                top_suggestion.c.confidence.label("suggested_confidence"),
+                people.c.display_name.label("suggested_display_name"),
+            )
+            .select_from(
+                faces.join(top_suggestion, top_suggestion.c.face_id == faces.c.face_id).join(
+                    people, people.c.person_id == top_suggestion.c.person_id
+                )
+            )
+            .where(
+                faces.c.photo_id.in_(photo_ids),
+                faces.c.person_id.is_(None),
+            )
+            .order_by(
+                faces.c.photo_id.asc(),
+                faces.c.face_id.asc(),
+            )
+        )
+        .mappings()
+        .all()
+    )
+
+    face_map: dict[str, list[dict[str, object]]] = {photo_id: [] for photo_id in photo_ids}
+    for row in face_rows:
+        photo_id = str(row["photo_id"])
+        face_map.setdefault(photo_id, []).append(
+            {
+                "face_id": str(row["face_id"]),
+                "bbox_x": row["bbox_x"],
+                "bbox_y": row["bbox_y"],
+                "bbox_w": row["bbox_w"],
+                "bbox_h": row["bbox_h"],
+                "top_suggestion": {
+                    "person_id": str(row["suggested_person_id"]),
+                    "display_name": str(row["suggested_display_name"]),
+                    "confidence": float(row["suggested_confidence"]),
+                },
+            }
+        )
+
+    items: list[dict[str, object]] = []
+    for row in photo_rows:
+        photo_id = str(row["photo_id"])
+        suggestions_for_photo = face_map.get(photo_id, [])
+        if not suggestions_for_photo:
+            continue
+
+        thumbnail = None
+        thumbnail_jpeg = row["thumbnail_jpeg"]
+        thumbnail_mime_type = row["thumbnail_mime_type"]
+        thumbnail_width = row["thumbnail_width"]
+        thumbnail_height = row["thumbnail_height"]
+        if thumbnail_jpeg and thumbnail_mime_type and thumbnail_width and thumbnail_height:
+            import base64
+
+            thumbnail = {
+                "mime_type": thumbnail_mime_type,
+                "width": int(thumbnail_width),
+                "height": int(thumbnail_height),
+                "data_base64": base64.b64encode(thumbnail_jpeg).decode("ascii"),
+            }
+
+        items.append(
+            {
+                "photo_id": photo_id,
+                "path": str(row["path"]),
+                "thumbnail": thumbnail,
+                "faces": suggestions_for_photo,
+            }
+        )
+
+    return {
+        "page": {
+            "page": page,
+            "page_size": page_size,
+            "total_items": total_items,
+            "total_pages": total_pages,
+        },
+        "items": items,
+    }
+
+
+def confirm_top_face_suggestions(
+    connection: Connection,
+    *,
+    face_ids: list[str],
+) -> dict[str, object]:
+    assigned: list[dict[str, str]] = []
+    skipped: list[dict[str, str]] = []
+
+    seen: set[str] = set()
+    unique_face_ids = [face_id for face_id in face_ids if face_id and not (face_id in seen or seen.add(face_id))]
+
+    for face_id in unique_face_ids:
+        face_row = (
+            connection.execute(
+                select(
+                    faces.c.face_id,
+                    faces.c.photo_id,
+                    faces.c.person_id,
+                ).where(faces.c.face_id == face_id)
+            )
+            .mappings()
+            .first()
+        )
+        if face_row is None:
+            skipped.append({"face_id": face_id, "reason": SUGGESTION_SKIP_FACE_NOT_FOUND})
+            continue
+
+        if face_row["person_id"] is not None:
+            skipped.append({"face_id": face_id, "reason": SUGGESTION_SKIP_ALREADY_ASSIGNED})
+            continue
+
+        top_suggestion_row = (
+            connection.execute(
+                select(face_suggestions.c.person_id)
+                .where(face_suggestions.c.face_id == face_id)
+                .order_by(
+                    face_suggestions.c.rank.asc(),
+                    face_suggestions.c.confidence.desc(),
+                    face_suggestions.c.person_id.asc(),
+                )
+                .limit(1)
+            )
+            .mappings()
+            .first()
+        )
+        if top_suggestion_row is None:
+            skipped.append({"face_id": face_id, "reason": SUGGESTION_SKIP_NO_TOP_SUGGESTION})
+            continue
+
+        suggested_person_id = str(top_suggestion_row["person_id"])
+        try:
+            assignment = assign_face_to_person(
+                connection,
+                face_id=face_id,
+                person_id=suggested_person_id,
+            )
+            assigned.append(
+                {
+                    "face_id": str(assignment["face_id"]),
+                    "photo_id": str(assignment["photo_id"]),
+                    "person_id": str(assignment["person_id"]),
+                }
+            )
+        except FaceNotFoundError:
+            skipped.append({"face_id": face_id, "reason": SUGGESTION_SKIP_FACE_NOT_FOUND})
+        except FaceAlreadyAssignedError:
+            skipped.append({"face_id": face_id, "reason": SUGGESTION_SKIP_ALREADY_ASSIGNED})
+        except PersonNotFoundError:
+            skipped.append(
+                {"face_id": face_id, "reason": SUGGESTION_SKIP_SUGGESTED_PERSON_NOT_FOUND}
+            )
+
+    return {
+        "assigned": assigned,
+        "skipped": skipped,
+    }

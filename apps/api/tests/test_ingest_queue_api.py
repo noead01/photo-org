@@ -80,6 +80,23 @@ def test_process_queue_endpoint_rejects_wrong_worker_role(client: TestClient):
     assert response.json() == {"detail": "Worker role required"}
 
 
+def test_face_suggestion_recompute_queue_endpoint_rejects_missing_worker_role(client: TestClient):
+    response = client.post("/api/v1/internal/face-suggestions/recompute/process")
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Worker role required"}
+
+
+def test_face_suggestion_recompute_queue_endpoint_rejects_wrong_worker_role(client: TestClient):
+    response = client.post(
+        "/api/v1/internal/face-suggestions/recompute/process",
+        headers={"X-Worker-Role": "wrong-role"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Worker role required"}
+
+
 def test_poll_storage_sources_endpoint_rejects_missing_worker_role(client: TestClient):
     response = client.post("/api/v1/internal/storage-sources/poll")
 
@@ -133,6 +150,50 @@ def test_process_queue_endpoint_forwards_limit_to_processor(
 
     assert response.status_code == 200
     assert captured == {"limit": 7}
+    assert response.json() == {
+        "processed": 0,
+        "failed": 0,
+        "retryable_errors": 0,
+    }
+
+
+def test_face_suggestion_recompute_queue_endpoint_forwards_limit_with_payload_filter(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    captured: dict[str, object] = {}
+
+    def fake_process_pending_ingest_queue(
+        *,
+        limit: int = 100,
+        payload_types: set[str] | None = None,
+    ):
+        captured["limit"] = limit
+        captured["payload_types"] = payload_types
+
+        class Result:
+            processed = 0
+            failed = 0
+            retryable_errors = 0
+
+        return Result()
+
+    monkeypatch.setattr(
+        "app.routers.ingest_queue.process_pending_ingest_queue",
+        fake_process_pending_ingest_queue,
+    )
+
+    response = client.post(
+        "/api/v1/internal/face-suggestions/recompute/process",
+        headers={"X-Worker-Role": "ingest-processor"},
+        json={"limit": 11},
+    )
+
+    assert response.status_code == 200
+    assert captured == {
+        "limit": 11,
+        "payload_types": {"face_suggestion_recompute"},
+    }
     assert response.json() == {
         "processed": 0,
         "failed": 0,

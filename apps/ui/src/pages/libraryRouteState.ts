@@ -6,10 +6,11 @@ import type { SortDirection } from "./library/libraryRouteTypes";
 
 export interface LibraryViewRouteState {
   sortDirection: SortDirection;
-  cursorByPage: Record<number, string | null>;
+  page: number;
+  pageSize: number;
 }
 
-export interface BrowseReturnState {
+export interface LibraryReturnState {
   restoreFocusPhotoId?: string;
   librarySelection?: LibrarySelectionRouteState;
   libraryViewState?: LibraryViewRouteState;
@@ -22,15 +23,15 @@ export interface DetailReturnState {
   libraryViewState?: LibraryViewRouteState;
 }
 
-let pendingBrowseFocusPhotoId: string | null = null;
+let pendingLibraryFocusPhotoId: string | null = null;
 
-export function setPendingBrowseFocusPhotoId(photoId: string): void {
-  pendingBrowseFocusPhotoId = photoId;
+export function setPendingLibraryFocusPhotoId(photoId: string): void {
+  pendingLibraryFocusPhotoId = photoId;
 }
 
-export function consumePendingBrowseFocusPhotoId(): string | null {
-  const photoId = pendingBrowseFocusPhotoId;
-  pendingBrowseFocusPhotoId = null;
+export function consumePendingLibraryFocusPhotoId(): string | null {
+  const photoId = pendingLibraryFocusPhotoId;
+  pendingLibraryFocusPhotoId = null;
   return photoId;
 }
 
@@ -38,15 +39,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-export function resolveBrowseReturnState(state: unknown): BrowseReturnState | null {
+export function resolveLibraryReturnState(state: unknown): LibraryReturnState | null {
   if (!isRecord(state)) {
     return null;
   }
 
   const restoreFocusPhotoId = state.restoreFocusPhotoId;
-  const librarySelection = parseLibrarySelectionRouteState(
-    state.librarySelection ?? state.browseSelection
-  );
+  const librarySelection = parseLibrarySelectionRouteState(state.librarySelection);
   const libraryViewState = parseLibraryViewRouteState(state.libraryViewState);
   const hasRestoreFocusPhotoId =
     typeof restoreFocusPhotoId === "string" && restoreFocusPhotoId.length > 0;
@@ -70,15 +69,11 @@ export function resolveDetailReturnState(state: unknown): DetailReturnState {
   const returnState: DetailReturnState = {};
   if (typeof state.returnToLibrarySearch === "string") {
     returnState.returnToLibrarySearch = state.returnToLibrarySearch;
-  } else if (typeof state.returnToBrowseSearch === "string") {
-    returnState.returnToLibrarySearch = state.returnToBrowseSearch;
   }
   if (typeof state.returnFocusPhotoId === "string" && state.returnFocusPhotoId.length > 0) {
     returnState.returnFocusPhotoId = state.returnFocusPhotoId;
   }
-  const librarySelection = parseLibrarySelectionRouteState(
-    state.librarySelection ?? state.browseSelection
-  );
+  const librarySelection = parseLibrarySelectionRouteState(state.librarySelection);
   if (librarySelection) {
     returnState.librarySelection = librarySelection;
   }
@@ -100,29 +95,19 @@ function parseLibraryViewRouteState(value: unknown): LibraryViewRouteState | nul
     return null;
   }
 
-  const cursorByPageValue = value.cursorByPage;
-  if (!isRecord(cursorByPageValue)) {
+  const pageValue = value.page;
+  if (typeof pageValue !== "number" || !Number.isInteger(pageValue) || pageValue < 1) {
     return null;
   }
 
-  const cursorByPage: Record<number, string | null> = {};
-  for (const [key, cursor] of Object.entries(cursorByPageValue)) {
-    const pageNumber = Number.parseInt(key, 10);
-    if (!Number.isInteger(pageNumber) || pageNumber < 1) {
-      return null;
-    }
-    if (typeof cursor !== "string" && cursor !== null) {
-      return null;
-    }
-    cursorByPage[pageNumber] = cursor;
-  }
-
-  if (cursorByPage[1] === undefined) {
-    cursorByPage[1] = null;
+  const pageSizeValue = value.pageSize;
+  if (typeof pageSizeValue !== "number" || !Number.isInteger(pageSizeValue) || pageSizeValue < 1) {
+    return null;
   }
 
   return {
     sortDirection,
-    cursorByPage
+    page: pageValue,
+    pageSize: pageSizeValue,
   };
 }
