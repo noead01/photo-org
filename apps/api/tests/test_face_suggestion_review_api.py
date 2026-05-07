@@ -186,6 +186,13 @@ def test_face_suggestion_review_list_returns_paginated_unassigned_faces_with_top
         "person_id": "person-1",
         "display_name": "Alex",
         "confidence": 0.97,
+        "rank": 1,
+    }
+    assert payload["items"][0]["faces"][0]["suggestions"][0] == {
+        "person_id": "person-1",
+        "display_name": "Alex",
+        "confidence": 0.97,
+        "rank": 1,
     }
     assert payload["items"][0]["faces"][0]["bbox_space_width"] == 4000
     assert payload["items"][0]["faces"][0]["bbox_space_height"] == 3000
@@ -213,6 +220,27 @@ def test_face_suggestion_review_list_returns_paginated_unassigned_faces_with_top
     assert len(filtered_payload["items"]) == 1
     assert filtered_payload["items"][0]["photo_id"] == "photo-1"
     assert [face["face_id"] for face in filtered_payload["items"][0]["faces"]] == ["face-1"]
+
+    response_excluded = client.get(
+        "/api/v1/suggestions/faces",
+        params={
+            "page": 1,
+            "page_size": 24,
+            "excluded_person_ids": ["person-2"],
+        },
+    )
+    assert response_excluded.status_code == 200
+    excluded_payload = response_excluded.json()
+    assert excluded_payload["page"] == {
+        "page": 1,
+        "page_size": 24,
+        "total_items": 2,
+        "total_pages": 1,
+    }
+    assert excluded_payload["items"][0]["photo_id"] == "photo-1"
+    assert [face["face_id"] for face in excluded_payload["items"][0]["faces"]] == ["face-1"]
+    assert excluded_payload["items"][1]["photo_id"] == "photo-2"
+    assert [face["face_id"] for face in excluded_payload["items"][1]["faces"]] == ["face-3"]
 
 
 def test_face_suggestion_review_list_omits_dismissed_faces(tmp_path, monkeypatch):
@@ -364,6 +392,81 @@ def test_face_suggestion_review_confirmation_assigns_selected_faces_to_top_sugge
 
     assert person_face_1 == "person-1"
     assert person_face_2 is None
+
+
+def test_face_suggestion_review_confirmation_assigns_selected_dropdown_person(
+    tmp_path,
+    monkeypatch,
+):
+    client = _authorized_client(tmp_path, monkeypatch, "face-suggestion-review-confirm-selected.db")
+
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'face-suggestion-review-confirm-selected.db'}", future=True
+    )
+    with engine.begin() as connection:
+        _insert_person(connection, person_id="person-1", display_name="Alex")
+        _insert_person(connection, person_id="person-2", display_name="Blair")
+        _insert_photo(
+            connection,
+            photo_id="photo-1",
+            path="/photos/1.jpg",
+            shot_ts=datetime(2026, 5, 5, 11, 0, tzinfo=UTC),
+        )
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id=None,
+            )
+        )
+        connection.execute(
+            insert(face_suggestions),
+            [
+                {
+                    "face_suggestion_id": "s1",
+                    "face_id": "face-1",
+                    "person_id": "person-1",
+                    "rank": 1,
+                    "confidence": 0.93,
+                    "centroid_distance": 0.07,
+                    "knn_distance": 0.07,
+                    "representation_version": 2,
+                    "scoring_version": "hybrid-v1",
+                    "model_version": "recognition-v1",
+                },
+                {
+                    "face_suggestion_id": "s2",
+                    "face_id": "face-1",
+                    "person_id": "person-2",
+                    "rank": 2,
+                    "confidence": 0.89,
+                    "centroid_distance": 0.11,
+                    "knn_distance": 0.11,
+                    "representation_version": 2,
+                    "scoring_version": "hybrid-v1",
+                    "model_version": "recognition-v1",
+                },
+            ],
+        )
+
+    response = client.post(
+        "/api/v1/suggestions/confirmations",
+        json={
+            "face_ids": ["face-1"],
+            "assignments": [{"face_id": "face-1", "person_id": "person-2"}],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["assigned"] == [
+        {
+            "face_id": "face-1",
+            "photo_id": "photo-1",
+            "person_id": "person-2",
+        }
+    ]
+    assert payload["skipped"] == []
 
 
 def test_face_suggestion_review_confirmation_requires_face_validation_role(tmp_path, monkeypatch):

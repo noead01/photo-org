@@ -101,6 +101,19 @@ function mapDismissalError(status: number, detail: string | null): string {
   return `Dismissal request failed (${status}).`;
 }
 
+function mapUnknownIdentityError(status: number, detail: string | null): string {
+  if (status === 403) {
+    return "You do not have permission to assign faces.";
+  }
+  if (status === 404) {
+    return detail ?? "Face no longer exists.";
+  }
+  if (status === 409) {
+    return detail ?? "Face assignment could not be applied.";
+  }
+  return `Unknown-identity request failed (${status}).`;
+}
+
 async function readErrorDetail(response: Response): Promise<string | null> {
   try {
     const payload = (await response.json()) as { detail?: unknown };
@@ -353,6 +366,44 @@ export function PhotoFaceAssignmentModal({
     }
   }
 
+  async function markUnknownHumanIdentity() {
+    if (!face || face.person_id !== null || isSubmitting) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/v1/faces/${face.face_id}/unknown-identities`, {
+        method: "POST",
+        headers: {
+          "X-Face-Validation-Role": "contributor"
+        }
+      });
+
+      if (!response.ok) {
+        const detail = await readErrorDetail(response);
+        setError(mapUnknownIdentityError(response.status, detail));
+        return;
+      }
+
+      const payload = (await response.json()) as { person_id?: unknown };
+      const personId = typeof payload.person_id === "string" ? payload.person_id : "";
+      if (!personId) {
+        setError("Unknown-identity response was missing person information.");
+        return;
+      }
+
+      onFaceUpdated(face.face_id, personId);
+      onClose();
+    } catch {
+      setError("Could not mark face as unknown person.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   if (!isOpen || !face) {
     return null;
   }
@@ -416,14 +467,24 @@ export function PhotoFaceAssignmentModal({
               </button>
             </div>
             {face.person_id === null ? (
-              <button
-                type="button"
-                className="face-assignment-modal-dismiss"
-                onClick={() => void dismissFalsePositive()}
-                disabled={isBusy}
-              >
-                Discard false positive
-              </button>
+              <div className="face-assignment-modal-unlabeled-actions">
+                <button
+                  type="button"
+                  className="face-assignment-modal-unknown"
+                  onClick={() => void markUnknownHumanIdentity()}
+                  disabled={isBusy}
+                >
+                  Mark human face, name unknown
+                </button>
+                <button
+                  type="button"
+                  className="face-assignment-modal-dismiss"
+                  onClick={() => void dismissFalsePositive()}
+                  disabled={isBusy}
+                >
+                  Discard false positive
+                </button>
+              </div>
             ) : null}
 
             <section className="face-assignment-modal-suggestions" aria-label="Suggested names">

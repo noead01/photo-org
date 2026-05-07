@@ -60,6 +60,38 @@ describe("FaceAssignmentControls", () => {
     expect(screen.getByLabelText("Assign face 2")).toBeInTheDocument();
   });
 
+  it("supports assigning an unlabeled face as unknown human identity", async () => {
+    const user = userEvent.setup();
+    const onAssigned = vi.fn();
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ face_id: "face-1", photo_id: "photo-1", person_id: "unknown-person" })
+    } as Response);
+
+    render(
+      <FaceAssignmentControls
+        faces={[{ face_id: "face-1", person_id: null }]}
+        people={[{ person_id: "person-1", display_name: "Inez" }]}
+        onAssigned={onAssigned}
+        onCorrected={onCorrected}
+      />
+    );
+
+    await user.selectOptions(screen.getByLabelText("Assign face 1"), "__unknown_person__");
+
+    await waitFor(() => {
+      expect(onAssigned).toHaveBeenCalledWith("face-1", "unknown-person");
+    });
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/faces/face-1/unknown-identities", {
+      method: "POST",
+      headers: {
+        "X-Face-Validation-Role": "contributor"
+      }
+    });
+  });
+
   it("shows deterministic inline 403 error", async () => {
     const user = userEvent.setup();
 

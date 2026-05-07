@@ -27,6 +27,7 @@ class TopFaceSuggestionResponse(BaseModel):
     person_id: str
     display_name: str
     confidence: float
+    rank: int | None = None
 
 
 class SuggestedUnassignedFaceResponse(BaseModel):
@@ -38,6 +39,7 @@ class SuggestedUnassignedFaceResponse(BaseModel):
     bbox_space_width: int | None = None
     bbox_space_height: int | None = None
     top_suggestion: TopFaceSuggestionResponse
+    suggestions: list[TopFaceSuggestionResponse] = Field(default_factory=list)
 
 
 class SuggestionReviewPhotoResponse(BaseModel):
@@ -59,6 +61,11 @@ class SuggestionReviewListResponse(BaseModel):
     items: list[SuggestionReviewPhotoResponse]
 
 
+class SuggestionSelectedAssignmentRequest(BaseModel):
+    face_id: str
+    person_id: str
+
+
 class SuggestionConfirmFacesRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
@@ -67,6 +74,7 @@ class SuggestionConfirmFacesRequest(BaseModel):
     )
 
     face_ids: list[str] = Field(default_factory=list, max_length=500)
+    assignments: list[SuggestionSelectedAssignmentRequest] = Field(default_factory=list, max_length=500)
 
 
 class SuggestedFaceAssignmentResponse(BaseModel):
@@ -95,6 +103,7 @@ def list_suggestion_review_faces_endpoint(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 24,
     min_confidence: Annotated[float, Query(ge=0, le=1)] = 0,
+    excluded_person_ids: Annotated[list[str] | None, Query()] = None,
     db: Session = Depends(get_db),
 ) -> SuggestionReviewListResponse:
     result = list_unassigned_face_suggestion_photos(
@@ -102,6 +111,7 @@ def list_suggestion_review_faces_endpoint(
         page=page,
         page_size=page_size,
         min_confidence=min_confidence,
+        excluded_person_ids=excluded_person_ids,
     )
     return SuggestionReviewListResponse.model_validate(result)
 
@@ -124,6 +134,10 @@ def confirm_suggestion_faces_endpoint(
     result = confirm_top_face_suggestions(
         db.connection(),
         face_ids=body.face_ids,
+        selected_assignments=[
+            {"face_id": assignment.face_id, "person_id": assignment.person_id}
+            for assignment in body.assignments
+        ],
     )
     db.commit()
     return SuggestionConfirmFacesResponse.model_validate(result)

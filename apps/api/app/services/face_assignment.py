@@ -13,6 +13,7 @@ from photoorg_db_schema import (
 )
 
 from app.db.queue import IngestQueueStore
+from app.services.people import get_or_create_unknown_person
 from app.services.recognition_policy import resolve_prediction_metadata
 from app.storage import face_labels, face_suggestions, faces, people
 
@@ -43,6 +44,30 @@ class FaceAlreadyAssignedToPersonError(RuntimeError):
 
 class FaceAssignedToDifferentPersonError(RuntimeError):
     pass
+
+
+def assign_face_to_unknown_person(
+    connection: Connection,
+    *,
+    face_id: str,
+) -> dict[str, str]:
+    row = _face_row(connection, face_id)
+    if row is None:
+        raise FaceNotFoundError("Face not found")
+    if row["person_id"] is not None:
+        raise FaceAlreadyAssignedError("Face already assigned")
+    if row["dismissed_ts"] is not None:
+        raise FaceAlreadyDismissedError("Face already dismissed")
+
+    unknown_person = get_or_create_unknown_person(
+        connection,
+        now=datetime.now(UTC),
+    )
+    return assign_face_to_person(
+        connection,
+        face_id=face_id,
+        person_id=str(unknown_person["person_id"]),
+    )
 
 
 def assign_face_to_person(
