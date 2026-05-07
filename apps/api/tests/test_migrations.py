@@ -188,6 +188,44 @@ def test_upgrade_database_enforces_faces_person_fk_constraint(tmp_path):
             )
 
 
+def test_upgrade_database_adds_face_dismissal_columns_to_existing_schema(tmp_path):
+    from app.migrations import upgrade_database
+
+    database_url = f"sqlite:///{tmp_path / 'face-dismissal-upgrade.db'}"
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE faces (
+                face_id VARCHAR(36) PRIMARY KEY,
+                photo_id VARCHAR(36) NOT NULL,
+                person_id VARCHAR(36),
+                bbox_x INTEGER,
+                bbox_y INTEGER,
+                bbox_w INTEGER,
+                bbox_h INTEGER,
+                bitmap BLOB,
+                embedding JSON,
+                detector_name VARCHAR,
+                detector_version VARCHAR,
+                provenance JSON,
+                created_ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.exec_driver_sql("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
+        connection.exec_driver_sql(
+            "INSERT INTO alembic_version (version_num) VALUES ('20260321_000001')"
+        )
+
+    upgrade_database(database_url)
+
+    with engine.connect() as connection:
+        columns = {column["name"] for column in inspect(connection).get_columns("faces")}
+
+    assert {"dismissed_ts", "dismissal_provenance"} <= columns
+
+
 def test_upgrade_database_creates_ingest_queue_table(tmp_path):
     from app.migrations import upgrade_database
 
