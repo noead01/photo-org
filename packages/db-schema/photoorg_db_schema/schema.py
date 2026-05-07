@@ -195,6 +195,8 @@ faces = Table(
     Column("detector_name", String),
     Column("detector_version", String),
     Column("provenance", JSON()),
+    Column("dismissed_ts", TIMESTAMP(timezone=True)),
+    Column("dismissal_provenance", JSON()),
     Column("created_ts", TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")),
 )
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from math import sqrt
 from uuid import uuid4
 
@@ -9,10 +10,13 @@ from sqlalchemy.engine import Connection
 
 from photoorg_db_schema import FACE_LABEL_SOURCE_HUMAN_CONFIRMED
 
+from app.services.face_candidates import lookup_nearest_neighbor_candidates
+from app.services.recognition_policy import resolve_prediction_metadata
 from app.storage import face_labels, face_suggestions, faces, person_representations
 
 
 SCORING_VERSION = "hybrid-v1"
+LIVE_SCORING_VERSION = "nearest-neighbor-live-v1"
 
 
 @dataclass(frozen=True)
@@ -25,6 +29,85 @@ class _SuggestionCandidate:
     model_version: str
     confirmed_face_count: int
     dispersion_score: float | None
+
+
+@dataclass(frozen=True)
+class StaleUnassignedRefreshResult:
+    stale_after_minutes: int
+    suggestion_limit: int
+    requested_face_limit: int
+    refreshed_face_count: int
+    stale_cutoff_ts: datetime
+
+
+def persist_face_suggestions_from_live_candidates(
+    connection: Connection,
+    *,
+    face_id: str,
+    candidates: list[dict[str, object]],
+    model_version: str,
+    limit: int = 5,
+) -> int:
+    source_row = (
+        connection.execute(
+            select(faces.c.face_id, faces.c.person_id).where(faces.c.face_id == face_id)
+        )
+        .mappings()
+        .first()
+    )
+    if source_row is None:
+        return 0
+    if source_row["person_id"] is not None:
+        _delete_face_suggestions(connection, face_id=face_id)
+        return 0
+
+    normalized_candidates: list[dict[str, object]] = []
+    for candidate in candidates[: max(0, limit)]:
+        person_id = candidate.get("person_id")
+        if not isinstance(person_id, str) or not person_id:
+            continue
+        confidence = candidate.get("confidence")
+        distance = candidate.get("distance")
+        try:
+            confidence_value = float(confidence)
+            distance_value = float(distance) if distance is not None else None
+        except (TypeError, ValueError):
+            continue
+        normalized_candidates.append(
+            {
+                "person_id": person_id,
+                "confidence": min(1.0, max(0.0, confidence_value)),
+                "distance": distance_value,
+                "matched_face_id": (
+                    str(candidate.get("matched_face_id"))
+                    if candidate.get("matched_face_id") is not None
+                    else None
+                ),
+            }
+        )
+
+    _delete_face_suggestions(connection, face_id=face_id)
+    for rank, candidate in enumerate(normalized_candidates, start=1):
+        connection.execute(
+            insert(face_suggestions).values(
+                face_suggestion_id=str(uuid4()),
+                face_id=face_id,
+                person_id=candidate["person_id"],
+                rank=rank,
+                confidence=candidate["confidence"],
+                centroid_distance=candidate["distance"],
+                knn_distance=candidate["distance"],
+                representation_version=1,
+                scoring_version=LIVE_SCORING_VERSION,
+                model_version=model_version,
+                provenance={
+                    "source": "live-candidate-lookup",
+                    "matched_face_id": candidate["matched_face_id"],
+                    "distance": candidate["distance"],
+                },
+            )
+        )
+    return len(normalized_candidates)
 
 
 def refresh_face_suggestions_for_person_scope(
@@ -115,6 +198,81 @@ def refresh_face_suggestions_for_people_in_top_rank(
     return len(target_face_rows)
 
 
+def refresh_stale_unassigned_face_suggestions(
+    connection: Connection,
+    *,
+    stale_after_minutes: int,
+    face_limit: int,
+    suggestion_limit: int = 5,
+) -> StaleUnassignedRefreshResult:
+    normalized_stale_after_minutes = max(0, stale_after_minutes)
+    normalized_face_limit = max(0, face_limit)
+    normalized_suggestion_limit = max(1, suggestion_limit)
+    stale_cutoff_ts = datetime.now(tz=UTC) - timedelta(
+        minutes=normalized_stale_after_minutes
+    )
+
+    if normalized_face_limit == 0:
+        return StaleUnassignedRefreshResult(
+            stale_after_minutes=normalized_stale_after_minutes,
+            suggestion_limit=normalized_suggestion_limit,
+            requested_face_limit=0,
+            refreshed_face_count=0,
+            stale_cutoff_ts=stale_cutoff_ts,
+        )
+
+    latest_suggestion_snapshot = (
+        select(
+            face_suggestions.c.face_id.label("face_id"),
+            func.max(face_suggestions.c.updated_ts).label("last_suggestion_ts"),
+        )
+        .group_by(face_suggestions.c.face_id)
+        .subquery()
+    )
+
+    target_face_ids = (
+        connection.execute(
+            select(faces.c.face_id)
+            .select_from(
+                faces.outerjoin(
+                    latest_suggestion_snapshot,
+                    latest_suggestion_snapshot.c.face_id == faces.c.face_id,
+                )
+            )
+            .where(
+                faces.c.person_id.is_(None),
+                faces.c.embedding.is_not(None),
+                (
+                    latest_suggestion_snapshot.c.face_id.is_(None)
+                    | (
+                        latest_suggestion_snapshot.c.last_suggestion_ts
+                        <= stale_cutoff_ts
+                    )
+                ),
+            )
+            .order_by(faces.c.face_id.asc())
+            .limit(normalized_face_limit)
+        )
+        .scalars()
+        .all()
+    )
+
+    for face_id in target_face_ids:
+        refresh_face_suggestions_for_face(
+            connection,
+            face_id=str(face_id),
+            limit=normalized_suggestion_limit,
+        )
+
+    return StaleUnassignedRefreshResult(
+        stale_after_minutes=normalized_stale_after_minutes,
+        suggestion_limit=normalized_suggestion_limit,
+        requested_face_limit=normalized_face_limit,
+        refreshed_face_count=len(target_face_ids),
+        stale_cutoff_ts=stale_cutoff_ts,
+    )
+
+
 def refresh_face_suggestions_for_face(
     connection: Connection,
     *,
@@ -140,73 +298,23 @@ def refresh_face_suggestions_for_face(
     if source_embedding is None:
         _delete_face_suggestions(connection, face_id=face_id)
         return
-
-    representations = _load_person_representations(connection)
-    if not representations:
-        _delete_face_suggestions(connection, face_id=face_id)
-        return
-    person_ids = [representation["person_id"] for representation in representations]
-    best_knn_distance = _load_best_knn_distance_by_person(
+    result = lookup_nearest_neighbor_candidates(
         connection,
-        source_embedding=source_embedding,
-        person_ids=person_ids,
+        face_id=face_id,
+        limit=limit,
+        enforce_min_confidence=False,
     )
-
-    ranked: list[_SuggestionCandidate] = []
-    for representation in representations:
-        centroid_distance = _cosine_distance(
-            source_embedding,
-            representation["centroid_embedding"],
-        )
-        if centroid_distance is None:
-            continue
-        person_id = representation["person_id"]
-        knn_distance = best_knn_distance.get(person_id)
-        if knn_distance is None:
-            continue
-        confidence = _combine_confidence(
-            centroid_distance=centroid_distance,
-            knn_distance=knn_distance,
-            confirmed_face_count=representation["confirmed_face_count"],
-            dispersion_score=representation["dispersion_score"],
-        )
-        ranked.append(
-            _SuggestionCandidate(
-                person_id=person_id,
-                confidence=confidence,
-                centroid_distance=centroid_distance,
-                knn_distance=knn_distance,
-                representation_version=representation["representation_version"],
-                model_version=representation["model_version"],
-                confirmed_face_count=representation["confirmed_face_count"],
-                dispersion_score=representation["dispersion_score"],
-            )
-        )
-
-    ranked.sort(key=lambda item: (-item.confidence, item.person_id))
-    top_ranked = ranked[:limit]
-
-    _delete_face_suggestions(connection, face_id=face_id)
-    for rank, candidate in enumerate(top_ranked, start=1):
-        connection.execute(
-            insert(face_suggestions).values(
-                face_suggestion_id=str(uuid4()),
-                face_id=face_id,
-                person_id=candidate.person_id,
-                rank=rank,
-                confidence=candidate.confidence,
-                centroid_distance=candidate.centroid_distance,
-                knn_distance=candidate.knn_distance,
-                representation_version=candidate.representation_version,
-                scoring_version=SCORING_VERSION,
-                model_version=candidate.model_version,
-                provenance={
-                    "scoring_version": SCORING_VERSION,
-                    "confirmed_face_count": candidate.confirmed_face_count,
-                    "dispersion_score": candidate.dispersion_score,
-                },
-            )
-        )
+    candidates = result.get("candidates")
+    if not isinstance(candidates, list):
+        candidates = []
+    model_version = resolve_prediction_metadata()["model_version"]
+    persist_face_suggestions_from_live_candidates(
+        connection,
+        face_id=face_id,
+        candidates=candidates,
+        model_version=model_version,
+        limit=limit,
+    )
 
 
 def _delete_face_suggestions(connection: Connection, *, face_id: str) -> None:

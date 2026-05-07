@@ -275,6 +275,67 @@ def test_photo_detail_api_exposes_ranked_face_suggestions(tmp_path, monkeypatch)
     ]
 
 
+def test_photo_detail_api_omits_dismissed_faces_and_recomputes_active_face_count(
+    tmp_path, monkeypatch
+):
+    database_url = f"sqlite:///{tmp_path / 'photo-detail-api-dismissed-faces.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 5, 6, 12, 0, tzinfo=UTC)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(photos).values(
+                photo_id="photo-1",
+                sha256="sha-1",
+                created_ts=now,
+                updated_ts=now,
+                path="/photos/photo-1.jpg",
+                filesize=1024,
+                ext="jpg",
+                faces_count=2,
+            )
+        )
+        connection.execute(
+            insert(faces).values(
+                face_id="face-active",
+                photo_id="photo-1",
+                person_id=None,
+                bbox_x=10,
+                bbox_y=20,
+                bbox_w=30,
+                bbox_h=40,
+            )
+        )
+        connection.execute(
+            insert(faces).values(
+                face_id="face-dismissed",
+                photo_id="photo-1",
+                person_id=None,
+                bbox_x=50,
+                bbox_y=60,
+                bbox_w=70,
+                bbox_h=80,
+                dismissed_ts=now,
+                dismissal_provenance={
+                    "workflow": "face-labeling",
+                    "surface": "api",
+                    "action": "dismiss_false_positive",
+                },
+            )
+        )
+
+    client = TestClient(app)
+    response = client.get("/api/v1/photos/photo-1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [face["face_id"] for face in payload["faces"]] == ["face-active"]
+    assert payload["metadata"]["faces_count"] == 1
+
+
 def test_photo_detail_api_allows_missing_shot_timestamp(tmp_path, monkeypatch):
     database_url = f"sqlite:///{tmp_path / 'photo-detail-api-null-shot-ts.db'}"
     upgrade_database(database_url)

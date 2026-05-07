@@ -39,6 +39,7 @@ interface PhotoFaceAssignmentModalProps {
   people: FaceAssignmentModalPerson[];
   onClose: () => void;
   onFaceUpdated: (faceId: string, personId: string) => void;
+  onFaceDismissed: (faceId: string) => void;
   onPersonCreated: (person: FaceAssignmentModalPerson) => void;
 }
 
@@ -85,6 +86,19 @@ function mapCorrectionError(status: number, detail: string | null): string {
     return detail ?? "Face correction could not be applied.";
   }
   return `Correction request failed (${status}).`;
+}
+
+function mapDismissalError(status: number, detail: string | null): string {
+  if (status === 403) {
+    return "You do not have permission to discard faces.";
+  }
+  if (status === 404) {
+    return detail ?? "Face no longer exists.";
+  }
+  if (status === 409) {
+    return detail ?? "Face dismissal could not be applied.";
+  }
+  return `Dismissal request failed (${status}).`;
 }
 
 async function readErrorDetail(response: Response): Promise<string | null> {
@@ -149,6 +163,7 @@ export function PhotoFaceAssignmentModal({
   people,
   onClose,
   onFaceUpdated,
+  onFaceDismissed,
   onPersonCreated
 }: PhotoFaceAssignmentModalProps) {
   const [draft, setDraft] = useState("");
@@ -307,6 +322,37 @@ export function PhotoFaceAssignmentModal({
     }
   }
 
+  async function dismissFalsePositive() {
+    if (!face || face.person_id !== null || isSubmitting) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/v1/faces/${face.face_id}/dismissals`, {
+        method: "POST",
+        headers: {
+          "X-Face-Validation-Role": "contributor"
+        }
+      });
+
+      if (!response.ok) {
+        const detail = await readErrorDetail(response);
+        setError(mapDismissalError(response.status, detail));
+        return;
+      }
+
+      onFaceDismissed(face.face_id);
+      onClose();
+    } catch {
+      setError("Could not discard face.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   if (!isOpen || !face) {
     return null;
   }
@@ -369,6 +415,16 @@ export function PhotoFaceAssignmentModal({
                 {createCandidate ? `Create and assign "${createCandidate}"` : "Save and close"}
               </button>
             </div>
+            {face.person_id === null ? (
+              <button
+                type="button"
+                className="face-assignment-modal-dismiss"
+                onClick={() => void dismissFalsePositive()}
+                disabled={isBusy}
+              >
+                Discard false positive
+              </button>
+            ) : null}
 
             <section className="face-assignment-modal-suggestions" aria-label="Suggested names">
               <h4>Suggested names</h4>

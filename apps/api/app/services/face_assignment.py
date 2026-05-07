@@ -14,7 +14,7 @@ from photoorg_db_schema import (
 
 from app.db.queue import IngestQueueStore
 from app.services.recognition_policy import resolve_prediction_metadata
-from app.storage import face_labels, faces, people
+from app.storage import face_labels, face_suggestions, faces, people
 
 
 class FaceNotFoundError(LookupError):
@@ -26,6 +26,10 @@ class PersonNotFoundError(LookupError):
 
 
 class FaceAlreadyAssignedError(RuntimeError):
+    pass
+
+
+class FaceAlreadyDismissedError(RuntimeError):
     pass
 
 
@@ -183,6 +187,54 @@ def confirm_face_assignment(
     }
 
 
+def dismiss_false_positive_face(
+    connection: Connection,
+    *,
+    face_id: str,
+) -> dict[str, str]:
+    row = _face_row(connection, face_id)
+    if row is None:
+        raise FaceNotFoundError("Face not found")
+    if row["person_id"] is not None:
+        raise FaceAlreadyAssignedError("Face already assigned")
+    if row["dismissed_ts"] is not None:
+        raise FaceAlreadyDismissedError("Face already dismissed")
+
+    dismissed_ts = datetime.now(UTC)
+    result = connection.execute(
+        update(faces)
+        .where(
+            faces.c.face_id == face_id,
+            faces.c.person_id.is_(None),
+            faces.c.dismissed_ts.is_(None),
+        )
+        .values(
+            dismissed_ts=dismissed_ts,
+            dismissal_provenance={
+                "workflow": "face-labeling",
+                "surface": "api",
+                "action": "dismiss_false_positive",
+            },
+        )
+    )
+    if result.rowcount != 1:
+        refreshed_row = _face_row(connection, face_id)
+        if refreshed_row is None:
+            raise FaceNotFoundError("Face not found")
+        if refreshed_row["person_id"] is not None:
+            raise FaceAlreadyAssignedError("Face already assigned")
+        if refreshed_row["dismissed_ts"] is not None:
+            raise FaceAlreadyDismissedError("Face already dismissed")
+        raise RuntimeError("Face dismissal changed; retry request")
+
+    connection.execute(delete(face_suggestions).where(face_suggestions.c.face_id == face_id))
+    return {
+        "face_id": str(row["face_id"]),
+        "photo_id": str(row["photo_id"]),
+        "dismissed_ts": dismissed_ts.isoformat().replace("+00:00", "Z"),
+    }
+
+
 def record_review_needed_face_suggestion(
     connection: Connection,
     *,
@@ -229,6 +281,7 @@ def _face_row(connection: Connection, face_id: str):
                 faces.c.face_id,
                 faces.c.photo_id,
                 faces.c.person_id,
+                faces.c.dismissed_ts,
             ).where(faces.c.face_id == face_id)
         )
         .mappings()

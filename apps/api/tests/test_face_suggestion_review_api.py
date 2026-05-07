@@ -8,7 +8,7 @@ from sqlalchemy import create_engine, insert, select
 from app.dependencies import FACE_VALIDATION_ROLE_HEADER, _get_session_factory
 from app.main import app
 from app.migrations import upgrade_database
-from app.storage import face_suggestions, faces, people, photos
+from app.storage import face_suggestions, faces, people, photo_exif_attributes, photos
 
 
 def _client(tmp_path, monkeypatch, filename: str) -> TestClient:
@@ -94,6 +94,26 @@ def test_face_suggestion_review_list_returns_paginated_unassigned_faces_with_top
             ],
         )
         connection.execute(
+            faces.update()
+            .where(faces.c.face_id == "face-1")
+            .values(provenance={"bbox_space_width": 4000, "bbox_space_height": 3000})
+        )
+        connection.execute(
+            insert(photo_exif_attributes),
+            [
+                {
+                    "photo_id": "photo-1",
+                    "exif_attribute_name": "exif_ifd.ExifImageWidth",
+                    "exif_attribute_value": 5000,
+                },
+                {
+                    "photo_id": "photo-1",
+                    "exif_attribute_name": "exif_ifd.ExifImageHeight",
+                    "exif_attribute_value": 4000,
+                },
+            ],
+        )
+        connection.execute(
             insert(face_suggestions),
             [
                 {
@@ -167,12 +187,103 @@ def test_face_suggestion_review_list_returns_paginated_unassigned_faces_with_top
         "display_name": "Alex",
         "confidence": 0.97,
     }
+    assert payload["items"][0]["faces"][0]["bbox_space_width"] == 4000
+    assert payload["items"][0]["faces"][0]["bbox_space_height"] == 3000
+    assert payload["items"][0]["faces"][1]["bbox_space_width"] == 5000
+    assert payload["items"][0]["faces"][1]["bbox_space_height"] == 4000
 
     response_page_two = client.get("/api/v1/suggestions/faces", params={"page": 2, "page_size": 1})
     assert response_page_two.status_code == 200
     page_two_payload = response_page_two.json()
     assert page_two_payload["items"][0]["photo_id"] == "photo-2"
     assert [face["face_id"] for face in page_two_payload["items"][0]["faces"]] == ["face-3"]
+
+    response_filtered = client.get(
+        "/api/v1/suggestions/faces",
+        params={"page": 1, "page_size": 24, "min_confidence": 0.9},
+    )
+    assert response_filtered.status_code == 200
+    filtered_payload = response_filtered.json()
+    assert filtered_payload["page"] == {
+        "page": 1,
+        "page_size": 24,
+        "total_items": 1,
+        "total_pages": 1,
+    }
+    assert len(filtered_payload["items"]) == 1
+    assert filtered_payload["items"][0]["photo_id"] == "photo-1"
+    assert [face["face_id"] for face in filtered_payload["items"][0]["faces"]] == ["face-1"]
+
+
+def test_face_suggestion_review_list_omits_dismissed_faces(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch, "face-suggestion-review-dismissed.db")
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'face-suggestion-review-dismissed.db'}", future=True)
+    now = datetime(2026, 5, 6, 12, 0, tzinfo=UTC)
+    with engine.begin() as connection:
+        _insert_person(connection, person_id="person-1", display_name="Alex")
+        _insert_photo(
+            connection,
+            photo_id="photo-1",
+            path="/photos/1.jpg",
+            shot_ts=datetime(2026, 5, 5, 11, 0, tzinfo=UTC),
+        )
+        connection.execute(
+            insert(faces).values(
+                face_id="face-active",
+                photo_id="photo-1",
+                person_id=None,
+            )
+        )
+        connection.execute(
+            insert(faces).values(
+                face_id="face-dismissed",
+                photo_id="photo-1",
+                person_id=None,
+                dismissed_ts=now,
+                dismissal_provenance={
+                    "workflow": "face-labeling",
+                    "surface": "api",
+                    "action": "dismiss_false_positive",
+                },
+            )
+        )
+        connection.execute(
+            insert(face_suggestions),
+            [
+                {
+                    "face_suggestion_id": "s1",
+                    "face_id": "face-active",
+                    "person_id": "person-1",
+                    "rank": 1,
+                    "confidence": 0.95,
+                    "centroid_distance": 0.05,
+                    "knn_distance": 0.05,
+                    "representation_version": 2,
+                    "scoring_version": "hybrid-v1",
+                    "model_version": "recognition-v1",
+                },
+                {
+                    "face_suggestion_id": "s2",
+                    "face_id": "face-dismissed",
+                    "person_id": "person-1",
+                    "rank": 1,
+                    "confidence": 0.96,
+                    "centroid_distance": 0.04,
+                    "knn_distance": 0.04,
+                    "representation_version": 2,
+                    "scoring_version": "hybrid-v1",
+                    "model_version": "recognition-v1",
+                },
+            ],
+        )
+
+    response = client.get("/api/v1/suggestions/faces", params={"page": 1, "page_size": 24})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["page"]["total_items"] == 1
+    assert [face["face_id"] for face in payload["items"][0]["faces"]] == ["face-active"]
 
 
 def test_face_suggestion_review_confirmation_assigns_selected_faces_to_top_suggestions(

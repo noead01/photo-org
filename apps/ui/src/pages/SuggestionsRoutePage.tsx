@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import ReactPaginate from "react-paginate";
+import { Link } from "react-router-dom";
+import { FaceBBoxOverlay, buildFaceOverlayRegions } from "./FaceBBoxOverlay";
 
 const PAGE_SIZE = 24;
 
@@ -22,6 +24,8 @@ type SuggestedFace = {
   bbox_y?: number | null;
   bbox_w?: number | null;
   bbox_h?: number | null;
+  bbox_space_width?: number | null;
+  bbox_space_height?: number | null;
   top_suggestion: TopSuggestion;
 };
 
@@ -61,12 +65,43 @@ function formatConfidence(confidence: number): string {
   return `${(confidence * 100).toFixed(1)}%`;
 }
 
+function formatDisplayPath(path: string): string {
+  const marker = "/storage-sources/";
+  const markerIndex = path.indexOf(marker);
+  if (markerIndex < 0) {
+    return path;
+  }
+
+  const pathAfterMarker = path.slice(markerIndex + marker.length);
+  const firstSlashAfterSourceId = pathAfterMarker.indexOf("/");
+  if (firstSlashAfterSourceId < 0) {
+    return path;
+  }
+
+  const sourceRelativePath = pathAfterMarker.slice(firstSlashAfterSourceId + 1).trim();
+  if (!sourceRelativePath) {
+    return path;
+  }
+
+  return `.../${sourceRelativePath}`;
+}
+
 function flattenFaceIds(items: SuggestionPhoto[]): string[] {
   return items.flatMap((photo) => photo.faces.map((face) => face.face_id));
 }
 
-async function fetchSuggestionsPage(page: number): Promise<SuggestionListPayload> {
-  const response = await fetch(`/api/v1/suggestions/faces?page=${page}&page_size=${PAGE_SIZE}`);
+async function fetchSuggestionsPage(
+  page: number,
+  minConfidenceThreshold: number
+): Promise<SuggestionListPayload> {
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(PAGE_SIZE)
+  });
+  if (minConfidenceThreshold > 0) {
+    params.set("min_confidence", String(minConfidenceThreshold));
+  }
+  const response = await fetch(`/api/v1/suggestions/faces?${params.toString()}`);
   if (!response.ok) {
     throw new Error(`Suggestions request failed (${response.status})`);
   }
@@ -90,6 +125,7 @@ async function confirmSuggestions(faceIds: string[]): Promise<SuggestionConfirmP
 
 export function SuggestionsRoutePage() {
   const [page, setPage] = useState(1);
+  const [minConfidencePercent, setMinConfidencePercent] = useState(0);
   const [payload, setPayload] = useState<SuggestionListPayload | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isConfirming, setIsConfirming] = useState(false);
@@ -97,11 +133,13 @@ export function SuggestionsRoutePage() {
   const [message, setMessage] = useState<string | null>(null);
   const [selectedFaceIds, setSelectedFaceIds] = useState<Set<string>>(new Set());
 
+  const minConfidenceThreshold = minConfidencePercent / 100;
+
   async function load(targetPage: number) {
     setIsLoading(true);
     setError(null);
     try {
-      const nextPayload = await fetchSuggestionsPage(targetPage);
+      const nextPayload = await fetchSuggestionsPage(targetPage, minConfidenceThreshold);
       setPayload(nextPayload);
       setSelectedFaceIds(new Set(flattenFaceIds(nextPayload.items)));
     } catch (caughtError: unknown) {
@@ -113,15 +151,19 @@ export function SuggestionsRoutePage() {
 
   useEffect(() => {
     void load(page);
-  }, [page]);
+  }, [page, minConfidenceThreshold]);
 
-  const selectedFaceIdsOrdered = useMemo(() => {
-    const selected = selectedFaceIds;
+  const currentPageFaceIdsOrdered = useMemo(() => {
     if (!payload) {
       return [] as string[];
     }
-    return flattenFaceIds(payload.items).filter((faceId) => selected.has(faceId));
-  }, [payload, selectedFaceIds]);
+    return flattenFaceIds(payload.items);
+  }, [payload]);
+
+  const selectedFaceIdsOrdered = useMemo(() => {
+    const selected = selectedFaceIds;
+    return currentPageFaceIdsOrdered.filter((faceId) => selected.has(faceId));
+  }, [currentPageFaceIdsOrdered, selectedFaceIds]);
 
   const totalPages = payload?.page.total_pages ?? 0;
   const totalItems = payload?.page.total_items ?? 0;
@@ -139,7 +181,10 @@ export function SuggestionsRoutePage() {
     setIsConfirming(true);
     setMessage(null);
     try {
-      const result = await confirmSuggestions(selectedFaceIdsOrdered);
+      const checkedFaceIdsOnCurrentPage = currentPageFaceIdsOrdered.filter((faceId) =>
+        selectedFaceIds.has(faceId)
+      );
+      const result = await confirmSuggestions(checkedFaceIdsOnCurrentPage);
       const assignedCount = result.assigned.length;
       const label = assignedCount === 1 ? "face suggestion" : "face suggestions";
       setMessage(`Confirmed ${assignedCount} ${label}.`);
@@ -162,6 +207,22 @@ export function SuggestionsRoutePage() {
           <p>{`Pending photos: ${totalItems}`}</p>
         </div>
         <div className="suggestions-header-actions">
+          <label className="suggestions-confidence-filter">
+            <span>{`Minimum certainty: ${minConfidencePercent}%`}</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={minConfidencePercent}
+              aria-label="Minimum suggestion certainty"
+              onChange={(event) => {
+                setMinConfidencePercent(Number(event.currentTarget.value));
+                setPage(1);
+              }}
+              disabled={isLoading || isConfirming}
+            />
+          </label>
           <button
             type="button"
             onClick={() => {
@@ -196,59 +257,104 @@ export function SuggestionsRoutePage() {
 
       {!isLoading && !error && payload ? (
         <ol className="suggestions-grid" aria-label="Suggestion photo list">
-          {payload.items.map((photo) => (
-            <li key={photo.photo_id} className="suggestions-card">
-              <div className="suggestions-thumbnail-shell">
-                {photo.thumbnail ? (
-                  <img
-                    className="suggestions-thumbnail"
-                    src={`data:${photo.thumbnail.mime_type};base64,${photo.thumbnail.data_base64}`}
-                    width={photo.thumbnail.width}
-                    height={photo.thumbnail.height}
-                    alt={`Preview of ${photo.path}`}
-                  />
-                ) : (
-                  <div className="suggestions-thumbnail suggestions-thumbnail-placeholder" aria-hidden="true">
-                    No preview
-                  </div>
-                )}
-              </div>
-              <div className="suggestions-card-body">
-                <p className="suggestions-path" title={photo.path}>
-                  {photo.path}
-                </p>
-                <ul className="suggestions-face-list">
-                  {photo.faces.map((face) => {
-                    const isSelected = selectedFaceIds.has(face.face_id);
-                    return (
-                      <li key={face.face_id}>
-                        <label>
-                          <input
-                            type="checkbox"
-                            aria-label={`Confirm suggestion for face ${face.face_id}`}
-                            checked={isSelected}
-                            onChange={() => {
-                              setSelectedFaceIds((current) => {
-                                const next = new Set(current);
-                                if (next.has(face.face_id)) {
-                                  next.delete(face.face_id);
-                                } else {
-                                  next.add(face.face_id);
-                                }
-                                return next;
-                              });
-                            }}
-                            disabled={isLoading || isConfirming}
-                          />
-                          <span>{`${face.top_suggestion.display_name} (${formatConfidence(face.top_suggestion.confidence)})`}</span>
-                        </label>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            </li>
-          ))}
+          {payload.items.map((photo) => {
+            const numberedFaces = photo.faces.map((face, index) => ({
+              ...face,
+              faceNumber: index + 1
+            }));
+            const faceNumberById = new Map(
+              numberedFaces.map((face) => [face.face_id, face.faceNumber] as const)
+            );
+            const overlayRegions =
+              photo.thumbnail
+                ? buildFaceOverlayRegions(
+                    numberedFaces.map((face) => ({
+                      face_id: face.face_id,
+                      person_id: null,
+                      bbox_x: face.bbox_x ?? null,
+                      bbox_y: face.bbox_y ?? null,
+                      bbox_w: face.bbox_w ?? null,
+                      bbox_h: face.bbox_h ?? null,
+                      bbox_space_width: face.bbox_space_width ?? null,
+                      bbox_space_height: face.bbox_space_height ?? null
+                    })),
+                    photo.thumbnail.width,
+                    photo.thumbnail.height
+                  )
+                : [];
+            const thumbnailShellStyle = photo.thumbnail
+              ? { aspectRatio: `${photo.thumbnail.width} / ${photo.thumbnail.height}` }
+              : undefined;
+            return (
+              <li key={photo.photo_id} className="suggestions-card">
+                <div className="suggestions-thumbnail-shell" style={thumbnailShellStyle}>
+                  <Link
+                    className="suggestions-thumbnail-link"
+                    to={`/library/${photo.photo_id}`}
+                    aria-label={`Open details for ${photo.path}`}
+                  >
+                    {photo.thumbnail ? (
+                      <img
+                        className="suggestions-thumbnail"
+                        src={`data:${photo.thumbnail.mime_type};base64,${photo.thumbnail.data_base64}`}
+                        width={photo.thumbnail.width}
+                        height={photo.thumbnail.height}
+                        alt={`Preview of ${photo.path}`}
+                      />
+                    ) : (
+                      <div className="suggestions-thumbnail suggestions-thumbnail-placeholder" aria-hidden="true">
+                        No preview
+                      </div>
+                    )}
+                    <FaceBBoxOverlay
+                      regions={overlayRegions}
+                      ariaLabel={`Suggested face regions for ${photo.path}`}
+                      renderRegionContent={(region) => (
+                        <span className="suggestions-face-overlay-badge" aria-hidden="true">
+                          {faceNumberById.get(region.faceId) ?? "?"}
+                        </span>
+                      )}
+                    />
+                  </Link>
+                </div>
+                <div className="suggestions-card-body">
+                  <p className="suggestions-path" title={photo.path}>
+                    {formatDisplayPath(photo.path)}
+                  </p>
+                  <ul className="suggestions-face-list">
+                    {photo.faces.map((face, index) => {
+                      const isSelected = selectedFaceIds.has(face.face_id);
+                      const faceNumber = index + 1;
+                      return (
+                        <li key={face.face_id}>
+                          <label>
+                            <input
+                              type="checkbox"
+                              aria-label={`Confirm suggestion for face ${face.face_id}`}
+                              checked={isSelected}
+                              onChange={() => {
+                                setSelectedFaceIds((current) => {
+                                  const next = new Set(current);
+                                  if (next.has(face.face_id)) {
+                                    next.delete(face.face_id);
+                                  } else {
+                                    next.add(face.face_id);
+                                  }
+                                  return next;
+                                });
+                              }}
+                              disabled={isLoading || isConfirming}
+                            />
+                            <span>{`Face ${faceNumber}: ${face.top_suggestion.display_name} (${formatConfidence(face.top_suggestion.confidence)})`}</span>
+                          </label>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              </li>
+            );
+          })}
         </ol>
       ) : null}
 
