@@ -30,6 +30,7 @@ interface FaceBBoxOverlayProps {
   getRegionAriaLabel?: (region: FaceOverlayRegion, index: number) => string;
   renderRegionContent?: (region: FaceOverlayRegion, index: number) => ReactNode;
   onRegionClick?: (region: FaceOverlayRegion, index: number) => void;
+  allowRegionHover?: boolean;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -147,7 +148,8 @@ export function FaceBBoxOverlay({
   ariaLabel,
   getRegionAriaLabel = defaultRegionAriaLabel,
   renderRegionContent,
-  onRegionClick
+  onRegionClick,
+  allowRegionHover = false
 }: FaceBBoxOverlayProps) {
   if (regions.length === 0) {
     return null;
@@ -158,7 +160,7 @@ export function FaceBBoxOverlay({
       {regions.map((region, index) => (
         <li
           key={region.faceId}
-          className={`detail-face-overlay${onRegionClick ? " is-interactive" : ""}`}
+          className={`detail-face-overlay${onRegionClick ? " is-interactive" : ""}${allowRegionHover ? " is-hoverable" : ""}`}
           aria-label={getRegionAriaLabel(region, index)}
           role={onRegionClick ? "button" : undefined}
           tabIndex={onRegionClick ? 0 : undefined}

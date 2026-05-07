@@ -15,6 +15,7 @@ from app.services.face_assignment import (
     FaceNotAssignedError,
     FaceNotFoundError,
     PersonNotFoundError,
+    assign_face_to_unknown_person,
     confirm_face_assignment,
     dismiss_false_positive_face,
     record_review_needed_face_suggestion,
@@ -100,6 +101,18 @@ class FaceDismissalResponse(BaseModel):
     face_id: str
     photo_id: str
     dismissed_ts: str
+
+
+class FaceUnknownIdentityResponse(BaseModel):
+    """Assignment result for an acknowledged human face with unknown identity."""
+
+    model_config = ConfigDict(
+        json_schema_extra={"description": "Resolved assignment to the system unknown-person identity."}
+    )
+
+    face_id: str
+    photo_id: str
+    person_id: str
 
 
 class FaceCandidateResponse(BaseModel):
@@ -293,6 +306,38 @@ def dismiss_face_endpoint(
 
     db.commit()
     return FaceDismissalResponse.model_validate(dismissal)
+
+
+@router.post(
+    "/{face_id}/unknown-identities",
+    summary="Mark face as human with unknown name",
+    description="Assign an unlabeled detected face to the system unknown-person identity.",
+    response_model=FaceUnknownIdentityResponse,
+    responses={
+        status.HTTP_403_FORBIDDEN: {"description": "Face validation role required"},
+        status.HTTP_404_NOT_FOUND: {"description": "Face not found"},
+        status.HTTP_409_CONFLICT: {"description": "Face already assigned or already dismissed"},
+    },
+)
+def assign_face_to_unknown_identity_endpoint(
+    face_id: str,
+    db: Session = Depends(get_db),
+    _: str = Depends(require_face_validation_role),
+) -> FaceUnknownIdentityResponse:
+    try:
+        assignment = assign_face_to_unknown_person(
+            db.connection(),
+            face_id=face_id,
+        )
+    except FaceNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except FaceAlreadyAssignedError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except FaceAlreadyDismissedError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    db.commit()
+    return FaceUnknownIdentityResponse.model_validate(assignment)
 
 
 @router.get(

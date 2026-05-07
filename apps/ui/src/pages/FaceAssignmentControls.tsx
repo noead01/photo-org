@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 type FaceLabelSource = "human_confirmed" | "machine_suggested" | null;
 
 const NOT_AVAILABLE = "Not available";
+const UNKNOWN_PERSON_OPTION_VALUE = "__unknown_person__";
 
 export interface FaceAssignmentFace {
   face_id: string;
@@ -70,6 +71,22 @@ function mapCorrectionError(status: number, detail: string | null): string {
   }
 
   return `Correction request failed (${status}).`;
+}
+
+function mapUnknownIdentityError(status: number, detail: string | null): string {
+  if (status === 403) {
+    return "You do not have permission to assign faces.";
+  }
+
+  if (status === 404) {
+    return detail ?? "Face no longer exists.";
+  }
+
+  if (status === 409) {
+    return detail ?? "Face assignment could not be applied.";
+  }
+
+  return `Unknown-identity request failed (${status}).`;
 }
 
 function resolvePersonLabel(people: FaceAssignmentPerson[], personId: string): string {
@@ -205,6 +222,41 @@ export function FaceAssignmentControls({
     }
   }
 
+  async function assignUnknown(faceId: string) {
+    setIsSubmitting(true);
+    setAssignmentError(null);
+    setCorrectionProvenance(null);
+
+    try {
+      const response = await fetch(`/api/v1/faces/${faceId}/unknown-identities`, {
+        method: "POST",
+        headers: {
+          "X-Face-Validation-Role": "contributor"
+        }
+      });
+
+      if (!response.ok) {
+        const detail = await readErrorDetail(response);
+        setAssignmentError(mapUnknownIdentityError(response.status, detail));
+        return;
+      }
+
+      const payload = (await response.json()) as { person_id?: unknown };
+      const personId = typeof payload.person_id === "string" ? payload.person_id : "";
+      if (!personId) {
+        setAssignmentError("Unknown-identity response was missing person information.");
+        return;
+      }
+
+      onAssigned(faceId, personId);
+      setActiveIndex((current) => current + 1);
+    } catch {
+      setAssignmentError("Could not assign face.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   async function correct(faceId: string, previousPersonId: string, personId: string) {
     setCorrectionFaceIdInFlight(faceId);
     setCorrectionError(null);
@@ -264,12 +316,17 @@ export function FaceAssignmentControls({
                 if (!personId) {
                   return;
                 }
+                if (personId === UNKNOWN_PERSON_OPTION_VALUE) {
+                  void assignUnknown(activeFace.face_id);
+                  return;
+                }
                 void assign(activeFace.face_id, personId);
               }}
             >
               <option value="" disabled>
                 Select person
               </option>
+              <option value={UNKNOWN_PERSON_OPTION_VALUE}>Human face (name unknown)</option>
               {people.map((person) => (
                 <option key={person.person_id} value={person.person_id}>
                   {person.display_name}

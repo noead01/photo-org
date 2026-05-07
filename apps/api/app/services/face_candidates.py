@@ -11,6 +11,7 @@ from app.services.recognition_policy import (
     distance_to_confidence,
     resolve_suggestion_thresholds,
 )
+from app.services.people import UNKNOWN_PERSON_DISPLAY_NAME
 from app.storage import faces, people
 
 
@@ -125,6 +126,7 @@ def _lookup_candidates_postgresql(
             faces.c.face_id != face_id,
             faces.c.person_id.is_not(None),
             faces.c.embedding.is_not(None),
+            people.c.display_name != UNKNOWN_PERSON_DISPLAY_NAME,
         )
         .subquery()
     )
@@ -174,6 +176,7 @@ def _lookup_candidates_python(
                 faces.c.face_id != face_id,
                 faces.c.person_id.is_not(None),
                 faces.c.embedding.is_not(None),
+                people.c.display_name != UNKNOWN_PERSON_DISPLAY_NAME,
             )
         )
         .mappings()

@@ -10,6 +10,8 @@ from sqlalchemy.exc import IntegrityError
 
 from app.storage import face_labels, faces, people
 
+UNKNOWN_PERSON_DISPLAY_NAME = "Unknown person"
+
 
 class PersonNotFoundError(LookupError):
     pass
@@ -105,6 +107,27 @@ def delete_person(connection: Connection, person_id: str) -> None:
     if person is None:
         raise PersonNotFoundError("Person not found")
     raise PersonInUseError("Person is referenced by face or label data")
+
+
+def get_or_create_unknown_person(
+    connection: Connection,
+    *,
+    now: datetime,
+) -> dict[str, object]:
+    existing = (
+        connection.execute(
+            select(people).where(people.c.display_name == UNKNOWN_PERSON_DISPLAY_NAME)
+        )
+        .mappings()
+        .first()
+    )
+    if existing is not None:
+        return _person_from_row(existing)
+    return create_person(
+        connection,
+        display_name=UNKNOWN_PERSON_DISPLAY_NAME,
+        now=now,
+    )
 
 
 def _normalize_utc_datetime(value: datetime) -> datetime:

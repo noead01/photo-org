@@ -72,9 +72,36 @@ function buildSuggestionsPayload({
         display_name: string;
         confidence: number;
       };
+      suggestions?: Array<{
+        person_id: string;
+        display_name: string;
+        confidence: number;
+        rank?: number;
+      }>;
     }>;
   }>;
 }) {
+  const normalizedItems = items.map((photo) => ({
+    ...photo,
+    faces: photo.faces.map((face) => ({
+      ...face,
+      suggestions:
+        "suggestions" in face && Array.isArray((face as { suggestions?: unknown }).suggestions)
+          ? (face as { suggestions: Array<{ person_id: string; display_name: string; confidence: number; rank?: number }> }).suggestions.map(
+              (suggestion, index) => ({
+                ...suggestion,
+                rank: suggestion.rank ?? index + 1
+              })
+            )
+          : [
+              {
+                ...face.top_suggestion,
+                rank: 1
+              }
+            ]
+    }))
+  }));
+
   return {
     page: {
       page,
@@ -82,7 +109,7 @@ function buildSuggestionsPayload({
       total_items: totalItems ?? items.length,
       total_pages: totalPages
     },
-    items
+    items: normalizedItems
   };
 }
 
@@ -189,8 +216,8 @@ describe("SuggestionsRoutePage", () => {
     ).toHaveAttribute("href", "/library/photo-1");
     expect(screen.getByLabelText("Confirm suggestion for face face-1")).toBeChecked();
     expect(screen.getByLabelText("Confirm suggestion for face face-2")).toBeChecked();
-    expect(screen.getByText("Face 1: Alex (97.0%)")).toBeInTheDocument();
-    expect(screen.getByText("Face 2: Blair (82.0%)")).toBeInTheDocument();
+    expect(screen.getByLabelText("Choose suggestion for face face-1")).toHaveDisplayValue("Alex");
+    expect(screen.getByLabelText("Choose suggestion for face face-2")).toHaveDisplayValue("Blair");
     const overlay = screen.getByRole("list", {
       name: "Suggested face regions for /storage-sources/source-1/family/trip/photo-1.jpg"
     });
@@ -280,11 +307,342 @@ describe("SuggestionsRoutePage", () => {
           "Content-Type": "application/json",
           "X-Face-Validation-Role": "contributor"
         },
-        body: JSON.stringify({ face_ids: ["face-1"] })
+        body: JSON.stringify({
+          face_ids: ["face-1"],
+          assignments: [{ face_id: "face-1", person_id: "person-1" }]
+        })
       });
     });
 
     expect(await screen.findByText("Confirmed 1 face suggestion.")).toBeInTheDocument();
+  });
+
+  it("submits the selected dropdown suggestion for a checked face", async () => {
+    const user = userEvent.setup();
+
+    installFetchRoutes(fetchMock, {
+      "GET /api/v1/people": reply(buildPeoplePayload()),
+      "GET /api/v1/suggestions/faces?page=1&page_size=24": [
+        reply(
+          buildSuggestionsPayload({
+            items: [
+              {
+                photo_id: "photo-1",
+                path: "/photos/photo-1.jpg",
+                thumbnail: null,
+                faces: [
+                  {
+                    face_id: "face-1",
+                    top_suggestion: {
+                      person_id: "person-1",
+                      display_name: "Alex",
+                      confidence: 0.97
+                    },
+                    suggestions: [
+                      { person_id: "person-1", display_name: "Alex", confidence: 0.97, rank: 1 },
+                      { person_id: "person-3", display_name: "Casey", confidence: 0.89, rank: 2 }
+                    ]
+                  }
+                ]
+              }
+            ]
+          })
+        ),
+        reply(
+          buildSuggestionsPayload({
+            totalItems: 0,
+            totalPages: 0,
+            items: []
+          })
+        )
+      ],
+      "POST /api/v1/suggestions/confirmations": reply({
+        assigned: [
+          {
+            face_id: "face-1",
+            photo_id: "photo-1",
+            person_id: "person-3"
+          }
+        ],
+        skipped: []
+      })
+    });
+
+    renderPage();
+
+    const selector = await screen.findByLabelText("Choose suggestion for face face-1");
+    await user.clear(selector);
+    await user.type(selector, "Casey");
+    await user.click(screen.getByRole("button", { name: "Confirm faces" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/v1/suggestions/confirmations", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Face-Validation-Role": "contributor"
+        },
+        body: JSON.stringify({
+          face_ids: ["face-1"],
+          assignments: [{ face_id: "face-1", person_id: "person-3" }]
+        })
+      });
+    });
+  });
+
+  it("confirms one face only with a typed unsuggested name", async () => {
+    const user = userEvent.setup();
+
+    installFetchRoutes(fetchMock, {
+      "GET /api/v1/people": reply(buildPeoplePayload()),
+      "GET /api/v1/suggestions/faces?page=1&page_size=24": [
+        reply(
+          buildSuggestionsPayload({
+            items: [
+              {
+                photo_id: "photo-1",
+                path: "/photos/photo-1.jpg",
+                thumbnail: null,
+                faces: [
+                  {
+                    face_id: "face-1",
+                    top_suggestion: {
+                      person_id: "person-1",
+                      display_name: "Alex",
+                      confidence: 0.97
+                    }
+                  },
+                  {
+                    face_id: "face-2",
+                    top_suggestion: {
+                      person_id: "person-2",
+                      display_name: "Blair",
+                      confidence: 0.88
+                    }
+                  }
+                ]
+              }
+            ]
+          })
+        ),
+        reply(
+          buildSuggestionsPayload({
+            items: [
+              {
+                photo_id: "photo-1",
+                path: "/photos/photo-1.jpg",
+                thumbnail: null,
+                faces: [
+                  {
+                    face_id: "face-2",
+                    top_suggestion: {
+                      person_id: "person-2",
+                      display_name: "Blair",
+                      confidence: 0.88
+                    }
+                  }
+                ]
+              }
+            ]
+          })
+        )
+      ],
+      "POST /api/v1/people": reply({
+        person_id: "person-new",
+        display_name: "Dana New",
+        created_ts: "2026-05-06T12:00:00Z",
+        updated_ts: "2026-05-06T12:00:00Z"
+      }, 201),
+      "POST /api/v1/faces/face-1/assignments": reply({
+        face_id: "face-1",
+        photo_id: "photo-1",
+        person_id: "person-new"
+      }, 201)
+    });
+
+    renderPage();
+
+    const faceChoice = await screen.findByLabelText("Choose suggestion for face face-1");
+    await user.clear(faceChoice);
+    await user.type(faceChoice, "Dana New");
+    await user.click(screen.getAllByRole("button", { name: "Confirm face" })[0]);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/v1/people", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ display_name: "Dana New" })
+      });
+    });
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/v1/faces/face-1/assignments", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Face-Validation-Role": "contributor"
+        },
+        body: JSON.stringify({ person_id: "person-new" })
+      });
+    });
+  });
+
+  it("orders suggested names by likelihood in the face chooser", async () => {
+    installFetchRoutes(fetchMock, {
+      "GET /api/v1/people": reply(buildPeoplePayload()),
+      "GET /api/v1/suggestions/faces?page=1&page_size=24": reply(
+        buildSuggestionsPayload({
+          items: [
+            {
+              photo_id: "photo-1",
+              path: "/photos/photo-1.jpg",
+              thumbnail: null,
+              faces: [
+                {
+                  face_id: "face-1",
+                  top_suggestion: {
+                    person_id: "person-1",
+                    display_name: "Alex",
+                    confidence: 0.97
+                  },
+                  suggestions: [
+                    { person_id: "person-2", display_name: "Blair", confidence: 0.76, rank: 2 },
+                    { person_id: "person-1", display_name: "Alex", confidence: 0.97, rank: 1 },
+                    { person_id: "person-3", display_name: "Casey", confidence: 0.81, rank: 3 }
+                  ]
+                }
+              ]
+            }
+          ]
+        })
+      )
+    });
+
+    renderPage();
+
+    const faceChoice = await screen.findByLabelText("Choose suggestion for face face-1");
+    const listId = faceChoice.getAttribute("list");
+    expect(listId).toBeTruthy();
+    const datalist = document.getElementById(listId ?? "");
+    expect(datalist).not.toBeNull();
+    const optionValues = Array.from(datalist?.querySelectorAll("option") ?? []).map(
+      (option) => option.getAttribute("value") ?? ""
+    );
+    expect(optionValues).toEqual(["Alex", "Casey", "Blair"]);
+  });
+
+  it("can mark a face as unknown from the face action button", async () => {
+    const user = userEvent.setup();
+
+    installFetchRoutes(fetchMock, {
+      "GET /api/v1/people": reply(buildPeoplePayload()),
+      "GET /api/v1/suggestions/faces?page=1&page_size=24": [
+        reply(
+          buildSuggestionsPayload({
+            items: [
+              {
+                photo_id: "photo-1",
+                path: "/photos/photo-1.jpg",
+                thumbnail: null,
+                faces: [
+                  {
+                    face_id: "face-1",
+                    top_suggestion: {
+                      person_id: "person-1",
+                      display_name: "Alex",
+                      confidence: 0.97
+                    }
+                  }
+                ]
+              }
+            ]
+          })
+        ),
+        reply(
+          buildSuggestionsPayload({
+            totalItems: 0,
+            totalPages: 0,
+            items: []
+          })
+        )
+      ],
+      "POST /api/v1/faces/face-1/unknown-identities": reply({
+        face_id: "face-1",
+        photo_id: "photo-1",
+        person_id: "unknown-person"
+      })
+    });
+
+    renderPage();
+
+    await screen.findByLabelText("Choose suggestion for face face-1");
+    await user.click(screen.getByRole("button", { name: "Mark face face-1 as unknown" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/v1/faces/face-1/unknown-identities", {
+        method: "POST",
+        headers: {
+          "X-Face-Validation-Role": "contributor"
+        }
+      });
+    });
+  });
+
+  it("can discard a face as false positive from the face action button", async () => {
+    const user = userEvent.setup();
+
+    installFetchRoutes(fetchMock, {
+      "GET /api/v1/people": reply(buildPeoplePayload()),
+      "GET /api/v1/suggestions/faces?page=1&page_size=24": [
+        reply(
+          buildSuggestionsPayload({
+            items: [
+              {
+                photo_id: "photo-1",
+                path: "/photos/photo-1.jpg",
+                thumbnail: null,
+                faces: [
+                  {
+                    face_id: "face-1",
+                    top_suggestion: {
+                      person_id: "person-1",
+                      display_name: "Alex",
+                      confidence: 0.97
+                    }
+                  }
+                ]
+              }
+            ]
+          })
+        ),
+        reply(
+          buildSuggestionsPayload({
+            totalItems: 0,
+            totalPages: 0,
+            items: []
+          })
+        )
+      ],
+      "POST /api/v1/faces/face-1/dismissals": reply({
+        face_id: "face-1",
+        photo_id: "photo-1"
+      })
+    });
+
+    renderPage();
+
+    await screen.findByLabelText("Choose suggestion for face face-1");
+    await user.click(screen.getByRole("button", { name: "Discard face face-1 as false positive" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/v1/faces/face-1/dismissals", {
+        method: "POST",
+        headers: {
+          "X-Face-Validation-Role": "contributor"
+        }
+      });
+    });
   });
 
   it("navigates between pages", async () => {
@@ -437,7 +795,10 @@ describe("SuggestionsRoutePage", () => {
           "Content-Type": "application/json",
           "X-Face-Validation-Role": "contributor"
         },
-        body: JSON.stringify({ face_ids: ["face-2"] })
+        body: JSON.stringify({
+          face_ids: ["face-2"],
+          assignments: [{ face_id: "face-2", person_id: "person-2" }]
+        })
       });
     });
   });
@@ -538,7 +899,7 @@ describe("SuggestionsRoutePage", () => {
 
     installFetchRoutes(fetchMock, {
       "GET /api/v1/people": reply(buildPeoplePayload()),
-      "GET /api/v1/suggestions/faces?page=1&page_size=24&min_confidence=0.9": reply(
+      "GET /api/v1/suggestions/faces?page=1&page_size=24&min_confidence=0.9&excluded_person_ids=person-2": reply(
         buildSuggestionsPayload({
           items: [
             {
@@ -564,10 +925,7 @@ describe("SuggestionsRoutePage", () => {
     renderPage();
 
     expect(await screen.findByDisplayValue("90")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Exclude Blair" })).toHaveAttribute(
-      "aria-pressed",
-      "true"
-    );
+    expect(screen.getByRole("button", { name: "Remove excluded person Blair" })).toBeInTheDocument();
   });
 
   it("falls back to defaults when persisted filter state is invalid", async () => {
@@ -601,10 +959,7 @@ describe("SuggestionsRoutePage", () => {
     renderPage();
 
     expect(await screen.findByDisplayValue("0")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Exclude Alex" })).toHaveAttribute(
-      "aria-pressed",
-      "false"
-    );
+    expect(screen.queryByRole("button", { name: /Remove excluded person/i })).not.toBeInTheDocument();
   });
 
   it("hides excluded faces, persists filter changes, and omits photos with no visible faces", async () => {
@@ -656,21 +1011,44 @@ describe("SuggestionsRoutePage", () => {
             }
           ]
         })
+      ),
+      "GET /api/v1/suggestions/faces?page=1&page_size=24&excluded_person_ids=person-2": reply(
+        buildSuggestionsPayload({
+          totalItems: 1,
+          items: [
+            {
+              photo_id: "photo-1",
+              path: "/photos/photo-1.jpg",
+              thumbnail: null,
+              faces: [
+                {
+                  face_id: "face-1",
+                  top_suggestion: {
+                    person_id: "person-1",
+                    display_name: "Alex",
+                    confidence: 0.97
+                  }
+                }
+              ]
+            }
+          ]
+        })
       )
     });
 
     renderPage();
 
-    expect(await screen.findByText("Face 2: Blair (82.0%)")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Exclude Blair" }));
+    expect(await screen.findByLabelText("Choose suggestion for face face-2")).toHaveDisplayValue("Blair");
+    await user.selectOptions(screen.getByLabelText("Add excluded person"), "person-2");
 
-    expect(screen.queryByText("Face 2: Blair (82.0%)")).not.toBeInTheDocument();
-    expect(screen.queryByText("/photos/photo-2.jpg")).not.toBeInTheDocument();
-    expect(screen.getByText("Pending photos: 1")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Exclude Blair" })).toHaveAttribute(
-      "aria-pressed",
-      "true"
-    );
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/v1/suggestions/faces?page=1&page_size=24&excluded_person_ids=person-2"
+      );
+    });
+    expect(screen.queryByLabelText("Choose suggestion for face face-2")).not.toBeInTheDocument();
+    expect(await screen.findByText("Pending photos: 1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove excluded person Blair" })).toBeInTheDocument();
     expect(window.localStorage.getItem("photo-org:suggestions:filters")).toContain("person-2");
   });
 
@@ -725,6 +1103,8 @@ describe("SuggestionsRoutePage", () => {
             ]
           })
         ),
+      ],
+      "GET /api/v1/suggestions/faces?page=1&page_size=24&excluded_person_ids=person-2": [
         reply(
           buildSuggestionsPayload({
             totalItems: 1,
@@ -746,6 +1126,13 @@ describe("SuggestionsRoutePage", () => {
               }
             ]
           })
+        ),
+        reply(
+          buildSuggestionsPayload({
+            totalItems: 0,
+            totalPages: 0,
+            items: []
+          })
         )
       ],
       "POST /api/v1/suggestions/confirmations": reply({
@@ -762,8 +1149,13 @@ describe("SuggestionsRoutePage", () => {
 
     renderPage();
 
-    expect(await screen.findByText("Face 2: Blair (82.0%)")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Exclude Blair" }));
+    expect(await screen.findByLabelText("Choose suggestion for face face-2")).toHaveDisplayValue("Blair");
+    await user.selectOptions(screen.getByLabelText("Add excluded person"), "person-2");
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/v1/suggestions/faces?page=1&page_size=24&excluded_person_ids=person-2"
+      );
+    });
     await user.click(screen.getByRole("button", { name: "Confirm faces" }));
 
     await waitFor(() => {
@@ -773,7 +1165,10 @@ describe("SuggestionsRoutePage", () => {
           "Content-Type": "application/json",
           "X-Face-Validation-Role": "contributor"
         },
-        body: JSON.stringify({ face_ids: ["face-1"] })
+        body: JSON.stringify({
+          face_ids: ["face-1"],
+          assignments: [{ face_id: "face-1", person_id: "person-1" }]
+        })
       });
     });
   });

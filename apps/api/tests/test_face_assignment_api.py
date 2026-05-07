@@ -320,6 +320,43 @@ def test_face_dismissal_api_rejects_already_dismissed_face(tmp_path, monkeypatch
     assert response.json() == {"detail": "Face already dismissed"}
 
 
+def test_face_unknown_identity_api_assigns_face_to_system_unknown_person(tmp_path, monkeypatch):
+    database_url = _database_url(tmp_path, "face-unknown-identity.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        _insert_photo(connection, photo_id="photo-1")
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id=None,
+            )
+        )
+
+    client = _authorized_client()
+    response = client.post("/api/v1/faces/face-1/unknown-identities")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["face_id"] == "face-1"
+    assert payload["photo_id"] == "photo-1"
+    assert isinstance(payload["person_id"], str) and payload["person_id"]
+
+    with engine.connect() as connection:
+        assigned_person_id = connection.execute(
+            select(faces.c.person_id).where(faces.c.face_id == "face-1")
+        ).scalar_one_or_none()
+        unknown_person_name = connection.execute(
+            select(people.c.display_name).where(people.c.person_id == payload["person_id"])
+        ).scalar_one_or_none()
+    assert assigned_person_id == payload["person_id"]
+    assert unknown_person_name == "Unknown person"
+
+
 def test_face_assignment_api_rejects_unrecognized_face_validation_role(tmp_path, monkeypatch):
     database_url = _database_url(tmp_path, "face-assign-wrong-role.db")
     upgrade_database(database_url)
