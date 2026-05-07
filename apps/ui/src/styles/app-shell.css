@@ -22,7 +22,14 @@
   color: #334155;
 }
 
-.suggestions-header-actions button {
+.suggestions-header-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.suggestions-confirm-button {
   border: 1px solid #bfdbfe;
   background: #eff6ff;
   color: #1d4ed8;
@@ -43,7 +50,28 @@
   width: 100%;
 }
 
-.suggestions-header-actions button:disabled {
+.suggestions-filter-group {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.suggestions-people-filter {
+  display: grid;
+  gap: 0.45rem;
+  max-width: 28rem;
+}
+
+.suggestions-filter-label {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #334155;
+}
+
+.suggestions-active-filters {
+  align-items: flex-start;
+}
+
+.suggestions-confirm-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }

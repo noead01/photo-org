@@ -1,7 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactPaginate from "react-paginate";
 import { Link } from "react-router-dom";
 import { FaceBBoxOverlay, buildFaceOverlayRegions } from "./FaceBBoxOverlay";
+import {
+  loadSuggestionsFilterState,
+  saveSuggestionsFilterState
+} from "./suggestions/suggestionsRouteMemory";
 
 const PAGE_SIZE = 24;
 
@@ -58,6 +62,11 @@ type SuggestionConfirmPayload = {
   }>;
 };
 
+type PersonRecord = {
+  person_id: string;
+  display_name: string;
+};
+
 function formatConfidence(confidence: number): string {
   if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
     return "0.0%";
@@ -108,6 +117,14 @@ async function fetchSuggestionsPage(
   return (await response.json()) as SuggestionListPayload;
 }
 
+async function fetchPeopleDirectory(): Promise<PersonRecord[]> {
+  const response = await fetch("/api/v1/people");
+  if (!response.ok) {
+    throw new Error(`People request failed (${response.status})`);
+  }
+  return (await response.json()) as PersonRecord[];
+}
+
 async function confirmSuggestions(faceIds: string[]): Promise<SuggestionConfirmPayload> {
   const response = await fetch("/api/v1/suggestions/confirmations", {
     method: "POST",
@@ -124,8 +141,15 @@ async function confirmSuggestions(faceIds: string[]): Promise<SuggestionConfirmP
 }
 
 export function SuggestionsRoutePage() {
+  const initialStoredFiltersRef = useRef(loadSuggestionsFilterState());
   const [page, setPage] = useState(1);
-  const [minConfidencePercent, setMinConfidencePercent] = useState(0);
+  const [minConfidencePercent, setMinConfidencePercent] = useState(
+    initialStoredFiltersRef.current?.minConfidencePercent ?? 0
+  );
+  const [excludedPersonIds, setExcludedPersonIds] = useState<string[]>(
+    initialStoredFiltersRef.current?.excludedPersonIds ?? []
+  );
+  const [peopleDirectory, setPeopleDirectory] = useState<PersonRecord[]>([]);
   const [payload, setPayload] = useState<SuggestionListPayload | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isConfirming, setIsConfirming] = useState(false);
@@ -134,6 +158,7 @@ export function SuggestionsRoutePage() {
   const [selectedFaceIds, setSelectedFaceIds] = useState<Set<string>>(new Set());
 
   const minConfidenceThreshold = minConfidencePercent / 100;
+  const excludedPersonIdSet = useMemo(() => new Set(excludedPersonIds), [excludedPersonIds]);
 
   async function load(targetPage: number) {
     setIsLoading(true);
@@ -153,20 +178,64 @@ export function SuggestionsRoutePage() {
     void load(page);
   }, [page, minConfidenceThreshold]);
 
-  const currentPageFaceIdsOrdered = useMemo(() => {
-    if (!payload) {
-      return [] as string[];
+  useEffect(() => {
+    let isCanceled = false;
+
+    async function loadPeople() {
+      try {
+        const people = await fetchPeopleDirectory();
+        if (!isCanceled) {
+          setPeopleDirectory(people);
+        }
+      } catch {
+        if (!isCanceled) {
+          setPeopleDirectory([]);
+        }
+      }
     }
-    return flattenFaceIds(payload.items);
-  }, [payload]);
+
+    void loadPeople();
+
+    return () => {
+      isCanceled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    saveSuggestionsFilterState({
+      minConfidencePercent,
+      excludedPersonIds
+    });
+  }, [excludedPersonIds, minConfidencePercent]);
+
+  const visibleItems = useMemo(() => {
+    if (!payload) {
+      return [] as SuggestionPhoto[];
+    }
+    return payload.items
+      .map((photo) => ({
+        ...photo,
+        faces: photo.faces.filter((face) => !excludedPersonIdSet.has(face.top_suggestion.person_id))
+      }))
+      .filter((photo) => photo.faces.length > 0);
+  }, [excludedPersonIdSet, payload]);
+
+  const currentPageFaceIdsOrdered = useMemo(() => {
+    return flattenFaceIds(visibleItems);
+  }, [visibleItems]);
 
   const selectedFaceIdsOrdered = useMemo(() => {
     const selected = selectedFaceIds;
     return currentPageFaceIdsOrdered.filter((faceId) => selected.has(faceId));
   }, [currentPageFaceIdsOrdered, selectedFaceIds]);
 
+  const excludedPeople = useMemo(
+    () => peopleDirectory.filter((person) => excludedPersonIdSet.has(person.person_id)),
+    [excludedPersonIdSet, peopleDirectory]
+  );
+
   const totalPages = payload?.page.total_pages ?? 0;
-  const totalItems = payload?.page.total_items ?? 0;
+  const totalItems = visibleItems.length;
   const normalizedTotalPages = Number.isInteger(totalPages) && totalPages > 0 ? totalPages : 1;
   const normalizedRequestedPage = Number.isInteger(page) && page > 0 ? page : 1;
   const clampedRequestedPage = Math.min(normalizedRequestedPage, normalizedTotalPages);
@@ -198,6 +267,16 @@ export function SuggestionsRoutePage() {
     }
   }
 
+  function toggleExcludedPerson(personId: string) {
+    setExcludedPersonIds((current) => {
+      if (current.includes(personId)) {
+        return current.filter((entry) => entry !== personId);
+      }
+      return [...current, personId];
+    });
+    setPage(1);
+  }
+
   return (
     <section className="page suggestions-page" aria-labelledby="suggestions-title">
       <div className="suggestions-header">
@@ -207,24 +286,69 @@ export function SuggestionsRoutePage() {
           <p>{`Pending photos: ${totalItems}`}</p>
         </div>
         <div className="suggestions-header-actions">
-          <label className="suggestions-confidence-filter">
-            <span>{`Minimum certainty: ${minConfidencePercent}%`}</span>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={1}
-              value={minConfidencePercent}
-              aria-label="Minimum suggestion certainty"
-              onChange={(event) => {
-                setMinConfidencePercent(Number(event.currentTarget.value));
-                setPage(1);
-              }}
-              disabled={isLoading || isConfirming}
-            />
-          </label>
+          <div className="suggestions-filter-group">
+            <label className="suggestions-confidence-filter">
+              <span>{`Minimum certainty: ${minConfidencePercent}%`}</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={minConfidencePercent}
+                aria-label="Minimum suggestion certainty"
+                onChange={(event) => {
+                  setMinConfidencePercent(Number(event.currentTarget.value));
+                  setPage(1);
+                }}
+                disabled={isLoading || isConfirming}
+              />
+            </label>
+            {peopleDirectory.length > 0 ? (
+              <div className="suggestions-people-filter">
+                <p className="suggestions-filter-label">Exclude people</p>
+                <ul className="search-chip-list suggestions-active-filters" aria-label="Excluded people filters">
+                  {peopleDirectory.map((person) => {
+                    const excluded = excludedPersonIdSet.has(person.person_id);
+                    return (
+                      <li key={person.person_id}>
+                        <button
+                          type="button"
+                          className={excluded ? "search-chip search-chip-active" : "search-chip"}
+                          aria-pressed={excluded}
+                          aria-label={`Exclude ${person.display_name}`}
+                          onClick={() => toggleExcludedPerson(person.person_id)}
+                          disabled={isLoading || isConfirming}
+                        >
+                          {person.display_name}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {excludedPeople.length > 0 ? (
+                  <ul className="search-chip-list suggestions-active-filters" aria-label="Active excluded people">
+                    {excludedPeople.map((person) => (
+                      <li key={person.person_id}>
+                        <button
+                          type="button"
+                          className="search-chip search-chip-active"
+                          aria-label={`Remove excluded person ${person.display_name}`}
+                          onClick={() => toggleExcludedPerson(person.person_id)}
+                          disabled={isLoading || isConfirming}
+                        >
+                          {`excluded: ${person.display_name}`}
+                          <span aria-hidden="true"> ×</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
           <button
             type="button"
+            className="suggestions-confirm-button"
             onClick={() => {
               void handleConfirmFaces();
             }}
@@ -251,13 +375,13 @@ export function SuggestionsRoutePage() {
       ) : null}
       {message ? <p>{message}</p> : null}
 
-      {!isLoading && !error && payload && payload.items.length === 0 ? (
+      {!isLoading && !error && payload && visibleItems.length === 0 ? (
         <p className="suggestions-empty">No pending suggestions.</p>
       ) : null}
 
       {!isLoading && !error && payload ? (
         <ol className="suggestions-grid" aria-label="Suggestion photo list">
-          {payload.items.map((photo) => {
+          {visibleItems.map((photo) => {
             const numberedFaces = photo.faces.map((face, index) => ({
               ...face,
               faceNumber: index + 1
