@@ -100,6 +100,17 @@ function normalizeSuggestionConfidenceMin(
   return parsed;
 }
 
+export function resolvePersonCertaintyPercent(
+  personCertaintyMode: PersonCertaintyMode,
+  suggestionConfidenceMinDraft: string
+): number {
+  if (personCertaintyMode === "human_only") {
+    return 100;
+  }
+
+  return Math.round(normalizeSuggestionConfidenceMin(suggestionConfidenceMinDraft) * 100);
+}
+
 export function isFuzzyNameMatch(query: string, candidate: string): boolean {
   const normalizedQuery = normalizeForFuzzyMatch(query);
   const normalizedCandidate = normalizeForFuzzyMatch(candidate);
@@ -207,7 +218,9 @@ export function buildLibraryUrlQuery(state: {
   for (const personName of state.selectedPersonNames) {
     params.append("person", personName);
   }
-  if (state.selectedPersonNames.length > 0) {
+  const shouldPersistPersonCertainty =
+    state.selectedPersonNames.length > 0 || state.personCertaintyMode !== DEFAULT_PERSON_CERTAINTY_MODE;
+  if (shouldPersistPersonCertainty) {
     params.set("personCertainty", state.personCertaintyMode);
     if (state.personCertaintyMode === "include_suggestions") {
       params.set(

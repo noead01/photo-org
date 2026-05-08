@@ -1,11 +1,14 @@
 import { formatLocationChipLabel } from "../search/locationFilter";
-import type { LibraryLocationRadius } from "./libraryRouteTypes";
+import { resolvePersonCertaintyPercent } from "./libraryRouteSearchState";
+import type { LibraryLocationRadius, PersonCertaintyMode } from "./libraryRouteTypes";
 
 interface LibraryActiveFilterChipsProps {
   committedQuery: string;
   fromDate: string;
   toDate: string;
   selectedPersonNames: string[];
+  personCertaintyMode: PersonCertaintyMode;
+  suggestionConfidenceMinDraft: string;
   locationRadius: LibraryLocationRadius | null;
   hasFacesFilter: boolean | null;
   pathHintFilters: string[];
@@ -23,6 +26,8 @@ export function LibraryActiveFilterChips({
   fromDate,
   toDate,
   selectedPersonNames,
+  personCertaintyMode,
+  suggestionConfidenceMinDraft,
   locationRadius,
   hasFacesFilter,
   pathHintFilters,
@@ -34,6 +39,10 @@ export function LibraryActiveFilterChips({
   onClearToDate,
   onClearCommittedQuery
 }: LibraryActiveFilterChipsProps) {
+  const personCertaintyPercent = resolvePersonCertaintyPercent(
+    personCertaintyMode,
+    suggestionConfidenceMinDraft
+  );
   const hasAnyFilter =
     Boolean(committedQuery) ||
     Boolean(fromDate || toDate) ||
@@ -74,10 +83,10 @@ export function LibraryActiveFilterChips({
           <button
             type="button"
             className="search-chip"
-            aria-label={`Remove person ${displayName}`}
+            aria-label={`Remove person ${displayName} with ${personCertaintyPercent}% certainty`}
             onClick={() => onRemovePersonFilter(displayName)}
           >
-            person: {displayName}
+            person: {displayName} ({personCertaintyPercent}%)
             <span aria-hidden="true"> ×</span>
           </button>
         </li>

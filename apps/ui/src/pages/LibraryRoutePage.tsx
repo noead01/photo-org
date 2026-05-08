@@ -766,6 +766,8 @@ export function LibraryRoutePage() {
         fromDate={fromDate}
         toDate={toDate}
         selectedPersonNames={selectedPersonNames}
+        personCertaintyMode={personCertaintyMode}
+        suggestionConfidenceMinDraft={suggestionConfidenceMinDraft}
         locationRadius={locationRadiusFilter}
         hasFacesFilter={hasFacesFilter}
         pathHintFilters={pathHintFilters}

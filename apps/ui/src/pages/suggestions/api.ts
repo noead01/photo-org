@@ -4,6 +4,7 @@ export async function fetchSuggestionsPage(
   page: number,
   pageSize: number,
   minConfidenceThreshold: number,
+  maxConfidenceThreshold: number,
   excludedPersonIds: string[]
 ): Promise<SuggestionListPayload> {
   const params = new URLSearchParams({
@@ -12,6 +13,9 @@ export async function fetchSuggestionsPage(
   });
   if (minConfidenceThreshold > 0) {
     params.set("min_confidence", String(minConfidenceThreshold));
+  }
+  if (maxConfidenceThreshold < 1) {
+    params.set("max_confidence", String(maxConfidenceThreshold));
   }
   for (const personId of excludedPersonIds) {
     params.append("excluded_person_ids", personId);

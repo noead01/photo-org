@@ -22,7 +22,7 @@ SUGGESTION_SKIP_SUGGESTED_PERSON_NOT_FOUND = "suggested_person_not_found"
 SUGGESTION_SKIP_SELECTED_PERSON_NOT_SUGGESTED = "selected_person_not_suggested"
 
 
-def _top_suggestion_subquery(*, excluded_person_ids: set[str]):
+def _top_suggestion_subquery():
     ranked = select(
         face_suggestions.c.face_id.label("face_id"),
         face_suggestions.c.person_id.label("person_id"),
@@ -44,8 +44,6 @@ def _top_suggestion_subquery(*, excluded_person_ids: set[str]):
             face_suggestions.c.person_id == people.c.person_id,
         )
     ).where(people.c.display_name != UNKNOWN_PERSON_DISPLAY_NAME)
-    if excluded_person_ids:
-        ranked = ranked.where(~face_suggestions.c.person_id.in_(sorted(excluded_person_ids)))
     ranked = ranked.subquery()
     return (
         select(
@@ -137,17 +135,24 @@ def list_unassigned_face_suggestion_photos(
     page: int,
     page_size: int,
     min_confidence: float = 0.0,
+    max_confidence: float = 1.0,
     excluded_person_ids: list[str] | None = None,
 ) -> dict[str, object]:
     normalized_min_confidence = min(1.0, max(0.0, float(min_confidence)))
+    normalized_max_confidence = min(1.0, max(0.0, float(max_confidence)))
+    if normalized_max_confidence < normalized_min_confidence:
+        normalized_max_confidence = normalized_min_confidence
     normalized_excluded_person_ids = {
         person_id.strip()
         for person_id in (excluded_person_ids or [])
         if isinstance(person_id, str) and person_id.strip()
     }
-    top_suggestion = _top_suggestion_subquery(
-        excluded_person_ids=normalized_excluded_person_ids,
-    )
+    top_suggestion = _top_suggestion_subquery()
+    excluded_top_suggestion_predicates = []
+    if normalized_excluded_person_ids:
+        excluded_top_suggestion_predicates.append(
+            ~top_suggestion.c.person_id.in_(sorted(normalized_excluded_person_ids))
+        )
     eligible_photo_ids = (
         select(faces.c.photo_id)
         .select_from(
@@ -160,6 +165,8 @@ def list_unassigned_face_suggestion_photos(
             faces.c.dismissed_ts.is_(None),
             photos.c.deleted_ts.is_(None),
             top_suggestion.c.confidence >= normalized_min_confidence,
+            top_suggestion.c.confidence <= normalized_max_confidence,
+            *excluded_top_suggestion_predicates,
         )
         .distinct()
         .subquery()
@@ -229,6 +236,8 @@ def list_unassigned_face_suggestion_photos(
                 faces.c.person_id.is_(None),
                 faces.c.dismissed_ts.is_(None),
                 top_suggestion.c.confidence >= normalized_min_confidence,
+                top_suggestion.c.confidence <= normalized_max_confidence,
+                *excluded_top_suggestion_predicates,
             )
             .order_by(
                 faces.c.photo_id.asc(),

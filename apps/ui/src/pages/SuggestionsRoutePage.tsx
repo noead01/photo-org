@@ -20,6 +20,9 @@ export function SuggestionsRoutePage() {
   const [minConfidencePercent, setMinConfidencePercent] = useState(
     initialStoredFiltersRef.current?.minConfidencePercent ?? 0
   );
+  const [maxConfidencePercent, setMaxConfidencePercent] = useState(
+    initialStoredFiltersRef.current?.maxConfidencePercent ?? 100
+  );
   const [excludedPersonIds, setExcludedPersonIds] = useState<string[]>(
     initialStoredFiltersRef.current?.excludedPersonIds ?? []
   );
@@ -32,6 +35,7 @@ export function SuggestionsRoutePage() {
   const [excludedPersonPickerValue, setExcludedPersonPickerValue] = useState("");
 
   const minConfidenceThreshold = minConfidencePercent / 100;
+  const maxConfidenceThreshold = maxConfidencePercent / 100;
   const excludedPersonIdSet = useMemo(() => new Set(excludedPersonIds), [excludedPersonIds]);
 
   const loadPage = useCallback(
@@ -43,6 +47,7 @@ export function SuggestionsRoutePage() {
           targetPage,
           PAGE_SIZE,
           minConfidenceThreshold,
+          maxConfidenceThreshold,
           excludedPersonIds
         );
         setPayload(nextPayload);
@@ -60,7 +65,7 @@ export function SuggestionsRoutePage() {
         setIsLoading(false);
       }
     },
-    [excludedPersonIds, minConfidenceThreshold]
+    [excludedPersonIds, maxConfidenceThreshold, minConfidenceThreshold]
   );
 
   useEffect(() => {
@@ -93,9 +98,10 @@ export function SuggestionsRoutePage() {
   useEffect(() => {
     saveSuggestionsFilterState({
       minConfidencePercent,
+      maxConfidencePercent,
       excludedPersonIds,
     });
-  }, [excludedPersonIds, minConfidencePercent]);
+  }, [excludedPersonIds, maxConfidencePercent, minConfidencePercent]);
 
   const currentPageFaceIdsOrdered = useMemo(() => flattenFaceIds(payload?.items ?? []), [payload]);
 
@@ -168,6 +174,7 @@ export function SuggestionsRoutePage() {
         <div className="suggestions-header-actions">
           <SuggestionsFilters
             minConfidencePercent={minConfidencePercent}
+            maxConfidencePercent={maxConfidencePercent}
             isLoading={isLoading}
             isConfirming={isConfirming}
             peopleDirectory={peopleDirectory}
@@ -176,6 +183,12 @@ export function SuggestionsRoutePage() {
             excludedPersonPickerValue={excludedPersonPickerValue}
             onMinConfidenceChange={(value) => {
               setMinConfidencePercent(value);
+              setMaxConfidencePercent((current) => Math.max(current, value));
+              setPage(1);
+            }}
+            onMaxConfidenceChange={(value) => {
+              setMaxConfidencePercent(value);
+              setMinConfidencePercent((current) => Math.min(current, value));
               setPage(1);
             }}
             onExcludedPersonPickerValueChange={setExcludedPersonPickerValue}

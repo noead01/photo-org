@@ -2,6 +2,7 @@ import type { PersonRecord } from "./types";
 
 type SuggestionsFiltersProps = {
   minConfidencePercent: number;
+  maxConfidencePercent: number;
   isLoading: boolean;
   isConfirming: boolean;
   peopleDirectory: PersonRecord[];
@@ -9,6 +10,7 @@ type SuggestionsFiltersProps = {
   excludedPeople: PersonRecord[];
   excludedPersonPickerValue: string;
   onMinConfidenceChange: (value: number) => void;
+  onMaxConfidenceChange: (value: number) => void;
   onExcludedPersonPickerValueChange: (value: string) => void;
   onAddExcludedPerson: (personId: string) => void;
   onRemoveExcludedPerson: (personId: string) => void;
@@ -16,6 +18,7 @@ type SuggestionsFiltersProps = {
 
 export function SuggestionsFilters({
   minConfidencePercent,
+  maxConfidencePercent,
   isLoading,
   isConfirming,
   peopleDirectory,
@@ -23,6 +26,7 @@ export function SuggestionsFilters({
   excludedPeople,
   excludedPersonPickerValue,
   onMinConfidenceChange,
+  onMaxConfidenceChange,
   onExcludedPersonPickerValueChange,
   onAddExcludedPerson,
   onRemoveExcludedPerson
@@ -40,6 +44,21 @@ export function SuggestionsFilters({
           aria-label="Minimum suggestion certainty"
           onChange={(event) => {
             onMinConfidenceChange(Number(event.currentTarget.value));
+          }}
+          disabled={isLoading || isConfirming}
+        />
+      </label>
+      <label className="suggestions-confidence-filter">
+        <span>{`Maximum certainty: ${maxConfidencePercent}%`}</span>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={maxConfidencePercent}
+          aria-label="Maximum suggestion certainty"
+          onChange={(event) => {
+            onMaxConfidenceChange(Number(event.currentTarget.value));
           }}
           disabled={isLoading || isConfirming}
         />

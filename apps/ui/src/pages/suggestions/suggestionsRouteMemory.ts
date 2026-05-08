@@ -2,6 +2,7 @@ const SUGGESTIONS_FILTERS_KEY = "photo-org:suggestions:filters";
 
 export interface StoredSuggestionsFilterState {
   minConfidencePercent: number;
+  maxConfidencePercent: number;
   excludedPersonIds: string[];
 }
 
@@ -45,10 +46,16 @@ export function loadSuggestionsFilterState(): StoredSuggestionsFilterState | nul
   try {
     const parsed = JSON.parse(rawValue) as {
       minConfidencePercent?: unknown;
+      maxConfidencePercent?: unknown;
       excludedPersonIds?: unknown;
     };
 
     if (!isValidMinConfidencePercent(parsed.minConfidencePercent)) {
+      return null;
+    }
+    const maxConfidencePercent =
+      parsed.maxConfidencePercent === undefined ? 100 : parsed.maxConfidencePercent;
+    if (!isValidMinConfidencePercent(maxConfidencePercent)) {
       return null;
     }
 
@@ -57,8 +64,10 @@ export function loadSuggestionsFilterState(): StoredSuggestionsFilterState | nul
       return null;
     }
 
+    const minConfidencePercent = parsed.minConfidencePercent;
     return {
-      minConfidencePercent: parsed.minConfidencePercent,
+      minConfidencePercent,
+      maxConfidencePercent: Math.max(maxConfidencePercent, minConfidencePercent),
       excludedPersonIds
     };
   } catch {
@@ -76,6 +85,7 @@ export function saveSuggestionsFilterState(state: StoredSuggestionsFilterState):
     SUGGESTIONS_FILTERS_KEY,
     JSON.stringify({
       minConfidencePercent: state.minConfidencePercent,
+      maxConfidencePercent: state.maxConfidencePercent,
       excludedPersonIds: state.excludedPersonIds
     })
   );
