@@ -221,6 +221,22 @@ def test_face_suggestion_review_list_returns_paginated_unassigned_faces_with_top
     assert filtered_payload["items"][0]["photo_id"] == "photo-1"
     assert [face["face_id"] for face in filtered_payload["items"][0]["faces"]] == ["face-1"]
 
+    response_range_filtered = client.get(
+        "/api/v1/suggestions/faces",
+        params={"page": 1, "page_size": 24, "min_confidence": 0.8, "max_confidence": 0.9},
+    )
+    assert response_range_filtered.status_code == 200
+    range_filtered_payload = response_range_filtered.json()
+    assert range_filtered_payload["page"] == {
+        "page": 1,
+        "page_size": 24,
+        "total_items": 1,
+        "total_pages": 1,
+    }
+    assert len(range_filtered_payload["items"]) == 1
+    assert range_filtered_payload["items"][0]["photo_id"] == "photo-1"
+    assert [face["face_id"] for face in range_filtered_payload["items"][0]["faces"]] == ["face-2"]
+
     response_excluded = client.get(
         "/api/v1/suggestions/faces",
         params={
@@ -241,6 +257,28 @@ def test_face_suggestion_review_list_returns_paginated_unassigned_faces_with_top
     assert [face["face_id"] for face in excluded_payload["items"][0]["faces"]] == ["face-1"]
     assert excluded_payload["items"][1]["photo_id"] == "photo-2"
     assert [face["face_id"] for face in excluded_payload["items"][1]["faces"]] == ["face-3"]
+
+    response_excluded_top_person = client.get(
+        "/api/v1/suggestions/faces",
+        params={
+            "page": 1,
+            "page_size": 24,
+            "excluded_person_ids": ["person-1"],
+        },
+    )
+    assert response_excluded_top_person.status_code == 200
+    excluded_top_person_payload = response_excluded_top_person.json()
+    assert excluded_top_person_payload["page"] == {
+        "page": 1,
+        "page_size": 24,
+        "total_items": 1,
+        "total_pages": 1,
+    }
+    assert len(excluded_top_person_payload["items"]) == 1
+    assert excluded_top_person_payload["items"][0]["photo_id"] == "photo-1"
+    # face-1 has person-1 as top suggestion (rank 1), so it should be excluded entirely.
+    # face-2 remains because its top suggestion is person-2.
+    assert [face["face_id"] for face in excluded_top_person_payload["items"][0]["faces"]] == ["face-2"]
 
 
 def test_face_suggestion_review_list_omits_dismissed_faces(tmp_path, monkeypatch):

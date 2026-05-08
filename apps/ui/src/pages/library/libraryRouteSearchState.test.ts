@@ -2,6 +2,7 @@ import {
   buildLibraryUrlQuery,
   buildSearchFilters,
   parseLibraryUrlState,
+  resolvePersonCertaintyPercent,
   validateDateRange
 } from "./libraryRouteSearchState";
 
@@ -56,6 +57,26 @@ describe("libraryRouteSearchState", () => {
     expect(query).toContain("sort=asc");
   });
 
+  it("persists certainty fields in URL query even before selecting people", () => {
+    const query = buildLibraryUrlQuery({
+      queryChips: [],
+      fromDate: "",
+      toDate: "",
+      selectedPersonNames: [],
+      personCertaintyMode: "include_suggestions",
+      suggestionConfidenceMinDraft: "0.91",
+      locationRadius: null,
+      hasFacesFilter: null,
+      pathHintFilters: [],
+      page: 1,
+      pageSize: 60,
+      sortDirection: "desc"
+    });
+
+    expect(query).toContain("personCertainty=include_suggestions");
+    expect(query).toContain("suggestionMin=0.91");
+  });
+
   it("validates descending date ranges", () => {
     expect(validateDateRange("2026-05-10", "2026-05-01")).toBe(
       "From date must be on or before To date."
@@ -70,6 +91,12 @@ describe("libraryRouteSearchState", () => {
       person_names: ["Inez"],
       person_certainty_mode: "human_only"
     });
+  });
+
+  it("resolves person certainty percent for each certainty mode", () => {
+    expect(resolvePersonCertaintyPercent("human_only", "0.25")).toBe(100);
+    expect(resolvePersonCertaintyPercent("include_suggestions", "0.91")).toBe(91);
+    expect(resolvePersonCertaintyPercent("include_suggestions", "not-a-number")).toBe(80);
   });
 
   it("returns null when no search filters are active", () => {

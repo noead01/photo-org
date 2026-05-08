@@ -1942,15 +1942,47 @@ class TestPhotosRepositorySoftDeleteFiltering:
                         "faces_count": 1,
                         "faces_detected_ts": now,
                     },
+                    {
+                        "photo_id": "photo-machine-non-top",
+                        "path": "seed-corpus/family/photo-machine-non-top.jpg",
+                        "sha256": "g" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 1,
+                        "faces_detected_ts": now,
+                    },
                 ],
             )
             connection.execute(
-                insert(people).values(
-                    person_id="person-inez",
-                    display_name="Inez Rivera",
-                    created_ts=now,
-                    updated_ts=now,
-                )
+                insert(people),
+                [
+                    {
+                        "person_id": "person-inez",
+                        "display_name": "Inez Rivera",
+                        "created_ts": now,
+                        "updated_ts": now,
+                    },
+                    {
+                        "person_id": "person-mateo",
+                        "display_name": "Mateo Rivera",
+                        "created_ts": now,
+                        "updated_ts": now,
+                    },
+                ],
             )
             connection.execute(
                 insert(faces),
@@ -1988,6 +2020,21 @@ class TestPhotosRepositorySoftDeleteFiltering:
                     {
                         "face_id": "face-machine-low",
                         "photo_id": "photo-machine-low",
+                        "person_id": None,
+                        "bbox_x": 0,
+                        "bbox_y": 0,
+                        "bbox_w": 10,
+                        "bbox_h": 10,
+                        "bitmap": None,
+                        "embedding": None,
+                        "detector_name": "seed",
+                        "detector_version": "1",
+                        "provenance": None,
+                        "created_ts": now,
+                    },
+                    {
+                        "face_id": "face-machine-non-top",
+                        "photo_id": "photo-machine-non-top",
                         "person_id": None,
                         "bbox_x": 0,
                         "bbox_y": 0,
@@ -2041,6 +2088,36 @@ class TestPhotosRepositorySoftDeleteFiltering:
                         "confidence": 0.62,
                         "centroid_distance": 0.38,
                         "knn_distance": 0.41,
+                        "representation_version": 1,
+                        "scoring_version": "hybrid-v1",
+                        "model_version": "nearest-neighbor-cosine-v1",
+                        "provenance": None,
+                        "created_ts": now,
+                        "updated_ts": now,
+                    },
+                    {
+                        "face_suggestion_id": "suggestion-non-top-inez",
+                        "face_id": "face-machine-non-top",
+                        "person_id": "person-inez",
+                        "rank": 2,
+                        "confidence": 0.88,
+                        "centroid_distance": 0.12,
+                        "knn_distance": 0.17,
+                        "representation_version": 1,
+                        "scoring_version": "hybrid-v1",
+                        "model_version": "nearest-neighbor-cosine-v1",
+                        "provenance": None,
+                        "created_ts": now,
+                        "updated_ts": now,
+                    },
+                    {
+                        "face_suggestion_id": "suggestion-non-top-mateo",
+                        "face_id": "face-machine-non-top",
+                        "person_id": "person-mateo",
+                        "rank": 1,
+                        "confidence": 0.93,
+                        "centroid_distance": 0.08,
+                        "knn_distance": 0.11,
                         "representation_version": 1,
                         "scoring_version": "hybrid-v1",
                         "model_version": "nearest-neighbor-cosine-v1",
@@ -2141,15 +2218,47 @@ class TestPhotosRepositorySoftDeleteFiltering:
                         "faces_count": 1,
                         "faces_detected_ts": now,
                     },
+                    {
+                        "photo_id": "photo-machine-non-top",
+                        "path": "seed-corpus/family/photo-machine-non-top.jpg",
+                        "sha256": "g" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 1,
+                        "faces_detected_ts": now,
+                    },
                 ],
             )
             connection.execute(
-                insert(people).values(
-                    person_id="person-inez",
-                    display_name="Inez Rivera",
-                    created_ts=now,
-                    updated_ts=now,
-                )
+                insert(people),
+                [
+                    {
+                        "person_id": "person-inez",
+                        "display_name": "Inez Rivera",
+                        "created_ts": now,
+                        "updated_ts": now,
+                    },
+                    {
+                        "person_id": "person-mateo",
+                        "display_name": "Mateo Rivera",
+                        "created_ts": now,
+                        "updated_ts": now,
+                    },
+                ],
             )
             connection.execute(
                 insert(faces),
@@ -2187,6 +2296,21 @@ class TestPhotosRepositorySoftDeleteFiltering:
                     {
                         "face_id": "face-machine-low",
                         "photo_id": "photo-machine-low",
+                        "person_id": None,
+                        "bbox_x": 0,
+                        "bbox_y": 0,
+                        "bbox_w": 10,
+                        "bbox_h": 10,
+                        "bitmap": None,
+                        "embedding": None,
+                        "detector_name": "seed",
+                        "detector_version": "1",
+                        "provenance": None,
+                        "created_ts": now,
+                    },
+                    {
+                        "face_id": "face-machine-non-top",
+                        "photo_id": "photo-machine-non-top",
                         "person_id": None,
                         "bbox_x": 0,
                         "bbox_y": 0,
@@ -2247,6 +2371,36 @@ class TestPhotosRepositorySoftDeleteFiltering:
                         "created_ts": now,
                         "updated_ts": now,
                     },
+                    {
+                        "face_suggestion_id": "suggestion-non-top-inez",
+                        "face_id": "face-machine-non-top",
+                        "person_id": "person-inez",
+                        "rank": 2,
+                        "confidence": 0.88,
+                        "centroid_distance": 0.12,
+                        "knn_distance": 0.17,
+                        "representation_version": 1,
+                        "scoring_version": "hybrid-v1",
+                        "model_version": "nearest-neighbor-cosine-v1",
+                        "provenance": None,
+                        "created_ts": now,
+                        "updated_ts": now,
+                    },
+                    {
+                        "face_suggestion_id": "suggestion-non-top-mateo",
+                        "face_id": "face-machine-non-top",
+                        "person_id": "person-mateo",
+                        "rank": 1,
+                        "confidence": 0.93,
+                        "centroid_distance": 0.08,
+                        "knn_distance": 0.11,
+                        "representation_version": 1,
+                        "scoring_version": "hybrid-v1",
+                        "model_version": "nearest-neighbor-cosine-v1",
+                        "provenance": None,
+                        "created_ts": now,
+                        "updated_ts": now,
+                    },
                 ],
             )
 
@@ -2264,7 +2418,28 @@ class TestPhotosRepositorySoftDeleteFiltering:
 
         assert {item["photo_id"] for item in items} == {"photo-human", "photo-machine-suggested"}
         assert "photo-machine-low" not in {item["photo_id"] for item in items}
+        assert "photo-machine-non-top" not in {item["photo_id"] for item in items}
         assert total == 2
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            id_filtered_items, id_filtered_total, _ = repo.search_photos(
+                filters=SearchFilters(
+                    people=["person-inez"],
+                    person_certainty_mode="include_suggestions",
+                    suggestion_confidence_min=0.78,
+                ),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+            )
+
+        assert {item["photo_id"] for item in id_filtered_items} == {
+            "photo-human",
+            "photo-machine-suggested",
+        }
+        assert "photo-machine-low" not in {item["photo_id"] for item in id_filtered_items}
+        assert "photo-machine-non-top" not in {item["photo_id"] for item in id_filtered_items}
+        assert id_filtered_total == 2
 
     def test_search_repository_composes_person_names_with_path_hints(self, tmp_path):
         database_url = f"sqlite:///{tmp_path / 'search-person-names-path-hints.db'}"

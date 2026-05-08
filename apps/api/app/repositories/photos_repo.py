@@ -90,6 +90,25 @@ class PhotosRepository:
     def _suggestion_confidence_threshold(filters: SearchFilters) -> float:
         return float(filters.suggestion_confidence_min) if filters.suggestion_confidence_min is not None else 0.0
 
+    def _top_face_suggestions_subquery(self):
+        return (
+            select(
+                self.face_suggestions.c.face_id.label("face_id"),
+                self.face_suggestions.c.person_id.label("person_id"),
+                self.face_suggestions.c.confidence.label("confidence"),
+                func.row_number()
+                .over(
+                    partition_by=self.face_suggestions.c.face_id,
+                    order_by=(
+                        self.face_suggestions.c.rank.asc(),
+                        self.face_suggestions.c.confidence.desc(),
+                        self.face_suggestions.c.person_id.asc(),
+                    ),
+                )
+                .label("suggestion_order"),
+            )
+        ).subquery()
+
     def _build_people_filter_clause(self, filters: SearchFilters):
         person_ids = filters.people or []
         if not person_ids:
@@ -131,19 +150,21 @@ class PhotosRepository:
             return confirmed_match_exists
 
         if person_certainty_mode == "include_suggestions":
+            top_face_suggestions = self._top_face_suggestions_subquery()
             suggestion_match_exists = (
                 select(self.faces.c.photo_id)
                 .select_from(
                     self.faces.join(
-                        self.face_suggestions,
-                        self.face_suggestions.c.face_id == self.faces.c.face_id,
+                        top_face_suggestions,
+                        top_face_suggestions.c.face_id == self.faces.c.face_id,
                     )
                 )
                 .where(
                     and_(
                         self.faces.c.photo_id == self.photos.c.photo_id,
-                        self.face_suggestions.c.person_id.in_(person_ids),
-                        self.face_suggestions.c.confidence >= self._suggestion_confidence_threshold(filters),
+                        top_face_suggestions.c.suggestion_order == 1,
+                        top_face_suggestions.c.person_id.in_(person_ids),
+                        top_face_suggestions.c.confidence >= self._suggestion_confidence_threshold(filters),
                     )
                 )
                 .limit(1)
@@ -217,21 +238,23 @@ class PhotosRepository:
             return confirmed_match_exists
 
         if person_certainty_mode == "include_suggestions":
+            top_face_suggestions = self._top_face_suggestions_subquery()
             suggestion_match_exists = (
                 select(self.faces.c.photo_id)
                 .select_from(
                     self.faces.join(
-                        self.face_suggestions,
-                        self.face_suggestions.c.face_id == self.faces.c.face_id,
+                        top_face_suggestions,
+                        top_face_suggestions.c.face_id == self.faces.c.face_id,
                     ).join(
                         self.people,
-                        self.face_suggestions.c.person_id == self.people.c.person_id,
+                        top_face_suggestions.c.person_id == self.people.c.person_id,
                     )
                 )
                 .where(
                     and_(
                         self.faces.c.photo_id == self.photos.c.photo_id,
-                        self.face_suggestions.c.confidence >= self._suggestion_confidence_threshold(filters),
+                        top_face_suggestions.c.suggestion_order == 1,
+                        top_face_suggestions.c.confidence >= self._suggestion_confidence_threshold(filters),
                         person_name_predicate,
                     )
                 )

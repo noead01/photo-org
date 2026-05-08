@@ -888,18 +888,107 @@ describe("SuggestionsRoutePage", () => {
     );
   });
 
+  it("applies a certainty range with both minimum and maximum filters", async () => {
+    installFetchRoutes(fetchMock, {
+      "GET /api/v1/people": reply(buildPeoplePayload()),
+      "GET /api/v1/suggestions/faces?page=1&page_size=24": reply(
+        buildSuggestionsPayload({
+          totalItems: 3,
+          items: [
+            {
+              photo_id: "photo-1",
+              path: "/photos/photo-1.jpg",
+              thumbnail: null,
+              faces: [
+                {
+                  face_id: "face-1",
+                  top_suggestion: {
+                    person_id: "person-1",
+                    display_name: "Alex",
+                    confidence: 0.97
+                  }
+                }
+              ]
+            }
+          ]
+        })
+      ),
+      "GET /api/v1/suggestions/faces?page=1&page_size=24&min_confidence=0.8": reply(
+        buildSuggestionsPayload({
+          totalItems: 2,
+          items: [
+            {
+              photo_id: "photo-1",
+              path: "/photos/photo-1.jpg",
+              thumbnail: null,
+              faces: [
+                {
+                  face_id: "face-1",
+                  top_suggestion: {
+                    person_id: "person-1",
+                    display_name: "Alex",
+                    confidence: 0.85
+                  }
+                }
+              ]
+            }
+          ]
+        })
+      ),
+      "GET /api/v1/suggestions/faces?page=1&page_size=24&min_confidence=0.8&max_confidence=0.9": reply(
+        buildSuggestionsPayload({
+          totalItems: 1,
+          items: [
+            {
+              photo_id: "photo-2",
+              path: "/photos/photo-2.jpg",
+              thumbnail: null,
+              faces: [
+                {
+                  face_id: "face-2",
+                  top_suggestion: {
+                    person_id: "person-2",
+                    display_name: "Blair",
+                    confidence: 0.88
+                  }
+                }
+              ]
+            }
+          ]
+        })
+      )
+    });
+
+    renderPage();
+    expect(await screen.findByText("/photos/photo-1.jpg")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Minimum suggestion certainty"), {
+      target: { value: "80" }
+    });
+    expect(await screen.findByText("/photos/photo-1.jpg")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Maximum suggestion certainty"), {
+      target: { value: "90" }
+    });
+
+    expect(await screen.findByText("/photos/photo-2.jpg")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/suggestions/faces?page=1&page_size=24&min_confidence=0.8&max_confidence=0.9"
+    );
+  });
+
   it("restores persisted minimum certainty and excluded people from local storage", async () => {
     window.localStorage.setItem(
       "photo-org:suggestions:filters",
       JSON.stringify({
         minConfidencePercent: 90,
+        maxConfidencePercent: 95,
         excludedPersonIds: ["person-2"]
       })
     );
 
     installFetchRoutes(fetchMock, {
       "GET /api/v1/people": reply(buildPeoplePayload()),
-      "GET /api/v1/suggestions/faces?page=1&page_size=24&min_confidence=0.9&excluded_person_ids=person-2": reply(
+      "GET /api/v1/suggestions/faces?page=1&page_size=24&min_confidence=0.9&max_confidence=0.95&excluded_person_ids=person-2": reply(
         buildSuggestionsPayload({
           items: [
             {
@@ -925,6 +1014,7 @@ describe("SuggestionsRoutePage", () => {
     renderPage();
 
     expect(await screen.findByDisplayValue("90")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("95")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Remove excluded person Blair" })).toBeInTheDocument();
   });
 

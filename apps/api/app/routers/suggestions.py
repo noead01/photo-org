@@ -103,6 +103,7 @@ def list_suggestion_review_faces_endpoint(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 24,
     min_confidence: Annotated[float, Query(ge=0, le=1)] = 0,
+    max_confidence: Annotated[float, Query(ge=0, le=1)] = 1,
     excluded_person_ids: Annotated[list[str] | None, Query()] = None,
     db: Session = Depends(get_db),
 ) -> SuggestionReviewListResponse:
@@ -111,6 +112,7 @@ def list_suggestion_review_faces_endpoint(
         page=page,
         page_size=page_size,
         min_confidence=min_confidence,
+        max_confidence=max_confidence,
         excluded_person_ids=excluded_person_ids,
     )
     return SuggestionReviewListResponse.model_validate(result)

@@ -301,6 +301,121 @@ describe("LibraryRoutePage", () => {
     expect(screen.queryByText("Machine suggestions")).not.toBeInTheDocument();
   });
 
+  it("applies certainty mode and threshold when adding a person filter", async () => {
+    const user = userEvent.setup();
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+
+      if (url === "/api/v1/people") {
+        return {
+          ok: true,
+          json: async () => [{ person_id: "person-inez", display_name: "Inez Rivera" }]
+        } as Response;
+      }
+
+      if (url !== "/api/v1/search") {
+        throw new Error(`Unhandled fetch: ${url}`);
+      }
+
+      const payload = buildPayload(["photo-a"]);
+      return {
+        ok: true,
+        json: async () => payload
+      } as Response;
+    });
+
+    renderLibraryAt("/library?page=2");
+
+    expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Filter labels" }));
+    await user.selectOptions(screen.getByLabelText("Person certainty mode"), "include_suggestions");
+    await user.clear(screen.getByLabelText("Suggestion threshold"));
+    await user.type(screen.getByLabelText("Suggestion threshold"), "0.91");
+    await user.type(screen.getByRole("textbox", { name: "Person filter" }), "inez");
+    await user.click(screen.getByRole("button", { name: "Add person filter" }));
+    expect(
+      await screen.findByRole("button", { name: "Remove person Inez Rivera with 91% certainty" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("person: Inez Rivera (91%)")).toBeInTheDocument();
+
+    await waitFor(() => {
+      const searchBodies = fetchMock.mock.calls
+        .filter(([requestInput]) => String(requestInput) === "/api/v1/search")
+        .map(([, requestInit]) =>
+          JSON.parse((requestInit?.body as string | undefined) ?? "{}") as {
+            filters?: {
+              person_names?: string[];
+              person_certainty_mode?: string;
+              suggestion_confidence_min?: number;
+            };
+          }
+        );
+
+      const personFilterRequest = searchBodies.find(
+        (body) => body.filters?.person_names?.includes("Inez Rivera")
+      );
+
+      expect(personFilterRequest).toEqual(
+        expect.objectContaining({
+          filters: expect.objectContaining({
+            person_certainty_mode: "include_suggestions",
+            suggestion_confidence_min: 0.91
+          })
+        })
+      );
+    });
+  });
+
+  it("shows 100% certainty on person chips for human-only mode", async () => {
+    const user = userEvent.setup();
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+
+      if (url === "/api/v1/people") {
+        return {
+          ok: true,
+          json: async () => [{ person_id: "person-inez", display_name: "Inez Rivera" }]
+        } as Response;
+      }
+
+      if (url !== "/api/v1/search") {
+        throw new Error(`Unhandled fetch: ${url}`);
+      }
+
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-a"])
+      } as Response;
+    });
+
+    renderLibraryAt("/library");
+    expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Filter labels" }));
+    await user.type(screen.getByRole("textbox", { name: "Person filter" }), "inez");
+    await user.click(screen.getByRole("button", { name: "Add person filter" }));
+
+    expect(
+      await screen.findByRole("button", { name: "Remove person Inez Rivera with 100% certainty" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("person: Inez Rivera (100%)")).toBeInTheDocument();
+  });
+
   it("advances to the next offset-backed page when Next is clicked", async () => {
     const user = userEvent.setup();
 

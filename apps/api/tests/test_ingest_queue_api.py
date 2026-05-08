@@ -175,6 +175,45 @@ def test_process_queue_endpoint_forwards_limit_to_processor(
     }
 
 
+def test_process_queue_endpoint_accepts_limit_5000_and_rejects_5001(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    captured: dict[str, int] = {}
+
+    def fake_process_pending_ingest_queue(*, limit: int = 100):
+        captured["limit"] = limit
+
+        class Result:
+            processed = 0
+            failed = 0
+            retryable_errors = 0
+
+        return Result()
+
+    monkeypatch.setattr(
+        "app.routers.ingest_queue.process_pending_ingest_queue",
+        fake_process_pending_ingest_queue,
+    )
+
+    accepted = client.post(
+        "/api/v1/internal/ingest-queue/process",
+        headers={"X-Worker-Role": "ingest-processor"},
+        json={"limit": 5000},
+    )
+
+    assert accepted.status_code == 200
+    assert captured == {"limit": 5000}
+
+    rejected = client.post(
+        "/api/v1/internal/ingest-queue/process",
+        headers={"X-Worker-Role": "ingest-processor"},
+        json={"limit": 5001},
+    )
+
+    assert rejected.status_code == 422
+
+
 def test_face_suggestion_recompute_queue_endpoint_forwards_limit_with_payload_filter(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
