@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ReactPaginate from "react-paginate";
+import { parseAsArrayOf, parseAsInteger, parseAsString, useQueryState } from "nuqs";
+import { BrowsePagination } from "./shared/BrowsePagination";
 
 import { SuggestionsFilters } from "./suggestions/SuggestionsFilters";
 import { SuggestionsGrid } from "./suggestions/SuggestionsGrid";
 import { fetchPeopleDirectory, fetchSuggestionsPage } from "./suggestions/api";
-import { loadSuggestionsFilterState, saveSuggestionsFilterState } from "./suggestions/suggestionsRouteMemory";
 import type { PersonRecord, SuggestionPhoto, SuggestionListPayload } from "./suggestions/types";
 import { useSuggestionsActions } from "./suggestions/useSuggestionsActions";
 
@@ -15,17 +15,19 @@ function flattenFaceIds(items: SuggestionPhoto[]): string[] {
 }
 
 export function SuggestionsRoutePage() {
-  const initialStoredFiltersRef = useRef(loadSuggestionsFilterState());
+  const [minConfidenceQueryValue, setMinConfidenceQueryValue] = useQueryState(
+    "minConfidence",
+    parseAsInteger.withDefault(0).withOptions({ history: "replace" })
+  );
+  const [maxConfidenceQueryValue, setMaxConfidenceQueryValue] = useQueryState(
+    "maxConfidence",
+    parseAsInteger.withDefault(100).withOptions({ history: "replace" })
+  );
+  const [excludedPersonIdsQueryValue, setExcludedPersonIdsQueryValue] = useQueryState(
+    "excludedPersonId",
+    parseAsArrayOf(parseAsString).withDefault([]).withOptions({ history: "replace" })
+  );
   const [page, setPage] = useState(1);
-  const [minConfidencePercent, setMinConfidencePercent] = useState(
-    initialStoredFiltersRef.current?.minConfidencePercent ?? 0
-  );
-  const [maxConfidencePercent, setMaxConfidencePercent] = useState(
-    initialStoredFiltersRef.current?.maxConfidencePercent ?? 100
-  );
-  const [excludedPersonIds, setExcludedPersonIds] = useState<string[]>(
-    initialStoredFiltersRef.current?.excludedPersonIds ?? []
-  );
   const [peopleDirectory, setPeopleDirectory] = useState<PersonRecord[]>([]);
   const [payload, setPayload] = useState<SuggestionListPayload | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -34,6 +36,19 @@ export function SuggestionsRoutePage() {
   const [faceChoiceDrafts, setFaceChoiceDrafts] = useState<Map<string, string>>(new Map());
   const [excludedPersonPickerValue, setExcludedPersonPickerValue] = useState("");
 
+  const minConfidencePercent = clampPercentage(minConfidenceQueryValue);
+  const maxConfidencePercent = Math.max(
+    minConfidencePercent,
+    clampPercentage(maxConfidenceQueryValue)
+  );
+  const excludedPersonIdsKey = excludedPersonIdsQueryValue
+    .map((personId) => personId.trim())
+    .filter((personId) => personId.length > 0)
+    .join("\u001f");
+  const excludedPersonIds = useMemo(
+    () => (excludedPersonIdsKey.length > 0 ? excludedPersonIdsKey.split("\u001f") : []),
+    [excludedPersonIdsKey]
+  );
   const minConfidenceThreshold = minConfidencePercent / 100;
   const maxConfidenceThreshold = maxConfidencePercent / 100;
   const excludedPersonIdSet = useMemo(() => new Set(excludedPersonIds), [excludedPersonIds]);
@@ -95,14 +110,6 @@ export function SuggestionsRoutePage() {
     };
   }, []);
 
-  useEffect(() => {
-    saveSuggestionsFilterState({
-      minConfidencePercent,
-      maxConfidencePercent,
-      excludedPersonIds,
-    });
-  }, [excludedPersonIds, maxConfidencePercent, minConfidencePercent]);
-
   const currentPageFaceIdsOrdered = useMemo(() => flattenFaceIds(payload?.items ?? []), [payload]);
 
   const selectedFaceIdsOrdered = useMemo(() => {
@@ -122,11 +129,8 @@ export function SuggestionsRoutePage() {
 
   const totalPages = payload?.page.total_pages ?? 0;
   const totalItems = payload?.page.total_items ?? 0;
-  const normalizedTotalPages = Number.isInteger(totalPages) && totalPages > 0 ? totalPages : 1;
-  const normalizedRequestedPage = Number.isInteger(page) && page > 0 ? page : 1;
-  const clampedRequestedPage = Math.min(normalizedRequestedPage, normalizedTotalPages);
-  const canGoPrevious = !isLoading && totalPages > 0 && clampedRequestedPage > 1;
-  const canGoNext = !isLoading && totalPages > 0 && clampedRequestedPage < totalPages;
+  const canGoPrevious = !isLoading && totalPages > 0 && page > 1;
+  const canGoNext = !isLoading && totalPages > 0 && page < totalPages;
 
   const {
     isConfirming,
@@ -149,17 +153,15 @@ export function SuggestionsRoutePage() {
   });
 
   function addExcludedPerson(personId: string) {
-    setExcludedPersonIds((current) => {
-      if (current.includes(personId)) {
-        return current;
-      }
-      return [...current, personId];
-    });
+    const nextExcludedIds = excludedPersonIds.includes(personId)
+      ? excludedPersonIds
+      : [...excludedPersonIds, personId];
+    void setExcludedPersonIdsQueryValue(nextExcludedIds);
     setPage(1);
   }
 
   function removeExcludedPerson(personId: string) {
-    setExcludedPersonIds((current) => current.filter((entry) => entry !== personId));
+    void setExcludedPersonIdsQueryValue(excludedPersonIds.filter((entry) => entry !== personId));
     setPage(1);
   }
 
@@ -181,14 +183,9 @@ export function SuggestionsRoutePage() {
             availablePeopleToExclude={availablePeopleToExclude}
             excludedPeople={excludedPeople}
             excludedPersonPickerValue={excludedPersonPickerValue}
-            onMinConfidenceChange={(value) => {
-              setMinConfidencePercent(value);
-              setMaxConfidencePercent((current) => Math.max(current, value));
-              setPage(1);
-            }}
-            onMaxConfidenceChange={(value) => {
-              setMaxConfidencePercent(value);
-              setMinConfidencePercent((current) => Math.min(current, value));
+            onConfidenceRangeChange={(minValue, maxValue) => {
+              void setMinConfidenceQueryValue(minValue);
+              void setMaxConfidenceQueryValue(maxValue);
               setPage(1);
             }}
             onExcludedPersonPickerValueChange={setExcludedPersonPickerValue}
@@ -266,46 +263,21 @@ export function SuggestionsRoutePage() {
         />
       ) : null}
 
-      <nav className="browse-pagination" aria-label="Suggestion pagination">
-        <ReactPaginate
-          previousLabel="<"
-          nextLabel=">"
-          breakLabel="..."
-          breakAriaLabels={{ backward: "Jump backward", forward: "Jump forward" }}
-          pageCount={normalizedTotalPages}
-          pageRangeDisplayed={3}
-          marginPagesDisplayed={1}
-          forcePage={clampedRequestedPage - 1}
-          disableInitialCallback
-          renderOnZeroPageCount={null}
-          onClick={(clickEvent) => {
-            if (!canGoPrevious && !canGoNext) {
-              return false;
-            }
-            if (clickEvent.isPrevious && !canGoPrevious) {
-              return false;
-            }
-            if (clickEvent.isNext && !canGoNext) {
-              return false;
-            }
-            return undefined;
-          }}
-          onPageChange={({ selected }) => setPage(selected + 1)}
-          pageLabelBuilder={(value) => `[${value}]`}
-          ariaLabelBuilder={(value) => `Page ${value}`}
-          containerClassName="browse-pagination-pages"
-          pageClassName="browse-pagination-page-item"
-          pageLinkClassName="browse-pagination-page-link"
-          previousClassName="browse-pagination-page-item"
-          nextClassName="browse-pagination-page-item"
-          previousLinkClassName="browse-pagination-page-link browse-pagination-arrow"
-          nextLinkClassName="browse-pagination-page-link browse-pagination-arrow"
-          activeClassName="is-active"
-          disabledClassName="is-disabled"
-          breakClassName="browse-pagination-break-item"
-          breakLinkClassName="browse-pagination-ellipsis"
-        />
-      </nav>
+      <BrowsePagination
+        currentPage={page}
+        pageCount={totalPages}
+        canGoPrevious={canGoPrevious}
+        canGoNext={canGoNext}
+        ariaLabel="Suggestion pagination"
+        onPageChange={setPage}
+      />
     </section>
   );
+}
+
+function clampPercentage(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(100, Math.round(value)));
 }

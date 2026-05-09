@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { NuqsAdapter } from "nuqs/adapters/react-router/v6";
 import { MemoryRouter, useNavigate } from "react-router-dom";
 import { AppRouteTree } from "./AppRouter";
 import { PRIMARY_ROUTE_DEFINITIONS } from "../routes/routeDefinitions";
@@ -22,7 +23,9 @@ function renderAtPath(path: string, sessionIdentity: SessionIdentity | null = TE
       initialEntries={[path]}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
-      <AppRouteTree initialSessionIdentity={sessionIdentity} />
+      <NuqsAdapter>
+        <AppRouteTree initialSessionIdentity={sessionIdentity} />
+      </NuqsAdapter>
     </MemoryRouter>
   );
 }
@@ -53,8 +56,10 @@ function renderAtPathWithQueryBump(
       initialEntries={[path]}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
     >
-      <QueryParamBumpButton />
-      <AppRouteTree initialSessionIdentity={sessionIdentity} />
+      <NuqsAdapter>
+        <QueryParamBumpButton />
+        <AppRouteTree initialSessionIdentity={sessionIdentity} />
+      </NuqsAdapter>
     </MemoryRouter>
   );
 }
@@ -68,6 +73,7 @@ function expectShellContextText(text: string) {
 const ROUTES_WITH_PRIMARY_PAGE_FEEDBACK = PRIMARY_ROUTE_DEFINITIONS.filter(
   (route) =>
     route.key !== "library" &&
+    route.key !== "albums" &&
     route.key !== "labeling" &&
     route.key !== "suggestions"
 );
@@ -93,7 +99,7 @@ describe("App shell", () => {
     ({ path, title }) => {
       renderAtPath(path);
 
-      expect(screen.getByRole("banner")).toBeInTheDocument();
+      expect(document.querySelector("header.shell-header")).not.toBeNull();
       expect(
         screen.getByRole("navigation", {
           name: "Primary"

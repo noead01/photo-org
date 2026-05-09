@@ -22,6 +22,7 @@ describe("libraryRouteSearchState", () => {
         "",
         "",
         ["inez"],
+        [],
         "include_suggestions",
         "0.8",
         null,
@@ -41,6 +42,7 @@ describe("libraryRouteSearchState", () => {
       fromDate: "",
       toDate: "",
       selectedPersonNames: ["Inez"],
+      selectedAlbumIds: [],
       personCertaintyMode: "include_suggestions",
       suggestionConfidenceMinDraft: "0.82",
       locationRadius: null,
@@ -63,6 +65,7 @@ describe("libraryRouteSearchState", () => {
       fromDate: "",
       toDate: "",
       selectedPersonNames: [],
+      selectedAlbumIds: [],
       personCertaintyMode: "include_suggestions",
       suggestionConfidenceMinDraft: "0.91",
       locationRadius: null,
@@ -86,7 +89,7 @@ describe("libraryRouteSearchState", () => {
 
   it("builds person filters without machine suggestion threshold for human-only mode", () => {
     expect(
-      buildSearchFilters("", "", ["Inez"], "human_only", "0.95", null, null, [])
+      buildSearchFilters("", "", ["Inez"], [], "human_only", "0.95", null, null, [])
     ).toEqual({
       person_names: ["Inez"],
       person_certainty_mode: "human_only"
@@ -100,6 +103,32 @@ describe("libraryRouteSearchState", () => {
   });
 
   it("returns null when no search filters are active", () => {
-    expect(buildSearchFilters("", "", [], "human_only", "0.8", null, null, [])).toBeNull();
+    expect(buildSearchFilters("", "", [], [], "human_only", "0.8", null, null, [])).toBeNull();
+  });
+
+  it("parses and serializes album filters in URL and search payload", () => {
+    const state = parseLibraryUrlState("?album=album-1&album=album-2");
+    expect(state.selectedAlbumIds).toEqual(["album-1", "album-2"]);
+
+    const query = buildLibraryUrlQuery({
+      queryChips: [],
+      fromDate: "",
+      toDate: "",
+      selectedPersonNames: [],
+      selectedAlbumIds: ["album-1"],
+      personCertaintyMode: "human_only",
+      suggestionConfidenceMinDraft: "0.8",
+      locationRadius: null,
+      hasFacesFilter: null,
+      pathHintFilters: [],
+      page: 1,
+      pageSize: 60,
+      sortDirection: "desc"
+    });
+    expect(query).toContain("album=album-1");
+
+    expect(buildSearchFilters("", "", [], ["album-1"], "human_only", "0.8", null, null, [])).toEqual({
+      album_ids: ["album-1"]
+    });
   });
 });

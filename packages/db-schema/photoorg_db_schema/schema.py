@@ -347,6 +347,69 @@ ingest_queue = Table(
     Column("last_error", Text),
 )
 
+albums = Table(
+    "albums",
+    metadata,
+    Column("album_id", String(36), primary_key=True),
+    Column("name", String, nullable=False),
+    Column("owner_user_id", String, nullable=False),
+    Column("kind", String, nullable=False, server_default=text("'editable'")),
+    Column(
+        "created_ts",
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    Column(
+        "updated_ts",
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+)
+
+editable_album_items = Table(
+    "editable_album_items",
+    metadata,
+    Column(
+        "album_id",
+        String(36),
+        ForeignKey("albums.album_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "photo_id",
+        String(36),
+        ForeignKey("photos.photo_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("added_by_user_id", String, nullable=False),
+    Column(
+        "added_ts",
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+)
+
+saved_filter_album_rules = Table(
+    "saved_filter_album_rules",
+    metadata,
+    Column(
+        "album_id",
+        String(36),
+        ForeignKey("albums.album_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("filter_json", JSON, nullable=False),
+    Column(
+        "updated_ts",
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+)
+
 Index("idx_photos_shot_ts", photos.c.shot_ts)
 Index("idx_photos_sha256", photos.c.sha256)
 Index("idx_photo_exif_attributes_photo_id", photo_exif_attributes.c.photo_id)
@@ -366,6 +429,13 @@ Index("idx_ingest_run_files_ingest_run_id", ingest_run_files.c.ingest_run_id)
 Index("idx_ingest_run_files_ingest_queue_id", ingest_run_files.c.ingest_queue_id)
 Index("idx_ingest_run_files_run_id_outcome", ingest_run_files.c.ingest_run_id, ingest_run_files.c.outcome)
 Index("idx_ingest_queue_status_enqueued_ts", ingest_queue.c.status, ingest_queue.c.enqueued_ts)
+Index("idx_albums_owner_updated_ts", albums.c.owner_user_id, albums.c.updated_ts)
+Index("idx_editable_album_items_photo_id", editable_album_items.c.photo_id)
+Index(
+    "uq_saved_filter_album_rules_album_id",
+    saved_filter_album_rules.c.album_id,
+    unique=True,
+)
 
 
 def configure_embedding_column(bind: Engine | Connection) -> None:

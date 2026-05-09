@@ -146,6 +146,7 @@ export function parseLibraryUrlState(search: string): SearchUrlState {
   const toDate = isValidIsoDate(toCandidate) ? toCandidate : "";
 
   const selectedPersonNames = dedupeTrimmedValues(params.getAll("person"));
+  const selectedAlbumIds = dedupeTrimmedValues(params.getAll("album"));
   const personCertaintyMode = parsePersonCertaintyMode(params.get("personCertainty"));
   const suggestionConfidenceMinDraft = parseSuggestionConfidenceMinDraft(params.get("suggestionMin"));
   const pathHintFilters = normalizePathHintFilters(params.getAll("pathHint"));
@@ -179,6 +180,7 @@ export function parseLibraryUrlState(search: string): SearchUrlState {
       DEFAULT_SEARCH_PAGE_LIMIT
     ),
     selectedPersonNames,
+    selectedAlbumIds,
     personCertaintyMode,
     suggestionConfidenceMinDraft,
     latitudeDraft: locationDrafts.latitudeDraft,
@@ -195,6 +197,7 @@ export function buildLibraryUrlQuery(state: {
   fromDate: string;
   toDate: string;
   selectedPersonNames: string[];
+  selectedAlbumIds: string[];
   personCertaintyMode: PersonCertaintyMode;
   suggestionConfidenceMinDraft: string;
   locationRadius: LibraryLocationRadius | null;
@@ -217,6 +220,9 @@ export function buildLibraryUrlQuery(state: {
   }
   for (const personName of state.selectedPersonNames) {
     params.append("person", personName);
+  }
+  for (const albumId of state.selectedAlbumIds) {
+    params.append("album", albumId);
   }
   const shouldPersistPersonCertainty =
     state.selectedPersonNames.length > 0 || state.personCertaintyMode !== DEFAULT_PERSON_CERTAINTY_MODE;
@@ -265,6 +271,7 @@ export function buildSearchFilters(
   fromDate: string,
   toDate: string,
   selectedPersonNames: string[],
+  selectedAlbumIds: string[],
   personCertaintyMode: PersonCertaintyMode,
   suggestionConfidenceMinDraft: string,
   locationRadius: LibraryLocationRadius | null,
@@ -273,6 +280,7 @@ export function buildSearchFilters(
 ): {
   date?: { from?: string; to?: string };
   person_names?: string[];
+  album_ids?: string[];
   person_certainty_mode?: PersonCertaintyMode;
   suggestion_confidence_min?: number;
   location_radius?: LibraryLocationRadius;
@@ -281,16 +289,25 @@ export function buildSearchFilters(
 } | null {
   const dateFilter = buildDateFilter(fromDate, toDate);
   const personNameFilter = selectedPersonNames.length > 0 ? selectedPersonNames : null;
+  const albumIdFilter = selectedAlbumIds.length > 0 ? selectedAlbumIds : null;
   const locationFilter = locationRadius;
   const pathHintFilter = pathHints.length > 0 ? pathHints : null;
 
-  if (!dateFilter && !personNameFilter && !locationFilter && hasFaces === null && !pathHintFilter) {
+  if (
+    !dateFilter &&
+    !personNameFilter &&
+    !albumIdFilter &&
+    !locationFilter &&
+    hasFaces === null &&
+    !pathHintFilter
+  ) {
     return null;
   }
 
   return {
     ...(dateFilter ? { date: dateFilter } : {}),
     ...(personNameFilter ? { person_names: personNameFilter } : {}),
+    ...(albumIdFilter ? { album_ids: albumIdFilter } : {}),
     ...(personNameFilter ? { person_certainty_mode: personCertaintyMode } : {}),
     ...(personNameFilter && personCertaintyMode === "include_suggestions"
       ? { suggestion_confidence_min: normalizeSuggestionConfidenceMin(suggestionConfidenceMinDraft) }

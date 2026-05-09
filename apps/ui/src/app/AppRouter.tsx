@@ -8,6 +8,7 @@ import {
   useLocation
 } from "react-router-dom";
 import { useState } from "react";
+import { NuqsAdapter } from "nuqs/adapters/react-router/v6";
 import { AppShell } from "./AppShell";
 import {
   PRIMARY_ROUTE_DEFINITIONS,
@@ -20,6 +21,7 @@ import { PhotoDetailRoutePage } from "../pages/PhotoDetailRoutePage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import { PeopleManagementRoutePage } from "../pages/PeopleManagementRoutePage";
 import { SuggestionsRoutePage } from "../pages/SuggestionsRoutePage";
+import { AlbumsRoutePage } from "../pages/AlbumsRoutePage";
 import {
   resolveInitialSessionIdentity,
   type SessionIdentity
@@ -87,6 +89,8 @@ export function AppRouteTree({ initialSessionIdentity }: AppRouteTreeProps = {})
             element={
               route.key === "library" ? (
                 <LibraryRoutePage />
+              ) : route.key === "albums" ? (
+                <AlbumsRoutePage />
               ) : route.key === "labeling" ? (
                 <PeopleManagementRoutePage />
               ) : route.key === "suggestions" ? (
@@ -105,10 +109,12 @@ export function AppRouteTree({ initialSessionIdentity }: AppRouteTreeProps = {})
 
 export function AppRouter() {
   return (
-    <BrowserRouter
-      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-    >
-      <AppRouteTree />
-    </BrowserRouter>
+    <NuqsAdapter>
+      <BrowserRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <AppRouteTree />
+      </BrowserRouter>
+    </NuqsAdapter>
   );
 }

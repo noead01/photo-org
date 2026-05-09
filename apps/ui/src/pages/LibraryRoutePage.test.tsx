@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { LibraryRoutePage } from "./LibraryRoutePage";
 import { buildLibraryViewStateStorageKey } from "./library/libraryRouteMemory";
@@ -81,6 +82,21 @@ function renderLibraryAt(path = "/library") {
         <Route path="/library" element={<LibraryRoutePage />} />
       </Routes>
     </MemoryRouter>
+  );
+}
+
+function renderLibraryAtStrict(path = "/library") {
+  return render(
+    <StrictMode>
+      <MemoryRouter
+        initialEntries={[path]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <Routes>
+          <Route path="/library" element={<LibraryRoutePage />} />
+        </Routes>
+      </MemoryRouter>
+    </StrictMode>
   );
 }
 
@@ -186,6 +202,52 @@ describe("LibraryRoutePage", () => {
     expect(screen.getByRole("checkbox", { name: "Select photo photo-a" })).toBeInTheDocument();
     expect(screen.queryByRole("checkbox", { name: "Show face boxes on all photos" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "View details" })).not.toBeInTheDocument();
+  });
+
+  it("deduplicates initial strict-mode service requests", async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/v1/search") {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        return {
+          ok: true,
+          json: async () => buildPayload(["photo-a"])
+        } as Response;
+      }
+      if (url === "/api/v1/operations/activity") {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+      if (url === "/api/v1/people") {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        return {
+          ok: true,
+          json: async () => []
+        } as Response;
+      }
+      if (url === "/api/v1/albums") {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        return {
+          ok: true,
+          json: async () => []
+        } as Response;
+      }
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    renderLibraryAtStrict("/library");
+    expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
+
+    await waitFor(() => {
+      const requests = fetchMock.mock.calls.map(([requestInput]) => String(requestInput));
+      expect(requests.filter((url) => url === "/api/v1/search")).toHaveLength(1);
+      expect(requests.filter((url) => url === "/api/v1/operations/activity")).toHaveLength(1);
+      expect(requests.filter((url) => url === "/api/v1/people")).toHaveLength(1);
+      expect(requests.filter((url) => url === "/api/v1/albums")).toHaveLength(1);
+    });
   });
 
   it("links thumbnail previews to photo detail", async () => {
@@ -337,8 +399,9 @@ describe("LibraryRoutePage", () => {
 
     await user.click(screen.getByRole("button", { name: "Filter labels" }));
     await user.selectOptions(screen.getByLabelText("Person certainty mode"), "include_suggestions");
-    await user.clear(screen.getByLabelText("Suggestion threshold"));
-    await user.type(screen.getByLabelText("Suggestion threshold"), "0.91");
+    const suggestionThresholdSlider = screen.getByRole("slider", { name: "Suggestion threshold" });
+    suggestionThresholdSlider.focus();
+    await user.keyboard("{PageUp}{ArrowRight}");
     await user.type(screen.getByRole("textbox", { name: "Person filter" }), "inez");
     await user.click(screen.getByRole("button", { name: "Add person filter" }));
     expect(
@@ -372,6 +435,62 @@ describe("LibraryRoutePage", () => {
         })
       );
     });
+  });
+
+  it("shows album filter controls and chips with album names", async () => {
+    const user = userEvent.setup();
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+
+      if (url === "/api/v1/albums") {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              album_id: "album-1",
+              name: "Family Trip",
+              owner_user_id: "operator-1",
+              kind: "editable",
+              created_ts: "2026-05-08T12:00:00Z",
+              updated_ts: "2026-05-08T12:00:00Z",
+              item_count: 3,
+              saved_filter: null
+            }
+          ]
+        } as Response;
+      }
+
+      if (url === "/api/v1/people") {
+        return {
+          ok: true,
+          json: async () => []
+        } as Response;
+      }
+
+      if (url !== "/api/v1/search") {
+        throw new Error(`Unhandled fetch: ${url}`);
+      }
+
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-a"])
+      } as Response;
+    });
+
+    renderLibraryAt("/library?album=album-1");
+    expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
+    expect(await screen.findByText("album: Family Trip")).toBeInTheDocument();
+    expect(screen.queryByText("album: album-1")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Filter labels" }));
+    expect(screen.getByRole("button", { name: "album: Family Trip" })).toBeInTheDocument();
   });
 
   it("shows 100% certainty on person chips for human-only mode", async () => {
@@ -834,10 +953,12 @@ describe("LibraryRoutePage", () => {
     );
 
     await user.selectOptions(screen.getByRole("combobox", { name: "Photos per page" }), "24");
-    expect(await screen.findByRole("button", { name: "Page 3" })).toHaveAttribute(
-      "aria-current",
-      "page"
-    );
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Page 3" })).toHaveAttribute(
+        "aria-current",
+        "page"
+      );
+    });
 
     await user.click(screen.getByRole("link", { name: "Open details for /library/photo-61.jpg" }));
     expect(await screen.findByRole("heading", { name: "Library test detail", level: 1 })).toBeInTheDocument();
@@ -974,5 +1095,135 @@ describe("LibraryRoutePage", () => {
       screen.getAllByText("Action temporarily unavailable while ingest processing is active.")
         .length
     ).toBeGreaterThan(0);
+  });
+
+  it("opens add-to-album modal with editable and saved-filter options", async () => {
+    const user = userEvent.setup();
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+      if (url === "/api/v1/search") {
+        return {
+          ok: true,
+          json: async () => buildPayload(["photo-a"])
+        } as Response;
+      }
+      if (url === "/api/v1/albums") {
+        return {
+          ok: true,
+          json: async () => ({
+            album_id: "album-2",
+            name: "Needs review",
+            owner_user_id: "operator-1",
+            kind: "saved_filter",
+            created_ts: "2026-05-07T12:00:00Z",
+            updated_ts: "2026-05-07T12:00:00Z",
+            item_count: 0,
+            saved_filter: { person_names: ["Inez"] }
+          })
+        } as Response;
+      }
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    renderLibraryAt("/library");
+    expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("radio", { name: "This page" }));
+    await user.click(screen.getByRole("button", { name: "Add to album" }));
+
+    expect(await screen.findByRole("radio", { name: "Editable" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Saved Filter" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Album type info" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("radio", { name: "Saved Filter" }));
+    await user.clear(screen.getByLabelText("Album name"));
+    await user.type(screen.getByLabelText("Album name"), "Needs review");
+    await user.click(screen.getByRole("button", { name: "Save to album" }));
+
+    let createCall: [RequestInfo | URL, RequestInit | undefined] | undefined;
+    await waitFor(() => {
+      createCall = fetchMock.mock.calls.find(
+        ([requestInput, requestInit]) =>
+          String(requestInput) === "/api/v1/albums" && requestInit?.method === "POST"
+      ) as [RequestInfo | URL, RequestInit | undefined] | undefined;
+      expect(createCall).toBeDefined();
+    });
+    const createBody = JSON.parse((createCall?.[1]?.body as string | undefined) ?? "{}") as {
+      name?: string;
+      kind?: string;
+      filter_json?: Record<string, unknown>;
+    };
+    expect(createBody.name).toBe("Needs review");
+    expect(createBody.kind).toBe("saved_filter");
+    expect(createBody.filter_json).toBeDefined();
+
+    expect(
+      await screen.findByText('Saved-filter album "Needs review" created from active filters.')
+    ).toBeInTheDocument();
+  });
+
+  it("exports the active selection as a zip file", async () => {
+    const user = userEvent.setup();
+    if (!("createObjectURL" in URL)) {
+      Object.defineProperty(URL, "createObjectURL", {
+        writable: true,
+        value: vi.fn()
+      });
+      Object.defineProperty(URL, "revokeObjectURL", {
+        writable: true,
+        value: vi.fn()
+      });
+    }
+    const createObjectUrlSpy = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:photo-export");
+    const revokeObjectUrlSpy = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+      if (url === "/api/v1/search") {
+        return {
+          ok: true,
+          json: async () => buildPayload(["photo-a"])
+        } as Response;
+      }
+      if (url === "/api/v1/exports/photos") {
+        return new Response(new Blob([new Uint8Array([1, 2, 3])], { type: "application/zip" }), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/zip",
+            "Content-Disposition": 'attachment; filename="library-export.zip"',
+            "X-Photo-Org-Exported-Count": "1",
+            "X-Photo-Org-Skipped-Count": "0"
+          }
+        });
+      }
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    renderLibraryAt("/library");
+    expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("radio", { name: "This page" }));
+    await user.click(screen.getByRole("button", { name: "Export" }));
+
+    expect(createObjectUrlSpy).toHaveBeenCalled();
+    expect(clickSpy).toHaveBeenCalled();
+    expect(revokeObjectUrlSpy).toHaveBeenCalledWith("blob:photo-export");
+    expect(
+      await screen.findByText("Export completed: 1 photo, 0 skipped.")
+    ).toBeInTheDocument();
   });
 });

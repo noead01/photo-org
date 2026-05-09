@@ -4,6 +4,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers.face_assignments import router as face_assignments_router
+from app.routers.albums import router as albums_router
+from app.routers.exports import router as exports_router
 from app.routers.ingest_queue import router as ingest_queue_router
 from app.routers.operations import router as operations_router
 from app.routers.people import router as people_router
@@ -61,6 +63,14 @@ def create_app() -> FastAPI:
                 "name": "operations",
                 "description": "Read-only operational activity and troubleshooting signals.",
             },
+            {
+                "name": "albums",
+                "description": "In-app album creation and photo membership APIs.",
+            },
+            {
+                "name": "exports",
+                "description": "Selection export APIs for downloadable photo archives.",
+            },
         ],
         redoc_url=None,
     )
@@ -85,6 +95,8 @@ def create_app() -> FastAPI:
     app.include_router(search_router, prefix="/api/v1")
     app.include_router(suggestions_router, prefix="/api/v1")
     app.include_router(storage_sources_router, prefix="/api/v1")
+    app.include_router(albums_router, prefix="/api/v1")
+    app.include_router(exports_router, prefix="/api/v1")
 
     @app.get("/openapi.yaml", include_in_schema=False)
     def openapi_yaml():

@@ -15,8 +15,8 @@ export const DEMO_SESSION_IDENTITY: SessionIdentity = {
   displayName: "Demo Operator",
   email: "operator@photo-org.local",
   capabilities: {
-    addToAlbum: false,
-    export: false
+    addToAlbum: true,
+    export: true
   }
 };
 

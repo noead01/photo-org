@@ -14,6 +14,7 @@ interface PrimaryRoutePageProps {
 
 export const PRIMARY_ROUTE_LOADING_LABELS: Record<PrimaryRouteDefinition["key"], string> = {
   library: "Loading library workflow.",
+  albums: "Loading albums workflow.",
   labeling: "Loading labeling workflow.",
   suggestions: "Loading suggestions workflow.",
   operations: "Loading operations workflow."

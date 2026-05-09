@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { FaceOverlayRegion } from "./FaceBBoxOverlay";
+import {
+  FaceLabelingApiError,
+  assignFace,
+  correctFace,
+  createPerson,
+  dismissFace,
+  fetchFaceCandidates,
+  markFaceUnknown,
+} from "./face-labeling/faceLabelingApi";
 
 interface FaceAssignmentModalFace {
   face_id: string;
@@ -25,10 +34,6 @@ interface FaceCandidate {
   person_id: string;
   display_name: string;
   confidence: number;
-}
-
-interface FaceCandidateLookupPayload {
-  candidates?: FaceCandidate[];
 }
 
 interface PhotoFaceAssignmentModalProps {
@@ -60,70 +65,6 @@ function formatConfidence(confidence: number): string {
     return "0.0%";
   }
   return `${(confidence * 100).toFixed(1)}%`;
-}
-
-function mapAssignmentError(status: number, detail: string | null): string {
-  if (status === 403) {
-    return "You do not have permission to assign faces.";
-  }
-  if (status === 404) {
-    return detail ?? "Face or person no longer exists.";
-  }
-  if (status === 409) {
-    return detail ?? "Face is already assigned.";
-  }
-  return `Assignment request failed (${status}).`;
-}
-
-function mapCorrectionError(status: number, detail: string | null): string {
-  if (status === 403) {
-    return "You do not have permission to correct face assignments.";
-  }
-  if (status === 404) {
-    return detail ?? "Face or person no longer exists.";
-  }
-  if (status === 409) {
-    return detail ?? "Face correction could not be applied.";
-  }
-  return `Correction request failed (${status}).`;
-}
-
-function mapDismissalError(status: number, detail: string | null): string {
-  if (status === 403) {
-    return "You do not have permission to discard faces.";
-  }
-  if (status === 404) {
-    return detail ?? "Face no longer exists.";
-  }
-  if (status === 409) {
-    return detail ?? "Face dismissal could not be applied.";
-  }
-  return `Dismissal request failed (${status}).`;
-}
-
-function mapUnknownIdentityError(status: number, detail: string | null): string {
-  if (status === 403) {
-    return "You do not have permission to assign faces.";
-  }
-  if (status === 404) {
-    return detail ?? "Face no longer exists.";
-  }
-  if (status === 409) {
-    return detail ?? "Face assignment could not be applied.";
-  }
-  return `Unknown-identity request failed (${status}).`;
-}
-
-async function readErrorDetail(response: Response): Promise<string | null> {
-  try {
-    const payload = (await response.json()) as { detail?: unknown };
-    if (typeof payload.detail === "string" && payload.detail.trim().length > 0) {
-      return payload.detail;
-    }
-  } catch {
-    // Fall through to default message.
-  }
-  return null;
 }
 
 function buildCropStyle(region: FaceOverlayRegion | null, thumbnail: FaceThumbnail | null): {
@@ -200,19 +141,11 @@ export function PhotoFaceAssignmentModal({
     const controller = new AbortController();
     setIsLoadingCandidates(true);
 
-    fetch(`/api/v1/faces/${face.face_id}/candidates?enforce_min_confidence=false`, {
-      signal: controller.signal
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`Candidate request failed (${response.status})`);
-        }
-        const payload = (await response.json()) as FaceCandidateLookupPayload;
+    fetchFaceCandidates(face.face_id, false, controller.signal)
+      .then((nextCandidates) => {
         if (controller.signal.aborted) {
           return;
         }
-
-        const nextCandidates = Array.isArray(payload.candidates) ? payload.candidates : [];
         setCandidates(nextCandidates.length > 0 ? nextCandidates : persistedSuggestions);
       })
       .catch((caughtError: unknown) => {
@@ -275,20 +208,7 @@ export function PhotoFaceAssignmentModal({
       let targetPersonId = targetPerson?.person_id ?? "";
 
       if (!targetPersonId && createCandidate) {
-        const createResponse = await fetch("/api/v1/people", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({ display_name: createCandidate })
-        });
-        if (!createResponse.ok) {
-          const detail = await readErrorDetail(createResponse);
-          setError(detail ?? `Create request failed (${createResponse.status}).`);
-          return;
-        }
-
-        const createdPerson = (await createResponse.json()) as FaceAssignmentModalPerson;
+        const createdPerson = await createPerson(createCandidate);
         onPersonCreated(createdPerson);
         targetPersonId = createdPerson.person_id;
       }
@@ -303,33 +223,20 @@ export function PhotoFaceAssignmentModal({
         return;
       }
 
-      const endpoint =
-        face.person_id === null
-          ? `/api/v1/faces/${face.face_id}/assignments`
-          : `/api/v1/faces/${face.face_id}/corrections`;
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Face-Validation-Role": "contributor"
-        },
-        body: JSON.stringify({ person_id: targetPersonId })
-      });
-
-      if (!response.ok) {
-        const detail = await readErrorDetail(response);
-        setError(
-          face.person_id === null
-            ? mapAssignmentError(response.status, detail)
-            : mapCorrectionError(response.status, detail)
-        );
-        return;
+      if (face.person_id === null) {
+        await assignFace(face.face_id, targetPersonId);
+      } else {
+        await correctFace(face.face_id, targetPersonId);
       }
 
       onFaceUpdated(face.face_id, targetPersonId);
       onClose();
-    } catch {
-      setError("Could not update face assignment.");
+    } catch (caughtError: unknown) {
+      setError(
+        caughtError instanceof FaceLabelingApiError && caughtError.message.trim().length > 0
+          ? caughtError.message
+          : "Could not update face assignment."
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -344,23 +251,15 @@ export function PhotoFaceAssignmentModal({
     setError(null);
 
     try {
-      const response = await fetch(`/api/v1/faces/${face.face_id}/dismissals`, {
-        method: "POST",
-        headers: {
-          "X-Face-Validation-Role": "contributor"
-        }
-      });
-
-      if (!response.ok) {
-        const detail = await readErrorDetail(response);
-        setError(mapDismissalError(response.status, detail));
-        return;
-      }
-
+      await dismissFace(face.face_id);
       onFaceDismissed(face.face_id);
       onClose();
-    } catch {
-      setError("Could not discard face.");
+    } catch (caughtError: unknown) {
+      setError(
+        caughtError instanceof FaceLabelingApiError && caughtError.message.trim().length > 0
+          ? caughtError.message
+          : "Could not discard face."
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -375,30 +274,15 @@ export function PhotoFaceAssignmentModal({
     setError(null);
 
     try {
-      const response = await fetch(`/api/v1/faces/${face.face_id}/unknown-identities`, {
-        method: "POST",
-        headers: {
-          "X-Face-Validation-Role": "contributor"
-        }
-      });
-
-      if (!response.ok) {
-        const detail = await readErrorDetail(response);
-        setError(mapUnknownIdentityError(response.status, detail));
-        return;
-      }
-
-      const payload = (await response.json()) as { person_id?: unknown };
-      const personId = typeof payload.person_id === "string" ? payload.person_id : "";
-      if (!personId) {
-        setError("Unknown-identity response was missing person information.");
-        return;
-      }
-
-      onFaceUpdated(face.face_id, personId);
+      const payload = await markFaceUnknown(face.face_id);
+      onFaceUpdated(face.face_id, payload.person_id);
       onClose();
-    } catch {
-      setError("Could not mark face as unknown person.");
+    } catch (caughtError: unknown) {
+      setError(
+        caughtError instanceof FaceLabelingApiError && caughtError.message.trim().length > 0
+          ? caughtError.message
+          : "Could not mark face as unknown person."
+      );
     } finally {
       setIsSubmitting(false);
     }

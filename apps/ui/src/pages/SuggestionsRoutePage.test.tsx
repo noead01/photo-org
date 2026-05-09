@@ -1,5 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { NuqsTestingAdapter, type OnUrlUpdateFunction } from "nuqs/adapters/testing";
+import { StrictMode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { SuggestionsRoutePage } from "./SuggestionsRoutePage";
 
@@ -8,11 +10,27 @@ type MockReply = {
   status?: number;
 };
 
-function renderPage() {
+function renderPage(path = "/suggestions", onUrlUpdate?: OnUrlUpdateFunction) {
+  const url = new URL(path, "https://photo-org.test");
   return render(
-    <MemoryRouter initialEntries={["/suggestions"]}>
-      <SuggestionsRoutePage />
+    <MemoryRouter initialEntries={[path]}>
+      <NuqsTestingAdapter hasMemory searchParams={url.search} onUrlUpdate={onUrlUpdate}>
+        <SuggestionsRoutePage />
+      </NuqsTestingAdapter>
     </MemoryRouter>
+  );
+}
+
+function renderPageStrict(path = "/suggestions", onUrlUpdate?: OnUrlUpdateFunction) {
+  const url = new URL(path, "https://photo-org.test");
+  return render(
+    <StrictMode>
+      <MemoryRouter initialEntries={[path]}>
+        <NuqsTestingAdapter hasMemory searchParams={url.search} onUrlUpdate={onUrlUpdate}>
+          <SuggestionsRoutePage />
+        </NuqsTestingAdapter>
+      </MemoryRouter>
+    </StrictMode>
   );
 }
 
@@ -230,6 +248,43 @@ describe("SuggestionsRoutePage", () => {
     expect(screen.getByRole("button", { name: "Page 1" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("button", { name: "Page 2" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next page" })).toHaveAttribute("aria-disabled", "false");
+  });
+
+  it("deduplicates initial strict-mode requests", async () => {
+    installFetchRoutes(fetchMock, {
+      "GET /api/v1/people": reply(buildPeoplePayload()),
+      "GET /api/v1/suggestions/faces?page=1&page_size=24": reply(
+        buildSuggestionsPayload({
+          items: [
+            {
+              photo_id: "photo-1",
+              path: "/photos/photo-1.jpg",
+              thumbnail: null,
+              faces: [
+                {
+                  face_id: "face-1",
+                  top_suggestion: {
+                    person_id: "person-1",
+                    display_name: "Alex",
+                    confidence: 0.97
+                  }
+                }
+              ]
+            }
+          ]
+        })
+      )
+    });
+
+    renderPageStrict();
+    expect(await screen.findByRole("heading", { name: "Suggestions", level: 1 })).toBeInTheDocument();
+    expect(await screen.findByText("/photos/photo-1.jpg")).toBeInTheDocument();
+
+    await waitFor(() => {
+      const requests = fetchMock.mock.calls.map(([requestInput]) => String(requestInput));
+      expect(requests.filter((url) => url === "/api/v1/people")).toHaveLength(1);
+      expect(requests.filter((url) => url === "/api/v1/suggestions/faces?page=1&page_size=24")).toHaveLength(1);
+    });
   });
 
   it("allows unmarking faces and only confirms checked face IDs", async () => {
@@ -828,6 +883,8 @@ describe("SuggestionsRoutePage", () => {
   });
 
   it("applies minimum certainty slider as a global suggestions filter", async () => {
+    const user = userEvent.setup();
+
     installFetchRoutes(fetchMock, {
       "GET /api/v1/people": reply(buildPeoplePayload()),
       "GET /api/v1/suggestions/faces?page=1&page_size=24": reply(
@@ -852,7 +909,7 @@ describe("SuggestionsRoutePage", () => {
           ]
         })
       ),
-      "GET /api/v1/suggestions/faces?page=1&page_size=24&min_confidence=0.9": reply(
+      "GET /api/v1/suggestions/faces?page=1&page_size=24&min_confidence=0.1": reply(
         buildSuggestionsPayload({
           totalItems: 1,
           items: [
@@ -866,7 +923,7 @@ describe("SuggestionsRoutePage", () => {
                   top_suggestion: {
                     person_id: "person-2",
                     display_name: "Blair",
-                    confidence: 0.91
+                    confidence: 0.11
                   }
                 }
               ]
@@ -879,16 +936,19 @@ describe("SuggestionsRoutePage", () => {
     renderPage();
     expect(await screen.findByText("/photos/photo-1.jpg")).toBeInTheDocument();
 
-    const thresholdSlider = screen.getByLabelText("Minimum suggestion certainty");
-    fireEvent.change(thresholdSlider, { target: { value: "90" } });
+    const minimumSlider = screen.getByRole("slider", { name: "Minimum suggestion certainty" });
+    minimumSlider.focus();
+    await user.keyboard("{PageUp}");
 
     expect(await screen.findByText("/photos/photo-2.jpg")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/suggestions/faces?page=1&page_size=24&min_confidence=0.9"
+      "/api/v1/suggestions/faces?page=1&page_size=24&min_confidence=0.1"
     );
   });
 
   it("applies a certainty range with both minimum and maximum filters", async () => {
+    const user = userEvent.setup();
+
     installFetchRoutes(fetchMock, {
       "GET /api/v1/people": reply(buildPeoplePayload()),
       "GET /api/v1/suggestions/faces?page=1&page_size=24": reply(
@@ -913,7 +973,7 @@ describe("SuggestionsRoutePage", () => {
           ]
         })
       ),
-      "GET /api/v1/suggestions/faces?page=1&page_size=24&min_confidence=0.8": reply(
+      "GET /api/v1/suggestions/faces?page=1&page_size=24&min_confidence=0.1": reply(
         buildSuggestionsPayload({
           totalItems: 2,
           items: [
@@ -927,7 +987,7 @@ describe("SuggestionsRoutePage", () => {
                   top_suggestion: {
                     person_id: "person-1",
                     display_name: "Alex",
-                    confidence: 0.85
+                    confidence: 0.15
                   }
                 }
               ]
@@ -935,7 +995,7 @@ describe("SuggestionsRoutePage", () => {
           ]
         })
       ),
-      "GET /api/v1/suggestions/faces?page=1&page_size=24&min_confidence=0.8&max_confidence=0.9": reply(
+      "GET /api/v1/suggestions/faces?page=1&page_size=24&min_confidence=0.1&max_confidence=0.9": reply(
         buildSuggestionsPayload({
           totalItems: 1,
           items: [
@@ -962,30 +1022,21 @@ describe("SuggestionsRoutePage", () => {
     renderPage();
     expect(await screen.findByText("/photos/photo-1.jpg")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Minimum suggestion certainty"), {
-      target: { value: "80" }
-    });
+    const minimumSlider = screen.getByRole("slider", { name: "Minimum suggestion certainty" });
+    minimumSlider.focus();
+    await user.keyboard("{PageUp}");
     expect(await screen.findByText("/photos/photo-1.jpg")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Maximum suggestion certainty"), {
-      target: { value: "90" }
-    });
+    const maximumSlider = screen.getByRole("slider", { name: "Maximum suggestion certainty" });
+    maximumSlider.focus();
+    await user.keyboard("{PageDown}");
 
     expect(await screen.findByText("/photos/photo-2.jpg")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/suggestions/faces?page=1&page_size=24&min_confidence=0.8&max_confidence=0.9"
+      "/api/v1/suggestions/faces?page=1&page_size=24&min_confidence=0.1&max_confidence=0.9"
     );
   });
 
-  it("restores persisted minimum certainty and excluded people from local storage", async () => {
-    window.localStorage.setItem(
-      "photo-org:suggestions:filters",
-      JSON.stringify({
-        minConfidencePercent: 90,
-        maxConfidencePercent: 95,
-        excludedPersonIds: ["person-2"]
-      })
-    );
-
+  it("loads suggestion filters from URL query params", async () => {
     installFetchRoutes(fetchMock, {
       "GET /api/v1/people": reply(buildPeoplePayload()),
       "GET /api/v1/suggestions/faces?page=1&page_size=24&min_confidence=0.9&max_confidence=0.95&excluded_person_ids=person-2": reply(
@@ -1011,16 +1062,14 @@ describe("SuggestionsRoutePage", () => {
       )
     });
 
-    renderPage();
+    renderPage("/suggestions?minConfidence=90&maxConfidence=95&excludedPersonId=person-2");
 
-    expect(await screen.findByDisplayValue("90")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("95")).toBeInTheDocument();
+    expect(await screen.findByText("Minimum certainty: 90%")).toBeInTheDocument();
+    expect(screen.getByText("Maximum certainty: 95%")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Remove excluded person Blair" })).toBeInTheDocument();
   });
 
-  it("falls back to defaults when persisted filter state is invalid", async () => {
-    window.localStorage.setItem("photo-org:suggestions:filters", "{bad json");
-
+  it("falls back to defaults when query filter state is invalid", async () => {
     installFetchRoutes(fetchMock, {
       "GET /api/v1/people": reply(buildPeoplePayload()),
       "GET /api/v1/suggestions/faces?page=1&page_size=24": reply(
@@ -1046,14 +1095,14 @@ describe("SuggestionsRoutePage", () => {
       )
     });
 
-    renderPage();
+    renderPage("/suggestions?minConfidence=-20&maxConfidence=not-a-number&excludedPersonId=&excludedPersonId=%20");
 
-    expect(await screen.findByDisplayValue("0")).toBeInTheDocument();
+    expect(await screen.findByText("Minimum certainty: 0%")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Remove excluded person/i })).not.toBeInTheDocument();
   });
 
-  it("hides excluded faces, persists filter changes, and omits photos with no visible faces", async () => {
-    const user = userEvent.setup();
+  it("hides excluded faces, updates URL filters, and omits photos with no visible faces", async () => {
+    const onUrlUpdate = vi.fn();
 
     installFetchRoutes(fetchMock, {
       "GET /api/v1/people": reply(buildPeoplePayload()),
@@ -1126,10 +1175,12 @@ describe("SuggestionsRoutePage", () => {
       )
     });
 
-    renderPage();
+    renderPage("/suggestions", onUrlUpdate);
 
     expect(await screen.findByLabelText("Choose suggestion for face face-2")).toHaveDisplayValue("Blair");
-    await user.selectOptions(screen.getByLabelText("Add excluded person"), "person-2");
+    fireEvent.change(screen.getByLabelText("Add excluded person"), {
+      target: { value: "person-2" }
+    });
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -1139,7 +1190,13 @@ describe("SuggestionsRoutePage", () => {
     expect(screen.queryByLabelText("Choose suggestion for face face-2")).not.toBeInTheDocument();
     expect(await screen.findByText("Pending photos: 1")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Remove excluded person Blair" })).toBeInTheDocument();
-    expect(window.localStorage.getItem("photo-org:suggestions:filters")).toContain("person-2");
+    await waitFor(() => {
+      expect(onUrlUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          queryString: "?excludedPersonId=person-2"
+        })
+      );
+    });
   });
 
   it("confirms only currently visible face ids after exclusions are applied", async () => {
@@ -1240,7 +1297,9 @@ describe("SuggestionsRoutePage", () => {
     renderPage();
 
     expect(await screen.findByLabelText("Choose suggestion for face face-2")).toHaveDisplayValue("Blair");
-    await user.selectOptions(screen.getByLabelText("Add excluded person"), "person-2");
+    fireEvent.change(screen.getByLabelText("Add excluded person"), {
+      target: { value: "person-2" }
+    });
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/v1/suggestions/faces?page=1&page_size=24&excluded_person_ids=person-2"

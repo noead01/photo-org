@@ -2,22 +2,30 @@ import type { FacetCountEntry, HasFacesFacetCounts } from "./facetFilters";
 
 type FacetFilterPanelProps = {
   hasFacesFilter: boolean | null;
+  selectedAlbumIds: string[];
   pathHintFilters: string[];
+  albumOptions: Array<{ albumId: string; albumName: string }>;
   hasFacesCounts: HasFacesFacetCounts;
   pathHintCounts: FacetCountEntry[];
   onToggleHasFaces: (nextValue: boolean) => void;
   onClearHasFaces: () => void;
+  onToggleAlbum: (albumId: string) => void;
+  onClearAllAlbums: () => void;
   onTogglePathHint: (pathHint: string) => void;
   onClearAllPathHints: () => void;
 };
 
 export function FacetFilterPanel({
   hasFacesFilter,
+  selectedAlbumIds,
   pathHintFilters,
+  albumOptions,
   hasFacesCounts,
   pathHintCounts,
   onToggleHasFaces,
   onClearHasFaces,
+  onToggleAlbum,
+  onClearAllAlbums,
   onTogglePathHint,
   onClearAllPathHints
 }: FacetFilterPanelProps) {
@@ -46,6 +54,34 @@ export function FacetFilterPanel({
           {hasFacesFilter !== null ? (
             <button type="button" className="search-facet-clear" onClick={onClearHasFaces}>
               Clear has-faces
+            </button>
+          ) : null}
+        </div>
+      </div>
+      <div className="search-facet-group">
+        <p className="search-facet-group-label">Albums</p>
+        <div className="search-facet-options">
+          {albumOptions.length > 0 ? (
+            albumOptions.map((entry) => {
+              const isActive = selectedAlbumIds.includes(entry.albumId);
+              return (
+                <button
+                  key={entry.albumId}
+                  type="button"
+                  className={`search-facet-option${isActive ? " search-facet-option-active" : ""}`}
+                  aria-pressed={isActive}
+                  onClick={() => onToggleAlbum(entry.albumId)}
+                >
+                  album: {entry.albumName}
+                </button>
+              );
+            })
+          ) : (
+            <p className="search-facet-empty">No editable albums yet.</p>
+          )}
+          {selectedAlbumIds.length > 0 ? (
+            <button type="button" className="search-facet-clear" onClick={onClearAllAlbums}>
+              Clear albums
             </button>
           ) : null}
         </div>

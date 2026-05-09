@@ -67,6 +67,7 @@ class PhotosRepository:
         self.face_labels: Table = Table("face_labels", md, autoload_with=bind)
         self.face_suggestions: Table = Table("face_suggestions", md, autoload_with=bind)
         self.photo_files: Table = Table("photo_files", md, autoload_with=bind)
+        self.editable_album_items: Table = Table("editable_album_items", md, autoload_with=bind)
         self.photo_exif_attributes: Table = Table("photo_exif_attributes", md, autoload_with=bind)
         self.exif_semantic_mappings: Table = Table("exif_semantic_mappings", md, autoload_with=bind)
         self.watched_folders: Table = Table("watched_folders", md, autoload_with=bind)
@@ -100,14 +101,28 @@ class PhotosRepository:
                 .over(
                     partition_by=self.face_suggestions.c.face_id,
                     order_by=(
-                        self.face_suggestions.c.rank.asc(),
                         self.face_suggestions.c.confidence.desc(),
+                        self.face_suggestions.c.rank.asc(),
                         self.face_suggestions.c.person_id.asc(),
                     ),
                 )
                 .label("suggestion_order"),
             )
         ).subquery()
+
+    def _human_confirmed_face_assignment_exists(self):
+        return (
+            select(self.face_labels.c.face_id)
+            .where(
+                and_(
+                    self.face_labels.c.face_id == self.faces.c.face_id,
+                    self.face_labels.c.person_id == self.faces.c.person_id,
+                    self.face_labels.c.label_source == "human_confirmed",
+                )
+            )
+            .limit(1)
+            .exists()
+        )
 
     def _build_people_filter_clause(self, filters: SearchFilters):
         person_ids = filters.people or []
@@ -151,6 +166,7 @@ class PhotosRepository:
 
         if person_certainty_mode == "include_suggestions":
             top_face_suggestions = self._top_face_suggestions_subquery()
+            human_confirmed_face_assignment_exists = self._human_confirmed_face_assignment_exists()
             suggestion_match_exists = (
                 select(self.faces.c.photo_id)
                 .select_from(
@@ -165,6 +181,7 @@ class PhotosRepository:
                         top_face_suggestions.c.suggestion_order == 1,
                         top_face_suggestions.c.person_id.in_(person_ids),
                         top_face_suggestions.c.confidence >= self._suggestion_confidence_threshold(filters),
+                        ~human_confirmed_face_assignment_exists,
                     )
                 )
                 .limit(1)
@@ -239,6 +256,7 @@ class PhotosRepository:
 
         if person_certainty_mode == "include_suggestions":
             top_face_suggestions = self._top_face_suggestions_subquery()
+            human_confirmed_face_assignment_exists = self._human_confirmed_face_assignment_exists()
             suggestion_match_exists = (
                 select(self.faces.c.photo_id)
                 .select_from(
@@ -255,6 +273,7 @@ class PhotosRepository:
                         self.faces.c.photo_id == self.photos.c.photo_id,
                         top_face_suggestions.c.suggestion_order == 1,
                         top_face_suggestions.c.confidence >= self._suggestion_confidence_threshold(filters),
+                        ~human_confirmed_face_assignment_exists,
                         person_name_predicate,
                     )
                 )
@@ -631,6 +650,21 @@ class PhotosRepository:
             where_conditions.append(
                 or_(*[self.photos.c.path.ilike(f"%{hint}%") for hint in filters.path_hints])
             )
+        if filters.album_ids:
+            album_ids = [album_id.strip() for album_id in filters.album_ids if album_id.strip()]
+            if album_ids:
+                album_items_subquery = (
+                    select(self.editable_album_items.c.photo_id)
+                    .where(
+                        and_(
+                            self.editable_album_items.c.photo_id == self.photos.c.photo_id,
+                            self.editable_album_items.c.album_id.in_(album_ids),
+                        )
+                    )
+                    .limit(1)
+                    .exists()
+                )
+                where_conditions.append(album_items_subquery)
         if filters.orientation:
             where_conditions.append(self.photos.c.orientation.in_(filters.orientation))
 
