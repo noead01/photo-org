@@ -1,5 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
 import { parseAsArrayOf, parseAsInteger, parseAsString, useQueryState } from "nuqs";
+import { resolveInitialSessionIdentity } from "../session/sessionIdentity";
+import {
+  addPhotosToAlbum,
+  createAlbum,
+  fetchAlbums
+} from "./library/libraryRouteApi";
+import { AlbumActionSurface } from "./photo-interactions/AlbumActionSurface";
+import {
+  DEFAULT_PHOTO_INSPECTOR_STATE,
+  photoInspectorReducer
+} from "./photo-interactions/photoInspectorState";
+import {
+  DEFAULT_PHOTO_SELECTION_STATE,
+  photoSelectionReducer
+} from "./photo-interactions/photoSelectionState";
+import type { AlbumTarget } from "./photo-interactions/photoInteractionTypes";
 import { BrowsePagination } from "./shared/BrowsePagination";
 
 import { SuggestionsFilters } from "./suggestions/SuggestionsFilters";
@@ -32,9 +48,25 @@ export function SuggestionsRoutePage() {
   const [payload, setPayload] = useState<SuggestionListPayload | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectionState, dispatchSelection] = useReducer(
+    photoSelectionReducer,
+    DEFAULT_PHOTO_SELECTION_STATE
+  );
+  const [photoInspectorState, dispatchPhotoInspector] = useReducer(
+    photoInspectorReducer,
+    {
+      ...DEFAULT_PHOTO_INSPECTOR_STATE,
+      areFaceBoxesVisible: true
+    }
+  );
   const [selectedFaceIds, setSelectedFaceIds] = useState<Set<string>>(new Set());
   const [faceChoiceDrafts, setFaceChoiceDrafts] = useState<Map<string, string>>(new Map());
   const [excludedPersonPickerValue, setExcludedPersonPickerValue] = useState("");
+  const [albumTargets, setAlbumTargets] = useState<AlbumTarget[]>([]);
+  const [isAlbumActionSubmitting, setIsAlbumActionSubmitting] = useState(false);
+  const [albumActionResultMessage, setAlbumActionResultMessage] = useState<string | null>(null);
+  const sessionIdentity = resolveInitialSessionIdentity();
+  const sessionUserId = sessionIdentity?.userId ?? null;
 
   const minConfidencePercent = clampPercentage(minConfidenceQueryValue);
   const maxConfidencePercent = Math.max(
@@ -88,29 +120,56 @@ export function SuggestionsRoutePage() {
   }, [loadPage, page]);
 
   useEffect(() => {
-    let isCanceled = false;
+    let canceled = false;
 
-    async function loadPeople() {
+    async function loadReferenceData() {
       try {
         const people = await fetchPeopleDirectory();
-        if (!isCanceled) {
+        if (!canceled) {
           setPeopleDirectory(people);
         }
       } catch {
-        if (!isCanceled) {
+        if (!canceled) {
           setPeopleDirectory([]);
+        }
+      }
+
+      try {
+        const albums = await fetchAlbums(sessionUserId);
+        if (!canceled) {
+          const mappedTargets = albums
+            .map<AlbumTarget>((album) => ({
+              albumId: album.album_id,
+              name: album.name,
+              kind: album.kind === "saved_filter" ? "saved_filter" : "manual",
+              canAcceptManualAdditions: album.kind === "editable"
+            }))
+            .sort((left, right) => left.name.localeCompare(right.name, "en-US"));
+          setAlbumTargets(mappedTargets);
+        }
+      } catch {
+        if (!canceled) {
+          setAlbumTargets([]);
         }
       }
     }
 
-    void loadPeople();
+    void loadReferenceData();
 
     return () => {
-      isCanceled = true;
+      canceled = true;
     };
-  }, []);
+  }, [sessionUserId]);
 
   const currentPageFaceIdsOrdered = useMemo(() => flattenFaceIds(payload?.items ?? []), [payload]);
+  const currentPagePhotoIdsOrdered = useMemo(
+    () => (payload?.items ?? []).map((item) => item.photo_id),
+    [payload]
+  );
+  const selectedPhotoIdsOrdered = useMemo(() => {
+    const selectedPhotoIds = selectionState.selectedPhotoIds;
+    return currentPagePhotoIdsOrdered.filter((photoId) => selectedPhotoIds.has(photoId));
+  }, [currentPagePhotoIdsOrdered, selectionState.selectedPhotoIds]);
 
   const selectedFaceIdsOrdered = useMemo(() => {
     const selected = selectedFaceIds;
@@ -163,6 +222,68 @@ export function SuggestionsRoutePage() {
   function removeExcludedPerson(personId: string) {
     void setExcludedPersonIdsQueryValue(excludedPersonIds.filter((entry) => entry !== personId));
     setPage(1);
+  }
+
+  async function handleAddToAlbum(albumId: string, photoIds: string[]) {
+    if (isAlbumActionSubmitting) {
+      return;
+    }
+
+    setIsAlbumActionSubmitting(true);
+    setAlbumActionResultMessage(null);
+    try {
+      const result = await addPhotosToAlbum(albumId, photoIds, sessionUserId);
+      const addedCount = result.added_photo_ids.length;
+      const duplicateCount = result.duplicate_photo_ids.length;
+      const missingCount = result.missing_photo_ids.length;
+      const details: string[] = [];
+      if (duplicateCount > 0) {
+        details.push(`${duplicateCount} already in album`);
+      }
+      if (missingCount > 0) {
+        details.push(`${missingCount} missing`);
+      }
+      const summary = `Added ${addedCount} photo${addedCount === 1 ? "" : "s"} to album.`;
+      setAlbumActionResultMessage(
+        details.length > 0 ? `${summary} (${details.join(", ")}).` : summary
+      );
+    } catch (caughtError: unknown) {
+      setAlbumActionResultMessage(
+        caughtError instanceof Error ? caughtError.message : "Could not add photos to album."
+      );
+    } finally {
+      setIsAlbumActionSubmitting(false);
+    }
+  }
+
+  async function handleCreateAlbumAndAdd(name: string, photoIds: string[]) {
+    if (isAlbumActionSubmitting) {
+      return;
+    }
+
+    setIsAlbumActionSubmitting(true);
+    setAlbumActionResultMessage(null);
+    try {
+      const createdAlbum = await createAlbum({ name, kind: "editable" }, sessionUserId);
+      await addPhotosToAlbum(createdAlbum.album_id, photoIds, sessionUserId);
+      setAlbumTargets((current) =>
+        [...current, {
+          albumId: createdAlbum.album_id,
+          name: createdAlbum.name,
+          kind: "manual" as const,
+          canAcceptManualAdditions: true
+        }].sort((left, right) => left.name.localeCompare(right.name, "en-US"))
+      );
+      setAlbumActionResultMessage(
+        `Created album "${createdAlbum.name}" and added ${photoIds.length} photo${photoIds.length === 1 ? "" : "s"}.`
+      );
+    } catch (caughtError: unknown) {
+      setAlbumActionResultMessage(
+        caughtError instanceof Error ? caughtError.message : "Could not create album."
+      );
+    } finally {
+      setIsAlbumActionSubmitting(false);
+    }
   }
 
   return (
@@ -221,6 +342,19 @@ export function SuggestionsRoutePage() {
       ) : null}
       {message ? <p>{message}</p> : null}
 
+      <AlbumActionSurface
+        albums={albumTargets}
+        selectedPhotoIds={selectedPhotoIdsOrdered}
+        isSubmitting={isAlbumActionSubmitting}
+        resultMessage={albumActionResultMessage}
+        onAddToAlbum={(albumId, photoIds) => {
+          void handleAddToAlbum(albumId, photoIds);
+        }}
+        onCreateAlbumAndAdd={(name, photoIds) => {
+          void handleCreateAlbumAndAdd(name, photoIds);
+        }}
+      />
+
       {!isLoading && !error && payload && payload.items.length === 0 ? (
         <p className="suggestions-empty">No pending suggestions.</p>
       ) : null}
@@ -228,11 +362,20 @@ export function SuggestionsRoutePage() {
       {!isLoading && !error && payload ? (
         <SuggestionsGrid
           items={payload.items}
+          selectedPhotoIds={selectionState.selectedPhotoIds}
           selectedFaceIds={selectedFaceIds}
+          faceBoxesVisible={photoInspectorState.areFaceBoxesVisible}
+          activeMetadataPhotoId={photoInspectorState.activeMetadataPhotoId}
           faceActionInFlightIds={faceActionInFlightIds}
           faceChoiceDrafts={faceChoiceDrafts}
           isLoading={isLoading}
           isConfirming={isConfirming}
+          onTogglePhotoSelected={(photoId) => {
+            dispatchSelection({
+              type: "togglePhotoSelection",
+              photoId
+            });
+          }}
           onToggleFaceSelected={(faceId) => {
             setSelectedFaceIds((current) => {
               const next = new Set(current);
@@ -242,6 +385,21 @@ export function SuggestionsRoutePage() {
                 next.add(faceId);
               }
               return next;
+            });
+          }}
+          onOpenMetadata={(photoId, sourceSurfaceId) => {
+            dispatchPhotoInspector({
+              type: "openMetadata",
+              photoId,
+              sourceSurfaceId
+            });
+          }}
+          onOpenFace={(face, photoId, sourceSurfaceId) => {
+            dispatchPhotoInspector({
+              type: "openFaceAssignment",
+              photoId,
+              faceId: face.face_id,
+              sourceSurfaceId
             });
           }}
           onFaceChoiceChange={(faceId, value) => {

@@ -1,12 +1,62 @@
 import type { AlbumDetail } from "../library/libraryRouteApi";
+import { PhotoSurface } from "../photo-interactions/PhotoSurface";
+import type { PhotoSummary } from "../photo-interactions/photoInteractionTypes";
+import { formatDisplayPath } from "../suggestions/formatting";
 
 interface AlbumDetailInlineProps {
   detail: AlbumDetail | null;
+  selectedPhotoIds: Set<string>;
+  faceBoxesVisible: boolean;
+  activeMetadataPhotoId: string | null;
   onRemovePhoto: (photoId: string) => void;
   onSelectPage: (albumId: string, page: number) => void;
+  onTogglePhotoSelected: (photoId: string) => void;
+  onFaceBoxesVisibleChange: (visible: boolean) => void;
+  onOpenMetadata: (photoId: string, sourceSurfaceId: string) => void;
+  onOpenFace: (photoId: string, faceId: string, sourceSurfaceId: string) => void;
 }
 
-export function AlbumDetailInline({ detail, onRemovePhoto, onSelectPage }: AlbumDetailInlineProps) {
+function adaptAlbumItem(detail: AlbumDetail, item: AlbumDetail["items"][number]): PhotoSummary {
+  return {
+    photoId: item.photo_id,
+    path: item.path,
+    title: formatDisplayPath(item.path),
+    shotTs: item.shot_ts,
+    filesize: item.filesize,
+    people: [],
+    media: {
+      thumbnail: item.thumbnail
+        ? {
+            mimeType: item.thumbnail.mime_type,
+            width: item.thumbnail.width,
+            height: item.thumbnail.height,
+            dataBase64: item.thumbnail.data_base64
+          }
+        : null,
+      originalIntent: "detail-only",
+      originalAvailability: null
+    },
+    faces: [],
+    albumMembership: {
+      albumIds: [detail.album_id],
+      currentAlbumId: detail.album_id
+    },
+    defaultFaceBoxesVisible: false
+  };
+}
+
+export function AlbumDetailInline({
+  detail,
+  selectedPhotoIds,
+  faceBoxesVisible,
+  activeMetadataPhotoId,
+  onRemovePhoto,
+  onSelectPage,
+  onTogglePhotoSelected,
+  onFaceBoxesVisibleChange,
+  onOpenMetadata,
+  onOpenFace
+}: AlbumDetailInlineProps) {
   return (
     <section className="albums-detail-inline" aria-label="Album detail">
       {detail ? (
@@ -21,23 +71,31 @@ export function AlbumDetailInline({ detail, onRemovePhoto, onSelectPage }: Album
           {detail.items.length === 0 ? (
             <p className="albums-empty">No photos in this album.</p>
           ) : (
+            <>
+            <label>
+              <input
+                type="checkbox"
+                checked={faceBoxesVisible}
+                onChange={(event) => onFaceBoxesVisibleChange(event.currentTarget.checked)}
+              />
+              Show face boxes on all photos
+            </label>
             <ul className="albums-detail-grid" aria-label="Album photo thumbnails">
               {detail.items.map((item) => (
                 <li key={item.photo_id}>
-                  {item.thumbnail ? (
-                    <img
-                      className="albums-detail-thumb"
-                      src={`data:${item.thumbnail.mime_type};base64,${item.thumbnail.data_base64}`}
-                      width={item.thumbnail.width}
-                      height={item.thumbnail.height}
-                      alt={item.path}
-                    />
-                  ) : (
-                    <div className="albums-detail-thumb albums-detail-thumb-placeholder" aria-hidden="true">
-                      No preview
-                    </div>
-                  )}
-                  <p title={item.path}>{item.path}</p>
+                  <PhotoSurface
+                    photo={adaptAlbumItem(detail, item)}
+                    selected={selectedPhotoIds.has(item.photo_id)}
+                    faceBoxesVisible={faceBoxesVisible}
+                    activeMetadata={activeMetadataPhotoId === item.photo_id}
+                    detailTo={`/library/${item.photo_id}`}
+                    selectionLabel={`Select photo ${item.photo_id}`}
+                    detailLabel={`Open details for ${item.path}`}
+                    metadataLabel={`Show metadata for ${item.photo_id}`}
+                    onToggleSelected={onTogglePhotoSelected}
+                    onOpenMetadata={onOpenMetadata}
+                    onOpenFace={onOpenFace}
+                  />
                   {detail.kind === "editable" ? (
                     <button type="button" onClick={() => onRemovePhoto(item.photo_id)}>
                       Remove photo {item.photo_id}
@@ -46,6 +104,7 @@ export function AlbumDetailInline({ detail, onRemovePhoto, onSelectPage }: Album
                 </li>
               ))}
             </ul>
+            </>
           )}
           {detail.total_pages > 1 ? (
             <div className="albums-detail-pagination" aria-label="Album content pagination">

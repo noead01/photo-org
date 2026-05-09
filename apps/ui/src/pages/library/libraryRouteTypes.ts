@@ -11,9 +11,19 @@ export type LibraryPhoto = {
   filesize: number;
   people?: string[];
   faces?: Array<{
+    face_id?: string;
     person_id: string | null;
+    bbox_x?: number | null;
+    bbox_y?: number | null;
+    bbox_w?: number | null;
+    bbox_h?: number | null;
+    bbox_space_width?: number | null;
+    bbox_space_height?: number | null;
     label_source?: "human_confirmed" | "machine_suggested" | null;
     confidence?: number | null;
+    model_version?: string | null;
+    provenance?: Record<string, unknown> | null;
+    label_recorded_ts?: string | null;
     suggestions?: Array<{
       person_id: string;
       display_name: string;

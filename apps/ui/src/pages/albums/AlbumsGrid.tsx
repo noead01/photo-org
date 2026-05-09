@@ -9,6 +9,9 @@ interface AlbumsGridProps {
   albums: AlbumRecord[];
   selectedAlbumId: string | null;
   detail: AlbumDetail | null;
+  selectedPhotoIds: Set<string>;
+  faceBoxesVisible: boolean;
+  activeMetadataPhotoId: string | null;
   createName: string;
   createType: "editable" | "saved_filter";
   createSavedFilterJsonDraft: string;
@@ -28,12 +31,19 @@ interface AlbumsGridProps {
   onSelectPage: (albumId: string, page: number) => void;
   onRowNameChange: (albumId: string, value: string) => void;
   onRowSavedFilterJsonDraftChange: (albumId: string, value: string) => void;
+  onTogglePhotoSelected: (photoId: string) => void;
+  onFaceBoxesVisibleChange: (visible: boolean) => void;
+  onOpenMetadata: (photoId: string, sourceSurfaceId: string) => void;
+  onOpenFace: (photoId: string, faceId: string, sourceSurfaceId: string) => void;
 }
 
 export function AlbumsGrid({
   albums,
   selectedAlbumId,
   detail,
+  selectedPhotoIds,
+  faceBoxesVisible,
+  activeMetadataPhotoId,
   createName,
   createType,
   createSavedFilterJsonDraft,
@@ -52,7 +62,11 @@ export function AlbumsGrid({
   onRemovePhoto,
   onSelectPage,
   onRowNameChange,
-  onRowSavedFilterJsonDraftChange
+  onRowSavedFilterJsonDraftChange,
+  onTogglePhotoSelected,
+  onFaceBoxesVisibleChange,
+  onOpenMetadata,
+  onOpenFace
 }: AlbumsGridProps) {
   return (
     <section className="albums-grid-shell" aria-label="Albums grid">
@@ -143,8 +157,15 @@ export function AlbumsGrid({
                     <td colSpan={4}>
                       <AlbumDetailInline
                         detail={detail}
+                        selectedPhotoIds={selectedPhotoIds}
+                        faceBoxesVisible={faceBoxesVisible}
+                        activeMetadataPhotoId={activeMetadataPhotoId}
                         onRemovePhoto={onRemovePhoto}
                         onSelectPage={onSelectPage}
+                        onTogglePhotoSelected={onTogglePhotoSelected}
+                        onFaceBoxesVisibleChange={onFaceBoxesVisibleChange}
+                        onOpenMetadata={onOpenMetadata}
+                        onOpenFace={onOpenFace}
                       />
                     </td>
                   </tr>

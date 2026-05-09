@@ -44,6 +44,69 @@ type SearchResponsePayload = {
   };
 };
 
+type PhotoDetailPayload = {
+  photo_id: string;
+  path: string;
+  ext: string;
+  camera_make: string | null;
+  orientation: string | null;
+  shot_ts: string | null;
+  filesize: number;
+  tags: string[];
+  people: string[];
+  faces: Array<{
+    face_id: string;
+    person_id: string | null;
+    bbox_x: number | null;
+    bbox_y: number | null;
+    bbox_w: number | null;
+    bbox_h: number | null;
+    bbox_space_width?: number | null;
+    bbox_space_height?: number | null;
+    label_source: "human_confirmed" | "machine_suggested" | null;
+    confidence: number | null;
+    model_version: string | null;
+    provenance: Record<string, unknown> | null;
+    label_recorded_ts: string | null;
+    suggestions?: Array<{
+      person_id: string;
+      display_name: string;
+      rank: number;
+      confidence: number;
+      model_version: string | null;
+      provenance: Record<string, unknown> | null;
+    }>;
+  }>;
+  thumbnail: {
+    mime_type: string;
+    width: number;
+    height: number;
+    data_base64: string;
+  } | null;
+  original: {
+    is_available: boolean;
+    availability_state: string;
+    last_failure_reason: string | null;
+  } | null;
+  metadata: {
+    sha256: string;
+    phash: string | null;
+    shot_ts_source: string | null;
+    camera_model: string | null;
+    software: string | null;
+    gps_latitude: number | null;
+    gps_longitude: number | null;
+    gps_altitude: number | null;
+    exif_attributes: Record<string, unknown> | null;
+    created_ts: string;
+    updated_ts: string;
+    modified_ts: string | null;
+    deleted_ts: string | null;
+    faces_count: number;
+    faces_detected_ts: string | null;
+  };
+};
+
 function buildPayload(
   photoIds: string[],
   total = photoIds.length,
@@ -68,6 +131,44 @@ function buildPayload(
           last_failure_reason: null
         }
       }))
+    }
+  };
+}
+
+function buildPhotoDetailPayload(photoId: string): PhotoDetailPayload {
+  return {
+    photo_id: photoId,
+    path: `/library/${photoId}.jpg`,
+    ext: "jpg",
+    camera_make: null,
+    orientation: null,
+    shot_ts: "2026-04-01T12:00:00Z",
+    filesize: 1024,
+    tags: [],
+    people: [],
+    faces: [],
+    thumbnail: null,
+    original: {
+      is_available: true,
+      availability_state: "available",
+      last_failure_reason: null
+    },
+    metadata: {
+      sha256: `${photoId}-sha`,
+      phash: null,
+      shot_ts_source: null,
+      camera_model: null,
+      software: null,
+      gps_latitude: null,
+      gps_longitude: null,
+      gps_altitude: null,
+      exif_attributes: null,
+      created_ts: "2026-04-01T12:00:00Z",
+      updated_ts: "2026-04-01T12:00:00Z",
+      modified_ts: null,
+      deleted_ts: null,
+      faces_count: 0,
+      faces_detected_ts: null
     }
   };
 }
@@ -200,7 +301,7 @@ describe("LibraryRoutePage", () => {
 
     expect(screen.queryByRole("button", { name: "Review faces" })).not.toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Select photo photo-a" })).toBeInTheDocument();
-    expect(screen.queryByRole("checkbox", { name: "Show face boxes on all photos" })).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Show face boxes on all photos" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "View details" })).not.toBeInTheDocument();
   });
 
@@ -279,6 +380,42 @@ describe("LibraryRoutePage", () => {
     });
 
     expect(thumbnailLink).toHaveAttribute("href", "/library/photo-a");
+  });
+
+  it("keeps library photo selection while opening metadata from a shared photo surface", async () => {
+    const user = userEvent.setup();
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+      if (url === "/api/v1/photos/photo-a") {
+        return {
+          ok: true,
+          json: async () => buildPhotoDetailPayload("photo-a")
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-a"])
+      } as Response;
+    });
+
+    renderLibraryAt("/library");
+
+    const selection = await screen.findByRole("checkbox", { name: "Select photo photo-a" });
+    await user.click(selection);
+    await user.click(screen.getByRole("button", { name: "Show metadata for photo-a.jpg" }));
+
+    expect(screen.getByRole("checkbox", { name: "Select photo photo-a" })).toBeChecked();
+    expect(
+      await screen.findByRole("complementary", { name: "Metadata for photo-a.jpg" })
+    ).toBeInTheDocument();
   });
 
   it("shows source-relative path labels in the grid", async () => {

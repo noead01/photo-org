@@ -96,7 +96,9 @@ describe("AlbumsRoutePage", () => {
     expect(screen.getByText("1 photos")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Show content Weekend" }));
 
-    expect(await screen.findByRole("img", { name: "/library/photo-1.jpg" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("img", { name: /preview of \/library\/photo-1.jpg/i })
+    ).toBeInTheDocument();
   });
 
   it("creates new albums and removes photo membership for editable albums", async () => {
@@ -275,5 +277,109 @@ describe("AlbumsRoutePage", () => {
     expect(await screen.findByText(
       "Library location: /library?person=Inez+Rivera&personCertainty=include_suggestions&suggestionMin=0.91&hasFaces=true"
     )).toBeInTheDocument();
+  });
+
+  it("uses shared photo selection and metadata inside album detail", async () => {
+    const user = userEvent.setup();
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/v1/albums") {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              album_id: "album-1",
+              name: "Weekend",
+              owner_user_id: "demo-user",
+              kind: "editable",
+              created_ts: "2026-05-08T12:00:00Z",
+              updated_ts: "2026-05-08T12:00:00Z",
+              item_count: 1,
+              saved_filter: null
+            }
+          ]
+        } as Response;
+      }
+      if (url === "/api/v1/albums/album-1?page=1&page_size=24") {
+        return {
+          ok: true,
+          json: async () => ({
+            album_id: "album-1",
+            name: "Weekend",
+            owner_user_id: "demo-user",
+            kind: "editable",
+            created_ts: "2026-05-08T12:00:00Z",
+            updated_ts: "2026-05-08T12:00:00Z",
+            item_count: 1,
+            items_total: 1,
+            items: [
+              {
+                photo_id: "photo-1",
+                path: "/library/photo-1.jpg",
+                ext: "jpg",
+                shot_ts: null,
+                filesize: 1024,
+                thumbnail: null
+              }
+            ],
+            page: 1,
+            page_size: 24,
+            total_pages: 1,
+            saved_filter: null
+          })
+        } as Response;
+      }
+      if (url === "/api/v1/photos/photo-1") {
+        return {
+          ok: true,
+          json: async () => ({
+            photo_id: "photo-1",
+            path: "/library/photo-1.jpg",
+            ext: "jpg",
+            camera_make: null,
+            orientation: null,
+            shot_ts: "2026-05-08T12:00:00Z",
+            filesize: 1024,
+            tags: [],
+            people: [],
+            faces: [],
+            thumbnail: null,
+            original: {
+              is_available: true,
+              availability_state: "available",
+              last_failure_reason: null
+            },
+            metadata: {
+              sha256: "photo-1-sha",
+              phash: null,
+              shot_ts_source: null,
+              camera_model: null,
+              software: null,
+              gps_latitude: null,
+              gps_longitude: null,
+              gps_altitude: null,
+              exif_attributes: null,
+              created_ts: "2026-05-08T12:00:00Z",
+              updated_ts: "2026-05-08T12:00:00Z",
+              modified_ts: null,
+              deleted_ts: null,
+              faces_count: 0,
+              faces_detected_ts: null
+            }
+          })
+        } as Response;
+      }
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    renderAlbumsRoute();
+
+    await user.click(await screen.findByRole("button", { name: /show content/i }));
+    await user.click(await screen.findByRole("checkbox", { name: /select photo/i }));
+    await user.click(screen.getByRole("button", { name: /show metadata/i }));
+
+    expect(screen.getByRole("checkbox", { name: /select photo/i })).toBeChecked();
+    expect(screen.getByRole("complementary", { name: /metadata/i })).toBeInTheDocument();
   });
 });

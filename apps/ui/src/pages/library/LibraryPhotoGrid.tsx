@@ -1,4 +1,5 @@
-import { Link } from "react-router-dom";
+import { adaptLibraryPhoto } from "../photo-interactions/photoInteractionAdapters";
+import { PhotoSurface } from "../photo-interactions/PhotoSurface";
 import type { LibraryPhoto } from "./libraryRouteTypes";
 import type { serializeLibrarySelectionState } from "./librarySelection";
 
@@ -8,6 +9,10 @@ interface LibraryPhotoGridProps {
   selectionRouteState: ReturnType<typeof serializeLibrarySelectionState>;
   selectedPhotoIds: Set<string>;
   onTogglePhotoSelection: (photoId: string) => void;
+  faceBoxesVisible: boolean;
+  activeMetadataPhotoId: string | null;
+  onOpenMetadata: (photoId: string, sourceSurfaceId: string) => void;
+  onOpenFace: (photoId: string, faceId: string, sourceSurfaceId: string) => void;
   libraryViewRouteState: {
     sortDirection: "asc" | "desc";
     page: number;
@@ -67,9 +72,7 @@ function summarizePhotoFaces(photo: LibraryPhoto): {
   };
 }
 
-function formatFaceSummary(
-  metrics: ReturnType<typeof summarizePhotoFaces>
-): string {
+function formatFaceSummary(metrics: ReturnType<typeof summarizePhotoFaces>): string {
   const base = `Faces detected/assigned: ${metrics.detectedFaces}/${metrics.assignedFaces}`;
   if (metrics.suggestedFaces <= 0) {
     return base;
@@ -84,63 +87,43 @@ export function LibraryPhotoGrid({
   selectionRouteState,
   selectedPhotoIds,
   onTogglePhotoSelection,
-  libraryViewRouteState
+  libraryViewRouteState,
+  faceBoxesVisible,
+  activeMetadataPhotoId,
+  onOpenMetadata,
+  onOpenFace
 }: LibraryPhotoGridProps) {
   return (
     <ol className="browse-grid" aria-label="Photo gallery">
       {photos.map((photo) => {
-        const metrics = summarizePhotoFaces(photo);
+        const summary = adaptLibraryPhoto(photo);
         const displayPath = formatDisplayPath(photo.path);
-        const isSelected = selectedPhotoIds.has(photo.photo_id);
+        const faceSummary = formatFaceSummary(summarizePhotoFaces(photo));
         return (
-          <li
-            key={photo.photo_id}
-            className={`browse-card${isSelected ? " browse-card-selected" : ""}`}
-          >
-            <label className="browse-card-checkbox-badge">
-              <input
-                type="checkbox"
-                checked={isSelected}
-                aria-label={`Select photo ${photo.photo_id}`}
-                onChange={() => {
-                  onTogglePhotoSelection(photo.photo_id);
-                }}
-              />
-            </label>
-            <div className="browse-thumbnail-shell">
-            <Link
-              className="browse-thumbnail-link"
-              data-photo-id={photo.photo_id}
-              to={`/library/${photo.photo_id}`}
-              state={{
+          <li key={photo.photo_id}>
+            <PhotoSurface
+              photo={{
+                ...summary,
+                title: displayPath
+              }}
+              selected={selectedPhotoIds.has(photo.photo_id)}
+              faceBoxesVisible={faceBoxesVisible}
+              activeMetadata={activeMetadataPhotoId === photo.photo_id}
+              detailTo={`/library/${photo.photo_id}`}
+              detailState={{
                 returnToLibrarySearch: locationSearch,
                 returnFocusPhotoId: photo.photo_id,
                 librarySelection: selectionRouteState,
                 libraryViewState: libraryViewRouteState
               }}
-              aria-label={`Open details for ${photo.path}`}
-            >
-              {photo.thumbnail ? (
-                <img
-                  className="browse-thumbnail"
-                  src={`data:${photo.thumbnail.mime_type};base64,${photo.thumbnail.data_base64}`}
-                  width={photo.thumbnail.width}
-                  height={photo.thumbnail.height}
-                  alt={`Preview of ${photo.path}`}
-                />
-              ) : (
-                <div className="browse-thumbnail browse-thumbnail-placeholder" aria-hidden="true">
-                  No preview
-                </div>
-              )}
-            </Link>
-            </div>
-            <div className="browse-card-body">
-              <p className="browse-path" title={photo.path}>
-                {displayPath}
-              </p>
-              <p className="browse-card-summary">{formatFaceSummary(metrics)}</p>
-            </div>
+              selectionLabel={`Select photo ${photo.photo_id}`}
+              detailLabel={`Open details for ${photo.path}`}
+              metadataLabel={`Show metadata for ${summary.title}`}
+              supportingText={faceSummary}
+              onToggleSelected={onTogglePhotoSelection}
+              onOpenMetadata={onOpenMetadata}
+              onOpenFace={onOpenFace}
+            />
           </li>
         );
       })}

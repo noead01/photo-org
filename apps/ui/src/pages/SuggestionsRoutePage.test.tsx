@@ -13,7 +13,10 @@ type MockReply = {
 function renderPage(path = "/suggestions", onUrlUpdate?: OnUrlUpdateFunction) {
   const url = new URL(path, "https://photo-org.test");
   return render(
-    <MemoryRouter initialEntries={[path]}>
+    <MemoryRouter
+      initialEntries={[path]}
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+    >
       <NuqsTestingAdapter hasMemory searchParams={url.search} onUrlUpdate={onUrlUpdate}>
         <SuggestionsRoutePage />
       </NuqsTestingAdapter>
@@ -25,7 +28,10 @@ function renderPageStrict(path = "/suggestions", onUrlUpdate?: OnUrlUpdateFuncti
   const url = new URL(path, "https://photo-org.test");
   return render(
     <StrictMode>
-      <MemoryRouter initialEntries={[path]}>
+      <MemoryRouter
+        initialEntries={[path]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <NuqsTestingAdapter hasMemory searchParams={url.search} onUrlUpdate={onUrlUpdate}>
           <SuggestionsRoutePage />
         </NuqsTestingAdapter>
@@ -237,7 +243,7 @@ describe("SuggestionsRoutePage", () => {
     expect(screen.getByLabelText("Choose suggestion for face face-1")).toHaveDisplayValue("Alex");
     expect(screen.getByLabelText("Choose suggestion for face face-2")).toHaveDisplayValue("Blair");
     const overlay = screen.getByRole("list", {
-      name: "Suggested face regions for /storage-sources/source-1/family/trip/photo-1.jpg"
+      name: "Detected face regions"
     });
     expect(within(overlay).getByText("1")).toBeInTheDocument();
     expect(within(overlay).getByText("2")).toBeInTheDocument();
@@ -248,6 +254,103 @@ describe("SuggestionsRoutePage", () => {
     expect(screen.getByRole("button", { name: "Page 1" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("button", { name: "Page 2" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next page" })).toHaveAttribute("aria-disabled", "false");
+  });
+
+  it("keeps photo selection separate from selected suggestion faces", async () => {
+    const user = userEvent.setup();
+
+    installFetchRoutes(fetchMock, {
+      "GET /api/v1/people": reply(buildPeoplePayload()),
+      "GET /api/v1/albums": reply([]),
+      "GET /api/v1/suggestions/faces?page=1&page_size=24": reply(
+        buildSuggestionsPayload({
+          items: [
+            {
+              photo_id: "photo-1",
+              path: "/photos/photo-1.jpg",
+              thumbnail: null,
+              faces: [
+                {
+                  face_id: "face-1",
+                  top_suggestion: {
+                    person_id: "person-1",
+                    display_name: "Alex",
+                    confidence: 0.97
+                  }
+                }
+              ]
+            }
+          ]
+        })
+      )
+    });
+
+    renderPage();
+
+    const photoCheckbox = await screen.findByRole("checkbox", { name: /select photo/i });
+    const faceCheckbox = screen.getByRole("checkbox", { name: /confirm suggestion for face/i });
+    expect(faceCheckbox).toBeChecked();
+
+    await user.click(photoCheckbox);
+
+    expect(photoCheckbox).toBeChecked();
+    expect(faceCheckbox).toBeChecked();
+  });
+
+  it("uses selected photos for album actions without clearing selected faces", async () => {
+    const user = userEvent.setup();
+
+    installFetchRoutes(fetchMock, {
+      "GET /api/v1/people": reply(buildPeoplePayload()),
+      "GET /api/v1/albums": reply([]),
+      "GET /api/v1/suggestions/faces?page=1&page_size=24": reply(
+        buildSuggestionsPayload({
+          items: [
+            {
+              photo_id: "photo-1",
+              path: "/photos/photo-1.jpg",
+              thumbnail: null,
+              faces: [
+                {
+                  face_id: "face-1",
+                  top_suggestion: {
+                    person_id: "person-1",
+                    display_name: "Alex",
+                    confidence: 0.97
+                  }
+                }
+              ]
+            }
+          ]
+        })
+      ),
+      "POST /api/v1/albums": reply({
+        album_id: "album-suggestions",
+        name: "Suggestions Picks",
+        owner_user_id: "demo-operator",
+        kind: "editable",
+        created_ts: "2026-05-09T12:00:00Z",
+        updated_ts: "2026-05-09T12:00:00Z",
+        item_count: 0
+      }, 201),
+      "POST /api/v1/albums/album-suggestions/items": reply({
+        album_id: "album-suggestions",
+        added_photo_ids: ["photo-1"],
+        duplicate_photo_ids: [],
+        missing_photo_ids: []
+      })
+    });
+
+    renderPage();
+
+    const photoCheckbox = await screen.findByRole("checkbox", { name: /select photo/i });
+    const faceCheckbox = screen.getByRole("checkbox", { name: /confirm suggestion for face/i });
+    expect(faceCheckbox).toBeChecked();
+    await user.click(photoCheckbox);
+    await user.type(screen.getByLabelText(/new album name/i), "Suggestions Picks");
+    await user.click(screen.getByRole("button", { name: /create and add 1 photo/i }));
+
+    expect(faceCheckbox).toBeChecked();
   });
 
   it("deduplicates initial strict-mode requests", async () => {

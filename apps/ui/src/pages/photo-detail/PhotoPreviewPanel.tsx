@@ -12,6 +12,7 @@ type IngestStatus = {
 
 interface PhotoPreviewPanelProps {
   detailPhotoId: string;
+  selected: boolean;
   previewImageSrc: string | null;
   shouldUseOriginalImage: boolean;
   activeOriginalImageSrc: string | null;
@@ -22,6 +23,7 @@ interface PhotoPreviewPanelProps {
   faceOverlayRegions: FaceOverlayRegion[];
   faceBadgeInitialsById: Map<string, string>;
   faceRegionState: string;
+  onToggleSelected: (photoId: string) => void;
   onShowFaceBoxesChange: (checked: boolean) => void;
   onImageScalePercentChange: (value: number) => void;
   onToggleDetails: () => void;
@@ -33,6 +35,7 @@ interface PhotoPreviewPanelProps {
 
 export function PhotoPreviewPanel({
   detailPhotoId,
+  selected,
   previewImageSrc,
   shouldUseOriginalImage,
   activeOriginalImageSrc,
@@ -43,6 +46,7 @@ export function PhotoPreviewPanel({
   faceOverlayRegions,
   faceBadgeInitialsById,
   faceRegionState,
+  onToggleSelected,
   onShowFaceBoxesChange,
   onImageScalePercentChange,
   onToggleDetails,
@@ -57,6 +61,15 @@ export function PhotoPreviewPanel({
     <article className="detail-preview-panel">
       <h2>Preview</h2>
       <div className="detail-media-controls" role="group" aria-label="Preview controls">
+        <label className="detail-photo-select-toggle">
+          <input
+            type="checkbox"
+            aria-label="Select photo"
+            checked={selected}
+            onChange={() => onToggleSelected(detailPhotoId)}
+          />
+          Select photo
+        </label>
         <label className="detail-face-box-toggle">
           <input
             type="checkbox"
@@ -136,7 +149,7 @@ export function PhotoPreviewPanel({
           </div>
         </div>
       ) : (
-        <div className="browse-thumbnail browse-thumbnail-placeholder" aria-hidden="true">
+        <div className="detail-preview-placeholder" aria-hidden="true">
           No preview
         </div>
       )}

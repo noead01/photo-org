@@ -1,12 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { deriveIngestStatus } from "../app/ingestStatus";
 import { buildFaceOverlayRegions, type FaceOverlayRegion } from "./FaceBBoxOverlay";
-import { PhotoFaceAssignmentModal } from "./PhotoFaceAssignmentModal";
 import { applyFaceAssignment, applyFaceDismissal } from "./face-labeling/faceLabelingState";
 import { resolveDetailReturnState, setPendingLibraryFocusPhotoId } from "./libraryRouteState";
 import { sortPeopleDirectory } from "./people/peopleState";
-import { PhotoMetadataFlyout } from "./photo-detail/PhotoMetadataFlyout";
+import { adaptPhotoDetail } from "./photo-interactions/photoInteractionAdapters";
+import {
+  createPhotoSelectionState,
+  parsePhotoSelectionRouteState,
+  photoSelectionReducer,
+} from "./photo-interactions/photoSelectionState";
+import { FaceAssignmentModal } from "./photo-interactions/FaceAssignmentModal";
+import { PhotoMetadataFlyout } from "./photo-interactions/PhotoMetadataFlyout";
 import { fetchPeopleDirectory } from "./photo-detail/photoDetailApi";
 import { MISSING_VALUE } from "./photo-detail/photoDetailFormatting";
 import { PhotoPreviewPanel } from "./photo-detail/PhotoPreviewPanel";
@@ -51,6 +57,19 @@ export function PhotoDetailRoutePage() {
   const location = useLocation();
   const { photoId } = useParams<{ photoId: string }>();
   const returnState = resolveDetailReturnState(location.state);
+  const incomingSelectionRouteState = useMemo(() => {
+    if (!location.state || typeof location.state !== "object") {
+      return null;
+    }
+    return parsePhotoSelectionRouteState(
+      (location.state as { photoSelection?: unknown }).photoSelection
+    );
+  }, [location.state]);
+  const [photoSelectionState, dispatchPhotoSelection] = useReducer(
+    photoSelectionReducer,
+    incomingSelectionRouteState,
+    createPhotoSelectionState
+  );
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   const { detail, setDetail, isLoading, error, isNotFound, retry } = usePhotoDetail(photoId);
   const [imageScalePercent, setImageScalePercent] = useState(100);
@@ -149,23 +168,14 @@ export function PhotoDetailRoutePage() {
     );
   }, [detail?.faces, peopleNameById]);
 
-  const selectedFaceForModal = useMemo(() => {
-    if (!detail || !activeFaceModalId) {
-      return null;
-    }
-    const index = detail.faces.findIndex((face) => face.face_id === activeFaceModalId);
-    if (index < 0) {
-      return null;
-    }
-    return { ...detail.faces[index], sequence: index + 1 };
-  }, [activeFaceModalId, detail]);
+  const modalPhotoSummary = useMemo(() => (detail ? adaptPhotoDetail(detail) : null), [detail]);
 
-  const selectedRegionForModal = useMemo(() => {
-    if (!activeFaceModalId) {
+  const selectedFaceForModal = useMemo(() => {
+    if (!activeFaceModalId || !modalPhotoSummary) {
       return null;
     }
-    return faceOverlayRegions.find((region) => region.faceId === activeFaceModalId) ?? null;
-  }, [activeFaceModalId, faceOverlayRegions]);
+    return modalPhotoSummary.faces.find((face) => face.faceId === activeFaceModalId) ?? null;
+  }, [activeFaceModalId, modalPhotoSummary]);
 
   const backLinkFocusPhotoId = detail?.photo_id ?? returnState.returnFocusPhotoId ?? photoId ?? null;
 
@@ -239,6 +249,11 @@ export function PhotoDetailRoutePage() {
                   restoreFocusPhotoId: backLinkFocusPhotoId ?? undefined,
                   librarySelection: returnState.librarySelection,
                   libraryViewState: returnState.libraryViewState,
+                  photoSelection: {
+                    scope: photoSelectionState.scope,
+                    selectedPhotoIds: Array.from(photoSelectionState.selectedPhotoIds).sort(),
+                    allFilteredFingerprint: photoSelectionState.allFilteredFingerprint,
+                  },
                 }
               : undefined
           }
@@ -271,6 +286,7 @@ export function PhotoDetailRoutePage() {
         <div className="detail-workspace">
           <PhotoPreviewPanel
             detailPhotoId={detail.photo_id}
+            selected={photoSelectionState.selectedPhotoIds.has(detail.photo_id)}
             previewImageSrc={previewImageSrc}
             shouldUseOriginalImage={shouldUseOriginalImage}
             activeOriginalImageSrc={activeOriginalImageSrc}
@@ -285,6 +301,12 @@ export function PhotoDetailRoutePage() {
             faceOverlayRegions={faceOverlayRegions}
             faceBadgeInitialsById={faceBadgeInitialsById}
             faceRegionState={faceRegionState}
+            onToggleSelected={(selectedPhotoId) =>
+              dispatchPhotoSelection({
+                type: "togglePhotoSelection",
+                photoId: selectedPhotoId,
+              })
+            }
             onShowFaceBoxesChange={setShowFaceBoxes}
             onImageScalePercentChange={setImageScalePercent}
             onToggleDetails={() => setIsDetailFlyoutOpen((current) => !current)}
@@ -295,11 +317,27 @@ export function PhotoDetailRoutePage() {
           />
 
           <PhotoMetadataFlyout
-            key={detail.photo_id}
+            key={`detail-metadata-${detail.photo_id}`}
+            summary={{
+              photoId: detail.photo_id,
+              title: detail.photo_id,
+              path: detail.path,
+              thumbnail: detail.thumbnail
+                ? {
+                    mimeType: detail.thumbnail.mime_type,
+                    width: detail.thumbnail.width,
+                    height: detail.thumbnail.height,
+                    dataBase64: detail.thumbnail.data_base64
+                  }
+                : null
+            }}
             detail={detail}
             ingestStatus={ingestStatus}
             isOpen={isDetailFlyoutOpen}
+            isLoadingDetail={false}
+            detailError={null}
             onClose={() => setIsDetailFlyoutOpen(false)}
+            onRetry={retry}
           />
         </div>
       ) : null}
@@ -311,11 +349,10 @@ export function PhotoDetailRoutePage() {
         </section>
       ) : null}
 
-      <PhotoFaceAssignmentModal
+      <FaceAssignmentModal
         isOpen={selectedFaceForModal !== null}
+        photo={modalPhotoSummary}
         face={selectedFaceForModal}
-        region={selectedRegionForModal}
-        thumbnail={detail?.thumbnail ?? null}
         people={peopleDirectory.map((person) => ({
           person_id: person.person_id,
           display_name: person.display_name,
