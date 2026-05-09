@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { deriveIngestStatus } from "../app/ingestStatus";
 import { buildFaceOverlayRegions, type FaceOverlayRegion } from "./FaceBBoxOverlay";
-import { PhotoFaceAssignmentModal } from "./PhotoFaceAssignmentModal";
 import { applyFaceAssignment, applyFaceDismissal } from "./face-labeling/faceLabelingState";
 import { resolveDetailReturnState, setPendingLibraryFocusPhotoId } from "./libraryRouteState";
 import { sortPeopleDirectory } from "./people/peopleState";
+import { adaptPhotoDetail } from "./photo-interactions/photoInteractionAdapters";
+import { FaceAssignmentModal } from "./photo-interactions/FaceAssignmentModal";
 import { PhotoMetadataFlyout } from "./photo-interactions/PhotoMetadataFlyout";
 import { fetchPeopleDirectory } from "./photo-detail/photoDetailApi";
 import { MISSING_VALUE } from "./photo-detail/photoDetailFormatting";
@@ -149,23 +150,14 @@ export function PhotoDetailRoutePage() {
     );
   }, [detail?.faces, peopleNameById]);
 
-  const selectedFaceForModal = useMemo(() => {
-    if (!detail || !activeFaceModalId) {
-      return null;
-    }
-    const index = detail.faces.findIndex((face) => face.face_id === activeFaceModalId);
-    if (index < 0) {
-      return null;
-    }
-    return { ...detail.faces[index], sequence: index + 1 };
-  }, [activeFaceModalId, detail]);
+  const modalPhotoSummary = useMemo(() => (detail ? adaptPhotoDetail(detail) : null), [detail]);
 
-  const selectedRegionForModal = useMemo(() => {
-    if (!activeFaceModalId) {
+  const selectedFaceForModal = useMemo(() => {
+    if (!activeFaceModalId || !modalPhotoSummary) {
       return null;
     }
-    return faceOverlayRegions.find((region) => region.faceId === activeFaceModalId) ?? null;
-  }, [activeFaceModalId, faceOverlayRegions]);
+    return modalPhotoSummary.faces.find((face) => face.faceId === activeFaceModalId) ?? null;
+  }, [activeFaceModalId, modalPhotoSummary]);
 
   const backLinkFocusPhotoId = detail?.photo_id ?? returnState.returnFocusPhotoId ?? photoId ?? null;
 
@@ -327,11 +319,10 @@ export function PhotoDetailRoutePage() {
         </section>
       ) : null}
 
-      <PhotoFaceAssignmentModal
+      <FaceAssignmentModal
         isOpen={selectedFaceForModal !== null}
+        photo={modalPhotoSummary}
         face={selectedFaceForModal}
-        region={selectedRegionForModal}
-        thumbnail={detail?.thumbnail ?? null}
         people={peopleDirectory.map((person) => ({
           person_id: person.person_id,
           display_name: person.display_name,

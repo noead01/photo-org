@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import type { FaceOverlayRegion } from "./FaceBBoxOverlay";
 import {
   FaceLabelingApiError,
   assignFace,
@@ -7,14 +6,9 @@ import {
   createPerson,
   dismissFace,
   fetchFaceCandidates,
-  markFaceUnknown,
-} from "./face-labeling/faceLabelingApi";
-
-interface FaceAssignmentModalFace {
-  face_id: string;
-  person_id: string | null;
-  suggestions?: FaceCandidate[];
-}
+  markFaceUnknown
+} from "../face-labeling/faceLabelingApi";
+import type { PhotoFace, PhotoSummary } from "./photoInteractionTypes";
 
 interface FaceAssignmentModalPerson {
   person_id: string;
@@ -23,24 +17,16 @@ interface FaceAssignmentModalPerson {
   updated_ts?: string;
 }
 
-interface FaceThumbnail {
-  mime_type: string;
-  width: number;
-  height: number;
-  data_base64: string;
-}
-
 interface FaceCandidate {
   person_id: string;
   display_name: string;
   confidence: number;
 }
 
-interface PhotoFaceAssignmentModalProps {
+interface FaceAssignmentModalProps {
   isOpen: boolean;
-  face: (FaceAssignmentModalFace & { sequence: number }) | null;
-  region: FaceOverlayRegion | null;
-  thumbnail: FaceThumbnail | null;
+  photo: PhotoSummary | null;
+  face: PhotoFace | null;
   people: FaceAssignmentModalPerson[];
   onClose: () => void;
   onFaceUpdated: (faceId: string, personId: string) => void;
@@ -67,18 +53,34 @@ function formatConfidence(confidence: number): string {
   return `${(confidence * 100).toFixed(1)}%`;
 }
 
-function buildCropStyle(region: FaceOverlayRegion | null, thumbnail: FaceThumbnail | null): {
+function buildCropStyle(face: PhotoFace | null, photo: PhotoSummary | null): {
   frame: CSSProperties;
   image: CSSProperties;
 } | null {
-  if (!region || !thumbnail || thumbnail.width <= 0 || thumbnail.height <= 0) {
+  if (!face || !photo?.media.thumbnail) {
     return null;
   }
 
-  const leftPx = (region.leftPercent / 100) * thumbnail.width;
-  const topPx = (region.topPercent / 100) * thumbnail.height;
-  const widthPx = (region.widthPercent / 100) * thumbnail.width;
-  const heightPx = (region.heightPercent / 100) * thumbnail.height;
+  const thumbnail = photo.media.thumbnail;
+  if (thumbnail.width <= 0 || thumbnail.height <= 0) {
+    return null;
+  }
+
+  const spaceWidth = face.bbox.spaceWidth && face.bbox.spaceWidth > 0 ? face.bbox.spaceWidth : thumbnail.width;
+  const spaceHeight = face.bbox.spaceHeight && face.bbox.spaceHeight > 0 ? face.bbox.spaceHeight : thumbnail.height;
+  const x = face.bbox.x ?? null;
+  const y = face.bbox.y ?? null;
+  const width = face.bbox.width ?? null;
+  const height = face.bbox.height ?? null;
+
+  if (x === null || y === null || width === null || height === null || width <= 0 || height <= 0) {
+    return null;
+  }
+
+  const leftPx = (x / spaceWidth) * thumbnail.width;
+  const topPx = (y / spaceHeight) * thumbnail.height;
+  const widthPx = (width / spaceWidth) * thumbnail.width;
+  const heightPx = (height / spaceHeight) * thumbnail.height;
 
   if (widthPx <= 0 || heightPx <= 0) {
     return null;
@@ -109,17 +111,16 @@ function buildCropStyle(region: FaceOverlayRegion | null, thumbnail: FaceThumbna
   };
 }
 
-export function PhotoFaceAssignmentModal({
+export function FaceAssignmentModal({
   isOpen,
+  photo,
   face,
-  region,
-  thumbnail,
   people,
   onClose,
   onFaceUpdated,
   onFaceDismissed,
   onPersonCreated
-}: PhotoFaceAssignmentModalProps) {
+}: FaceAssignmentModalProps) {
   const [draft, setDraft] = useState("");
   const [candidates, setCandidates] = useState<FaceCandidate[]>([]);
   const [isLoadingCandidates, setIsLoadingCandidates] = useState(false);
@@ -134,14 +135,20 @@ export function PhotoFaceAssignmentModal({
 
     setError(null);
     setCandidateError(null);
-    const persistedSuggestions = Array.isArray(face.suggestions) ? face.suggestions : [];
+    const persistedSuggestions = Array.isArray(face.suggestions)
+      ? face.suggestions.map((suggestion) => ({
+          person_id: suggestion.personId,
+          display_name: suggestion.displayName,
+          confidence: suggestion.confidence
+        }))
+      : [];
     setCandidates(persistedSuggestions);
-    setDraft(face.person_id ? resolvePersonName(people, face.person_id) : "");
+    setDraft(face.personId ? resolvePersonName(people, face.personId) : "");
 
     const controller = new AbortController();
     setIsLoadingCandidates(true);
 
-    fetchFaceCandidates(face.face_id, false, controller.signal)
+    fetchFaceCandidates(face.faceId, false, controller.signal)
       .then((nextCandidates) => {
         if (controller.signal.aborted) {
           return;
@@ -165,8 +172,7 @@ export function PhotoFaceAssignmentModal({
   }, [face, isOpen, people]);
 
   const peopleByName = useMemo(() => {
-    const sorted = [...people].sort((left, right) => left.display_name.localeCompare(right.display_name, "en-US"));
-    return sorted;
+    return [...people].sort((left, right) => left.display_name.localeCompare(right.display_name, "en-US"));
   }, [people]);
 
   const normalizedDraft = normalizeName(draft);
@@ -192,9 +198,10 @@ export function PhotoFaceAssignmentModal({
   const targetPerson = exactMatch ?? (fuzzyMatches.length === 1 ? fuzzyMatches[0] : null);
   const trimmedDraft = draft.trim();
   const createCandidate = trimmedDraft.length > 0 && !targetPerson ? trimmedDraft : null;
-  const cropStyle = buildCropStyle(region, thumbnail);
-  const knownCurrentLabel = face ? resolvePersonName(people, face.person_id) : "Unassigned";
+  const cropStyle = buildCropStyle(face, photo);
+  const knownCurrentLabel = face ? resolvePersonName(people, face.personId) : "Unassigned";
   const isBusy = isSubmitting;
+  const faceSequence = face && photo ? photo.faces.findIndex((item) => item.faceId === face.faceId) + 1 : 0;
 
   async function saveAndClose() {
     if (!face || isSubmitting) {
@@ -218,18 +225,18 @@ export function PhotoFaceAssignmentModal({
         return;
       }
 
-      if (face.person_id === targetPersonId) {
+      if (face.personId === targetPersonId) {
         onClose();
         return;
       }
 
-      if (face.person_id === null) {
-        await assignFace(face.face_id, targetPersonId);
+      if (face.personId === null) {
+        await assignFace(face.faceId, targetPersonId);
       } else {
-        await correctFace(face.face_id, targetPersonId);
+        await correctFace(face.faceId, targetPersonId);
       }
 
-      onFaceUpdated(face.face_id, targetPersonId);
+      onFaceUpdated(face.faceId, targetPersonId);
       onClose();
     } catch (caughtError: unknown) {
       setError(
@@ -243,7 +250,7 @@ export function PhotoFaceAssignmentModal({
   }
 
   async function dismissFalsePositive() {
-    if (!face || face.person_id !== null || isSubmitting) {
+    if (!face || face.personId !== null || isSubmitting) {
       return;
     }
 
@@ -251,8 +258,8 @@ export function PhotoFaceAssignmentModal({
     setError(null);
 
     try {
-      await dismissFace(face.face_id);
-      onFaceDismissed(face.face_id);
+      await dismissFace(face.faceId);
+      onFaceDismissed(face.faceId);
       onClose();
     } catch (caughtError: unknown) {
       setError(
@@ -266,7 +273,7 @@ export function PhotoFaceAssignmentModal({
   }
 
   async function markUnknownHumanIdentity() {
-    if (!face || face.person_id !== null || isSubmitting) {
+    if (!face || face.personId !== null || isSubmitting) {
       return;
     }
 
@@ -274,8 +281,8 @@ export function PhotoFaceAssignmentModal({
     setError(null);
 
     try {
-      const payload = await markFaceUnknown(face.face_id);
-      onFaceUpdated(face.face_id, payload.person_id);
+      const payload = await markFaceUnknown(face.faceId);
+      onFaceUpdated(face.faceId, payload.person_id);
       onClose();
     } catch (caughtError: unknown) {
       setError(
@@ -288,7 +295,7 @@ export function PhotoFaceAssignmentModal({
     }
   }
 
-  if (!isOpen || !face) {
+  if (!isOpen || !photo || !face) {
     return null;
   }
 
@@ -301,9 +308,14 @@ export function PhotoFaceAssignmentModal({
         onClick={onClose}
       />
 
-      <section className="face-assignment-modal" role="dialog" aria-modal="true" aria-label="Face assignment">
+      <section
+        className="face-assignment-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Face assignment"
+      >
         <div className="face-assignment-modal-header">
-          <h3>Face {face.sequence} assignment</h3>
+          <h3>Face {faceSequence > 0 ? faceSequence : "?"} assignment</h3>
           <button type="button" onClick={onClose}>
             Close
           </button>
@@ -312,16 +324,28 @@ export function PhotoFaceAssignmentModal({
         <div className="face-assignment-modal-layout">
           <div className="face-assignment-modal-preview">
             <p>Bbox preview</p>
-            {thumbnail && cropStyle ? (
-              <div className="face-assignment-modal-crop" style={cropStyle.frame}>
+            {photo.media.thumbnail ? (
+              <>
                 <img
-                  src={`data:${thumbnail.mime_type};base64,${thumbnail.data_base64}`}
-                  width={thumbnail.width}
-                  height={thumbnail.height}
-                  style={cropStyle.image}
-                  alt={`Face ${face.sequence} cropped preview`}
+                  src={`data:${photo.media.thumbnail.mimeType};base64,${photo.media.thumbnail.dataBase64}`}
+                  width={photo.media.thumbnail.width}
+                  height={photo.media.thumbnail.height}
+                  alt={`Preview of ${photo.path}`}
                 />
-              </div>
+                {cropStyle ? (
+                  <div className="face-assignment-modal-crop" style={cropStyle.frame}>
+                    <img
+                      src={`data:${photo.media.thumbnail.mimeType};base64,${photo.media.thumbnail.dataBase64}`}
+                      width={photo.media.thumbnail.width}
+                      height={photo.media.thumbnail.height}
+                      style={cropStyle.image}
+                      alt={`Face ${faceSequence > 0 ? faceSequence : "?"} cropped preview`}
+                    />
+                  </div>
+                ) : (
+                  <div className="face-assignment-modal-crop-placeholder">Preview unavailable</div>
+                )}
+              </>
             ) : (
               <div className="face-assignment-modal-crop-placeholder">Preview unavailable</div>
             )}
@@ -350,7 +374,7 @@ export function PhotoFaceAssignmentModal({
                 {createCandidate ? `Create and assign "${createCandidate}"` : "Save and close"}
               </button>
             </div>
-            {face.person_id === null ? (
+            {face.personId === null ? (
               <div className="face-assignment-modal-unlabeled-actions">
                 <button
                   type="button"
