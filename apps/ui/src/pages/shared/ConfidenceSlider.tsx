@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Range, getTrackBackground } from "react-range";
 
 interface ConfidenceSingleSliderProps {
@@ -35,18 +36,27 @@ export function ConfidenceSingleSlider({
   disabled = false,
 }: ConfidenceSingleSliderProps) {
   const normalizedValue = clampPercent(value);
+  const [draftValue, setDraftValue] = useState(normalizedValue);
+
+  useEffect(() => {
+    setDraftValue(normalizedValue);
+  }, [normalizedValue]);
 
   return (
     <div className="confidence-slider-wrapper">
-      <p>{`Suggestion threshold: ${normalizedValue}%`}</p>
+      <p>{`Suggestion threshold: ${draftValue}%`}</p>
       <Range
         min={0}
         max={100}
         step={1}
-        values={[normalizedValue]}
+        values={[draftValue]}
         disabled={disabled}
         onChange={(next) => {
-          const [first = normalizedValue] = next;
+          const [first = draftValue] = next;
+          setDraftValue(clampPercent(first));
+        }}
+        onFinalChange={(next) => {
+          const [first = draftValue] = next;
           onValueChange(clampPercent(first));
         }}
         renderTrack={({ props, children }) => (
@@ -62,7 +72,7 @@ export function ConfidenceSingleSlider({
               className="confidence-slider-track"
               style={{
                 background: getTrackBackground({
-                  values: [normalizedValue],
+                  values: [draftValue],
                   colors: ["#3b82f6", "#dbeafe"],
                   min: 0,
                   max: 100,
@@ -96,20 +106,30 @@ export function ConfidenceRangeSlider({
   disabled = false,
 }: ConfidenceRangeSliderProps) {
   const [normalizedMin, normalizedMax] = normalizeRange(minValue, maxValue);
-  const sliderValues = [normalizedMin, normalizedMax];
+  const [draftRange, setDraftRange] = useState<[number, number]>([normalizedMin, normalizedMax]);
+  const [draftMin, draftMax] = draftRange;
+
+  useEffect(() => {
+    setDraftRange([normalizedMin, normalizedMax]);
+  }, [normalizedMin, normalizedMax]);
 
   return (
     <div className="confidence-slider-wrapper">
-      <p>{`Minimum certainty: ${normalizedMin}%`}</p>
-      <p>{`Maximum certainty: ${normalizedMax}%`}</p>
+      <p>{`Minimum certainty: ${draftMin}%`}</p>
+      <p>{`Maximum certainty: ${draftMax}%`}</p>
       <Range
         min={0}
         max={100}
         step={1}
-        values={sliderValues}
+        values={draftRange}
         disabled={disabled}
         onChange={(next) => {
-          const [nextMin = normalizedMin, nextMax = normalizedMax] = next;
+          const [nextMin = draftMin, nextMax = draftMax] = next;
+          const [safeMin, safeMax] = normalizeRange(nextMin, nextMax);
+          setDraftRange([safeMin, safeMax]);
+        }}
+        onFinalChange={(next) => {
+          const [nextMin = draftMin, nextMax = draftMax] = next;
           const [safeMin, safeMax] = normalizeRange(nextMin, nextMax);
           onValueChange(safeMin, safeMax);
         }}
@@ -126,7 +146,7 @@ export function ConfidenceRangeSlider({
               className="confidence-slider-track"
               style={{
                 background: getTrackBackground({
-                  values: sliderValues,
+                  values: draftRange,
                   colors: ["#dbeafe", "#3b82f6", "#dbeafe"],
                   min: 0,
                   max: 100,

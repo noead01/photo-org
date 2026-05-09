@@ -16,6 +16,8 @@ describe("ConfidenceSlider", () => {
     expect(thumb.tagName).toBe("DIV");
 
     fireEvent.keyDown(thumb, { key: "ArrowRight" });
+    expect(onValueChange).not.toHaveBeenCalled();
+    fireEvent.keyUp(thumb, { key: "ArrowRight" });
 
     expect(onValueChange).toHaveBeenCalledWith(92);
   });
@@ -33,6 +35,8 @@ describe("ConfidenceSlider", () => {
     const minThumb = screen.getByLabelText("Minimum suggestion certainty");
     expect(minThumb.tagName).toBe("DIV");
     fireEvent.keyDown(minThumb, { key: "ArrowRight" });
+    expect(onValueChange).not.toHaveBeenCalled();
+    fireEvent.keyUp(minThumb, { key: "ArrowRight" });
 
     expect(onValueChange).toHaveBeenCalledWith(31, 80);
   });
