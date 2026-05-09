@@ -149,7 +149,7 @@ export function PhotoPreviewPanel({
           </div>
         </div>
       ) : (
-        <div className="browse-thumbnail browse-thumbnail-placeholder" aria-hidden="true">
+        <div className="detail-preview-placeholder" aria-hidden="true">
           No preview
         </div>
       )}
