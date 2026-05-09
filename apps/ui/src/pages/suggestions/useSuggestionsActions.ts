@@ -1,6 +1,12 @@
 import { useState, type Dispatch, type SetStateAction } from "react";
 
-import { confirmSuggestions, readErrorDetail } from "./api";
+import {
+  assignFace,
+  createPerson,
+  dismissFace,
+  markFaceUnknown,
+} from "../face-labeling/faceLabelingApi";
+import { confirmSuggestions } from "./api";
 import {
   NOT_A_FACE_CHOICE_LABEL,
   UNKNOWN_FACE_CHOICE_LABEL,
@@ -102,29 +108,11 @@ export function useSuggestionsActions({
   }
 
   async function submitDismissFalsePositive(faceId: string) {
-    const response = await fetch(`/api/v1/faces/${faceId}/dismissals`, {
-      method: "POST",
-      headers: {
-        "X-Face-Validation-Role": "contributor",
-      },
-    });
-    if (!response.ok) {
-      const detail = await readErrorDetail(response);
-      throw new Error(detail ?? `Face dismissal failed (${response.status}).`);
-    }
+    await dismissFace(faceId);
   }
 
   async function submitUnknownHuman(faceId: string) {
-    const response = await fetch(`/api/v1/faces/${faceId}/unknown-identities`, {
-      method: "POST",
-      headers: {
-        "X-Face-Validation-Role": "contributor",
-      },
-    });
-    if (!response.ok) {
-      const detail = await readErrorDetail(response);
-      throw new Error(detail ?? `Unknown-person assignment failed (${response.status}).`);
-    }
+    await markFaceUnknown(faceId);
   }
 
   async function handleConfirmFaces() {
@@ -219,36 +207,14 @@ export function useSuggestionsActions({
       async () => {
         let personId = "";
         if (resolution.kind === "create_person_and_assign") {
-          const createResponse = await fetch("/api/v1/people", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ display_name: resolution.displayName }),
-          });
-          if (!createResponse.ok) {
-            const detail = await readErrorDetail(createResponse);
-            throw new Error(detail ?? `Create person failed (${createResponse.status}).`);
-          }
-          const createdPerson = (await createResponse.json()) as PersonRecord;
+          const createdPerson = (await createPerson(resolution.displayName)) as PersonRecord;
           personId = createdPerson.person_id;
           setPeopleDirectory((current) => [...current, createdPerson]);
         } else {
           personId = resolution.personId;
         }
 
-        const assignResponse = await fetch(`/api/v1/faces/${face.face_id}/assignments`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Face-Validation-Role": "contributor",
-          },
-          body: JSON.stringify({ person_id: personId }),
-        });
-        if (!assignResponse.ok) {
-          const detail = await readErrorDetail(assignResponse);
-          throw new Error(detail ?? `Face assignment failed (${assignResponse.status}).`);
-        }
+        await assignFace(face.face_id, personId);
 
         setMessage("Face confirmed.");
       },

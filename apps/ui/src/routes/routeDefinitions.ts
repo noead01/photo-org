@@ -1,5 +1,6 @@
 export type PrimaryRouteKey =
   | "library"
+  | "albums"
   | "labeling"
   | "suggestions"
   | "operations";
@@ -41,6 +42,14 @@ export const PRIMARY_ROUTE_DEFINITIONS: PrimaryRouteDefinition[] = [
     navLabel: "Library",
     title: "Library",
     description: "Unified library workflow for search, scope, and actions.",
+    handoff: baseHandoffExpectation
+  },
+  {
+    key: "albums",
+    path: "/albums",
+    navLabel: "Albums",
+    title: "Albums",
+    description: "Create and manage editable and saved-filter albums.",
     handoff: baseHandoffExpectation
   },
   {

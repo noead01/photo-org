@@ -1,4 +1,5 @@
 import { useState, type FormEventHandler } from "react";
+import { ConfidenceSingleSlider } from "../shared/ConfidenceSlider";
 import type { FacetCountEntry } from "../search/facetFilters";
 import { FacetFilterPanel } from "../search/FacetFilterPanel";
 import { LocationRadiusPicker } from "../search/LocationRadiusPicker";
@@ -11,6 +12,8 @@ interface LibrarySearchFormProps {
   toDate: string;
   personDraft: string;
   selectedPersonNames: string[];
+  selectedAlbumIds: string[];
+  albumFilterOptions: Array<{ albumId: string; albumName: string }>;
   personCertaintyMode: PersonCertaintyMode;
   suggestionConfidenceMinDraft: string;
   latitudeDraft: string;
@@ -42,6 +45,8 @@ interface LibrarySearchFormProps {
   onMapError: (message: string | null) => void;
   onToggleHasFacesFilter: (nextValue: boolean) => void;
   onClearHasFacesFilter: () => void;
+  onToggleAlbumFilter: (albumId: string) => void;
+  onClearAllAlbumFilters: () => void;
   onTogglePathHintFilter: (pathHint: string) => void;
   onClearAllPathHints: () => void;
 }
@@ -52,6 +57,8 @@ export function LibrarySearchForm({
   toDate,
   personDraft,
   selectedPersonNames,
+  selectedAlbumIds,
+  albumFilterOptions,
   personCertaintyMode,
   suggestionConfidenceMinDraft,
   latitudeDraft,
@@ -83,13 +90,17 @@ export function LibrarySearchForm({
   onMapError,
   onToggleHasFacesFilter,
   onClearHasFacesFilter,
+  onToggleAlbumFilter,
+  onClearAllAlbumFilters,
   onTogglePathHintFilter,
   onClearAllPathHints
 }: LibrarySearchFormProps) {
   const [isFilterEditorOpen, setIsFilterEditorOpen] = useState(false);
+  const suggestionThresholdPercent = normalizeSuggestionThresholdPercent(suggestionConfidenceMinDraft);
   const hasDateFilter = Boolean(fromDate || toDate);
   const hasPersonFilter = hasSelectedPersonFilter(selectedPersonNames, personDraft);
   const hasLocationFilter = Boolean(locationRadius || latitudeDraft || longitudeDraft || radiusDraft);
+  const hasAlbumFilter = selectedAlbumIds.length > 0;
   const hasFacetFilter = hasFacesFilter !== null || pathHintFilters.length > 0;
 
   return (
@@ -126,6 +137,9 @@ export function LibrarySearchForm({
               className={hasLocationFilter ? "search-filter-chip search-filter-chip-active" : "search-filter-chip"}
             >
               Location
+            </span>
+            <span className={hasAlbumFilter ? "search-filter-chip search-filter-chip-active" : "search-filter-chip"}>
+              Album
             </span>
             <span className={hasFacetFilter ? "search-filter-chip search-filter-chip-active" : "search-filter-chip"}>
               Facets
@@ -185,14 +199,12 @@ export function LibrarySearchForm({
               </div>
               {personCertaintyMode === "include_suggestions" ? (
                 <div className="search-person-input-row">
-                  <label htmlFor="search-person-suggestion-threshold">Suggestion threshold</label>
-                  <input
-                    id="search-person-suggestion-threshold"
-                    aria-label="Suggestion threshold"
-                    type="text"
-                    inputMode="decimal"
-                    value={suggestionConfidenceMinDraft}
-                    onChange={(event) => onSuggestionConfidenceMinDraftChange(event.target.value)}
+                  <ConfidenceSingleSlider
+                    value={suggestionThresholdPercent}
+                    onValueChange={(value) =>
+                      onSuggestionConfidenceMinDraftChange(formatSuggestionThresholdDraft(value))
+                    }
+                    disabled={false}
                   />
                 </div>
               ) : null}
@@ -234,11 +246,15 @@ export function LibrarySearchForm({
 
             <FacetFilterPanel
               hasFacesFilter={hasFacesFilter}
+              selectedAlbumIds={selectedAlbumIds}
               pathHintFilters={pathHintFilters}
+              albumOptions={albumFilterOptions}
               hasFacesCounts={facetHasFacesCounts}
               pathHintCounts={facetPathHintCounts}
               onToggleHasFaces={onToggleHasFacesFilter}
               onClearHasFaces={onClearHasFacesFilter}
+              onToggleAlbum={onToggleAlbumFilter}
+              onClearAllAlbums={onClearAllAlbumFilters}
               onTogglePathHint={onTogglePathHintFilter}
               onClearAllPathHints={onClearAllPathHints}
             />
@@ -283,6 +299,20 @@ export function LibrarySearchForm({
       ) : null}
     </form>
   );
+}
+
+function normalizeSuggestionThresholdPercent(draft: string): number {
+  const parsed = Number.parseFloat(draft);
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(100, Math.round(parsed * 100)));
+}
+
+function formatSuggestionThresholdDraft(percent: number): string {
+  const normalizedPercent = Math.max(0, Math.min(100, Math.round(percent)));
+  const normalizedDecimal = normalizedPercent / 100;
+  return normalizedDecimal.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 }
 
 function hasSelectedPersonFilter(selectedPersonNames: string[], personDraft: string): boolean {

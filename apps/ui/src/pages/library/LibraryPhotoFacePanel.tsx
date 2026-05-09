@@ -7,6 +7,8 @@ import {
 } from "../FaceBBoxOverlay";
 import { FaceAssignmentControls } from "../FaceAssignmentControls";
 import type { FaceAssignmentFace, FaceAssignmentPerson } from "../FaceAssignmentControls";
+import { FaceLabelingApiError, confirmFace as submitFaceConfirmation } from "../face-labeling/faceLabelingApi";
+import { applyFaceAssignment, applyFaceConfirmation } from "../face-labeling/faceLabelingState";
 import type { LibraryPhoto } from "./libraryRouteTypes";
 
 type FaceRegion = FaceAssignmentFace & {
@@ -37,58 +39,6 @@ function provenanceBadgeIcon(source: FaceLabelSource): string {
     return "💡";
   }
   return "❓";
-}
-
-async function readErrorDetail(response: Response): Promise<string | null> {
-  try {
-    const payload = (await response.json()) as { detail?: unknown };
-    if (typeof payload.detail === "string" && payload.detail.trim().length > 0) {
-      return payload.detail;
-    }
-  } catch {
-    // Ignore parse errors and use fallback mapping.
-  }
-
-  return null;
-}
-
-function applyFaceAssignment(
-  payload: PhotoDetailPayload,
-  faceId: string,
-  personId: string
-): PhotoDetailPayload {
-  return {
-    ...payload,
-    faces: payload.faces.map((face) =>
-      face.face_id === faceId
-        ? {
-            ...face,
-            person_id: personId,
-            label_source: null,
-            confidence: null,
-            model_version: null,
-            provenance: null,
-            label_recorded_ts: null
-          }
-        : face
-    )
-  };
-}
-
-function mapConfirmationError(status: number, detail: string | null): string {
-  if (status === 403) {
-    return "You do not have permission to confirm face assignments.";
-  }
-
-  if (status === 404) {
-    return detail ?? "Face or person no longer exists.";
-  }
-
-  if (status === 409) {
-    return detail ?? "Face confirmation could not be applied.";
-  }
-
-  return `Confirmation request failed (${status}).`;
 }
 
 function resolvePersonLabel(people: FaceAssignmentPerson[], personId: string): string {
@@ -199,47 +149,28 @@ export function LibraryPhotoFacePanel({ photo }: LibraryPhotoFacePanelProps) {
     setConfirmMessage(null);
 
     try {
-      const response = await fetch(`/api/v1/faces/${faceId}/confirmations`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Face-Validation-Role": "contributor"
-        },
-        body: JSON.stringify({ person_id: personId })
-      });
-
-      if (!response.ok) {
-        const detailMessage = await readErrorDetail(response);
-        setConfirmError(mapConfirmationError(response.status, detailMessage));
-        return;
-      }
-
+      await submitFaceConfirmation(faceId, personId);
       setDetail((current) =>
         current
-          ? {
-              ...current,
-              faces: current.faces.map((face) =>
-                face.face_id === faceId
-                  ? {
-                      ...face,
-                      label_source: "human_confirmed",
-                      provenance: face.provenance ?? {
-                        action: "confirmation",
-                        surface: "library-quick-panel",
-                        workflow: "face-labeling"
-                      },
-                      label_recorded_ts: face.label_recorded_ts ?? new Date().toISOString()
-                    }
-                  : face
-              )
-            }
+          ? applyFaceConfirmation(current, faceId, {
+              provenance: {
+                action: "confirmation",
+                surface: "library-quick-panel",
+                workflow: "face-labeling"
+              },
+              recordedTs: new Date().toISOString()
+            })
           : current
       );
       setConfirmMessage(
         `Confirmed face ${sequence} for ${resolvePersonLabel(people, personId)}.`
       );
-    } catch {
-      setConfirmError("Could not confirm face assignment.");
+    } catch (caughtError: unknown) {
+      setConfirmError(
+        caughtError instanceof FaceLabelingApiError && caughtError.message.trim().length > 0
+          ? caughtError.message
+          : "Could not confirm face assignment."
+      );
     } finally {
       setConfirmFaceIdInFlight(null);
     }

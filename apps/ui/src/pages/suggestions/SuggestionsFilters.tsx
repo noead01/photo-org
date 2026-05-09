@@ -1,4 +1,5 @@
 import type { PersonRecord } from "./types";
+import { ConfidenceRangeSlider } from "../shared/ConfidenceSlider";
 
 type SuggestionsFiltersProps = {
   minConfidencePercent: number;
@@ -9,8 +10,7 @@ type SuggestionsFiltersProps = {
   availablePeopleToExclude: PersonRecord[];
   excludedPeople: PersonRecord[];
   excludedPersonPickerValue: string;
-  onMinConfidenceChange: (value: number) => void;
-  onMaxConfidenceChange: (value: number) => void;
+  onConfidenceRangeChange: (minValue: number, maxValue: number) => void;
   onExcludedPersonPickerValueChange: (value: string) => void;
   onAddExcludedPerson: (personId: string) => void;
   onRemoveExcludedPerson: (personId: string) => void;
@@ -25,44 +25,21 @@ export function SuggestionsFilters({
   availablePeopleToExclude,
   excludedPeople,
   excludedPersonPickerValue,
-  onMinConfidenceChange,
-  onMaxConfidenceChange,
+  onConfidenceRangeChange,
   onExcludedPersonPickerValueChange,
   onAddExcludedPerson,
   onRemoveExcludedPerson
 }: SuggestionsFiltersProps) {
   return (
     <div className="suggestions-filter-group">
-      <label className="suggestions-confidence-filter">
-        <span>{`Minimum certainty: ${minConfidencePercent}%`}</span>
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={1}
-          value={minConfidencePercent}
-          aria-label="Minimum suggestion certainty"
-          onChange={(event) => {
-            onMinConfidenceChange(Number(event.currentTarget.value));
-          }}
+      <div className="suggestions-confidence-filter">
+        <ConfidenceRangeSlider
+          minValue={minConfidencePercent}
+          maxValue={maxConfidencePercent}
+          onValueChange={onConfidenceRangeChange}
           disabled={isLoading || isConfirming}
         />
-      </label>
-      <label className="suggestions-confidence-filter">
-        <span>{`Maximum certainty: ${maxConfidencePercent}%`}</span>
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={1}
-          value={maxConfidencePercent}
-          aria-label="Maximum suggestion certainty"
-          onChange={(event) => {
-            onMaxConfidenceChange(Number(event.currentTarget.value));
-          }}
-          disabled={isLoading || isConfirming}
-        />
-      </label>
+      </div>
       {peopleDirectory.length > 0 ? (
         <div className="suggestions-people-filter">
           <p className="suggestions-filter-label">Exclude people</p>

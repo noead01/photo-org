@@ -23,6 +23,8 @@ from app.schemas.search_request import SearchRequest, SearchFilters, SortSpec, P
 from app.schemas.search_response import SearchResponse, Hits, PhotoHit
 from app.core.enums import FilesizeRange
 from app.storage import (
+    albums,
+    editable_album_items,
     face_labels,
     face_suggestions,
     faces,
@@ -2342,6 +2344,21 @@ class TestPhotosRepositorySoftDeleteFiltering:
                 insert(face_suggestions),
                 [
                     {
+                        "face_suggestion_id": "suggestion-human-mateo",
+                        "face_id": "face-human",
+                        "person_id": "person-mateo",
+                        "rank": 1,
+                        "confidence": 0.99,
+                        "centroid_distance": 0.01,
+                        "knn_distance": 0.02,
+                        "representation_version": 1,
+                        "scoring_version": "hybrid-v1",
+                        "model_version": "nearest-neighbor-cosine-v1",
+                        "provenance": None,
+                        "created_ts": now,
+                        "updated_ts": now,
+                    },
+                    {
                         "face_suggestion_id": "suggestion-high",
                         "face_id": "face-machine-suggested",
                         "person_id": "person-inez",
@@ -2440,6 +2457,38 @@ class TestPhotosRepositorySoftDeleteFiltering:
         assert "photo-machine-low" not in {item["photo_id"] for item in id_filtered_items}
         assert "photo-machine-non-top" not in {item["photo_id"] for item in id_filtered_items}
         assert id_filtered_total == 2
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            mateo_name_items, mateo_name_total, _ = repo.search_photos(
+                filters=SearchFilters(
+                    person_names=["mateo"],
+                    person_certainty_mode="include_suggestions",
+                    suggestion_confidence_min=0.78,
+                ),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+            )
+
+        assert {item["photo_id"] for item in mateo_name_items} == {"photo-machine-non-top"}
+        assert "photo-human" not in {item["photo_id"] for item in mateo_name_items}
+        assert mateo_name_total == 1
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            mateo_id_items, mateo_id_total, _ = repo.search_photos(
+                filters=SearchFilters(
+                    people=["person-mateo"],
+                    person_certainty_mode="include_suggestions",
+                    suggestion_confidence_min=0.78,
+                ),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+            )
+
+        assert {item["photo_id"] for item in mateo_id_items} == {"photo-machine-non-top"}
+        assert "photo-human" not in {item["photo_id"] for item in mateo_id_items}
+        assert mateo_id_total == 1
 
     def test_search_repository_composes_person_names_with_path_hints(self, tmp_path):
         database_url = f"sqlite:///{tmp_path / 'search-person-names-path-hints.db'}"
@@ -3459,6 +3508,194 @@ class TestPhotosRepositoryOfflineBrowseIntegration:
         assert hit.original.is_available is False
         assert hit.original.availability_state == "unreachable"
         assert hit.original.last_failure_reason == "permission_denied"
+
+
+class TestPhotosRepositoryAlbumFilterIntegration:
+    def test_search_repository_filters_by_album_ids_with_or_semantics(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-album-ids-or.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        now = datetime(2026, 5, 8, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            connection.execute(
+                insert(photos),
+                [
+                    {
+                        "photo_id": "photo-a",
+                        "path": "seed-corpus/a.jpg",
+                        "sha256": "a" * 64,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "updated_ts": now,
+                    },
+                    {
+                        "photo_id": "photo-b",
+                        "path": "seed-corpus/b.jpg",
+                        "sha256": "b" * 64,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "updated_ts": now,
+                    },
+                    {
+                        "photo_id": "photo-c",
+                        "path": "seed-corpus/c.jpg",
+                        "sha256": "c" * 64,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "updated_ts": now,
+                    },
+                ],
+            )
+            connection.execute(
+                insert(albums),
+                [
+                    {
+                        "album_id": "album-1",
+                        "name": "First",
+                        "owner_user_id": "demo-user",
+                        "kind": "editable",
+                        "created_ts": now,
+                        "updated_ts": now,
+                    },
+                    {
+                        "album_id": "album-2",
+                        "name": "Second",
+                        "owner_user_id": "demo-user",
+                        "kind": "editable",
+                        "created_ts": now,
+                        "updated_ts": now,
+                    },
+                ],
+            )
+            connection.execute(
+                insert(editable_album_items),
+                [
+                    {
+                        "album_id": "album-1",
+                        "photo_id": "photo-a",
+                        "added_by_user_id": "demo-user",
+                        "added_ts": now,
+                    },
+                    {
+                        "album_id": "album-2",
+                        "photo_id": "photo-b",
+                        "added_by_user_id": "demo-user",
+                        "added_ts": now,
+                    },
+                ],
+            )
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            items, total, _ = repo.search_photos(
+                filters=SearchFilters(album_ids=["album-1", "album-2"]),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+                text_query=None,
+            )
+
+        assert total == 2
+        assert {item["photo_id"] for item in items} == {"photo-a", "photo-b"}
+
+    def test_search_repository_album_ids_compose_with_person_names(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-album-ids-person-names.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        now = datetime(2026, 5, 8, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            connection.execute(
+                insert(photos),
+                [
+                    {
+                        "photo_id": "photo-a",
+                        "path": "seed-corpus/a.jpg",
+                        "sha256": "a" * 64,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "updated_ts": now,
+                    },
+                    {
+                        "photo_id": "photo-b",
+                        "path": "seed-corpus/b.jpg",
+                        "sha256": "b" * 64,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "updated_ts": now,
+                    },
+                ],
+            )
+            connection.execute(
+                insert(albums).values(
+                    album_id="album-1",
+                    name="First",
+                    owner_user_id="demo-user",
+                    kind="editable",
+                    created_ts=now,
+                    updated_ts=now,
+                )
+            )
+            connection.execute(
+                insert(editable_album_items),
+                [
+                    {
+                        "album_id": "album-1",
+                        "photo_id": "photo-a",
+                        "added_by_user_id": "demo-user",
+                        "added_ts": now,
+                    },
+                    {
+                        "album_id": "album-1",
+                        "photo_id": "photo-b",
+                        "added_by_user_id": "demo-user",
+                        "added_ts": now,
+                    },
+                ],
+            )
+            connection.execute(
+                insert(people).values(
+                    person_id="person-1",
+                    display_name="Inez",
+                    created_ts=now,
+                    updated_ts=now,
+                )
+            )
+            connection.execute(
+                insert(faces).values(
+                    face_id="face-a",
+                    photo_id="photo-a",
+                    person_id="person-1",
+                    created_ts=now,
+                )
+            )
+            connection.execute(
+                insert(face_labels).values(
+                    face_label_id="label-a",
+                    face_id="face-a",
+                    person_id="person-1",
+                    label_source="human_confirmed",
+                    created_ts=now,
+                    updated_ts=now,
+                )
+            )
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            items, total, _ = repo.search_photos(
+                filters=SearchFilters(album_ids=["album-1"], person_names=["Inez"]),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+                text_query=None,
+            )
+
+        assert total == 1
+        assert [item["photo_id"] for item in items] == ["photo-a"]
 
 
 class TestPhotosRepositoryHasFacesFacet:

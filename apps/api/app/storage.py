@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from photoorg_db_schema import (
+    editable_album_items,
+    albums,
     exif_semantic_mappings,
     exif_semantics,
     face_suggestions,
@@ -16,6 +18,7 @@ from photoorg_db_schema import (
     photo_exif_attributes,
     photo_tags,
     photos,
+    saved_filter_album_rules,
     storage_source_aliases,
     storage_sources,
     watched_folders,

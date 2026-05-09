@@ -80,6 +80,7 @@ class SearchFilters(BaseModel):
     camera_make: Optional[List[str]] = None
     extension: Optional[List[str]] = None
     path_hints: Optional[List[str]] = None
+    album_ids: Optional[List[str]] = None
     orientation: Optional[List[str]] = None
     filesize_range: Optional[FilesizeRange] = None
     has_faces: Optional[bool] = None

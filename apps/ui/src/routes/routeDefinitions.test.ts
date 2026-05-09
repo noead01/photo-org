@@ -14,6 +14,14 @@ describe("Shell handoff expectations", () => {
 });
 
 describe("Navigation state", () => {
+  it("defines albums as a primary route", () => {
+    const albumsState = resolveNavigationState("/albums");
+
+    expect(albumsState.activeRoute.key).toBe("albums");
+    expect(albumsState.pageContext).toBe("Albums");
+    expect(albumsState.usesFallback).toBe(false);
+  });
+
   it("maps /library to the library primary route and uses it as fallback context", () => {
     const libraryState = resolveNavigationState("/library");
 

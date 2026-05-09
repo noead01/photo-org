@@ -7,6 +7,7 @@ interface LibraryActiveFilterChipsProps {
   fromDate: string;
   toDate: string;
   selectedPersonNames: string[];
+  selectedAlbumIds: string[];
   personCertaintyMode: PersonCertaintyMode;
   suggestionConfidenceMinDraft: string;
   locationRadius: LibraryLocationRadius | null;
@@ -14,6 +15,8 @@ interface LibraryActiveFilterChipsProps {
   pathHintFilters: string[];
   onClearLocationFilter: () => void;
   onRemovePersonFilter: (displayName: string) => void;
+  resolveAlbumLabel: (albumId: string) => string;
+  onClearAlbumFilter: (albumId: string) => void;
   onClearHasFacesFilter: () => void;
   onClearPathHintFilter: (pathHint: string) => void;
   onClearFromDate: () => void;
@@ -26,6 +29,7 @@ export function LibraryActiveFilterChips({
   fromDate,
   toDate,
   selectedPersonNames,
+  selectedAlbumIds,
   personCertaintyMode,
   suggestionConfidenceMinDraft,
   locationRadius,
@@ -33,6 +37,8 @@ export function LibraryActiveFilterChips({
   pathHintFilters,
   onClearLocationFilter,
   onRemovePersonFilter,
+  resolveAlbumLabel,
+  onClearAlbumFilter,
   onClearHasFacesFilter,
   onClearPathHintFilter,
   onClearFromDate,
@@ -47,6 +53,7 @@ export function LibraryActiveFilterChips({
     Boolean(committedQuery) ||
     Boolean(fromDate || toDate) ||
     selectedPersonNames.length > 0 ||
+    selectedAlbumIds.length > 0 ||
     Boolean(locationRadius) ||
     hasFacesFilter !== null ||
     pathHintFilters.length > 0;
@@ -87,6 +94,19 @@ export function LibraryActiveFilterChips({
             onClick={() => onRemovePersonFilter(displayName)}
           >
             person: {displayName} ({personCertaintyPercent}%)
+            <span aria-hidden="true"> ×</span>
+          </button>
+        </li>
+      ))}
+      {selectedAlbumIds.map((albumId) => (
+        <li key={albumId}>
+          <button
+            type="button"
+            className="search-chip"
+            aria-label={`Remove album ${resolveAlbumLabel(albumId)}`}
+            onClick={() => onClearAlbumFilter(albumId)}
+          >
+            album: {resolveAlbumLabel(albumId)}
             <span aria-hidden="true"> ×</span>
           </button>
         </li>

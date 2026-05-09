@@ -63,6 +63,7 @@ export type SearchUrlState = {
   sortDirection: SortDirection;
   pageSize: number;
   selectedPersonNames: string[];
+  selectedAlbumIds: string[];
   personCertaintyMode: PersonCertaintyMode;
   suggestionConfidenceMinDraft: string;
   latitudeDraft: string;

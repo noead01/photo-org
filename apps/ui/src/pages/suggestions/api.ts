@@ -1,4 +1,9 @@
 import type { PersonRecord, SuggestionConfirmPayload, SuggestionListPayload } from "./types";
+import { readErrorDetail } from "../face-labeling/faceLabelingErrors";
+import { fetchPeople } from "../people/peopleApi";
+
+const inFlightSuggestionsRequests = new Map<string, Promise<SuggestionListPayload>>();
+let inFlightPeopleDirectoryRequest: Promise<PersonRecord[]> | null = null;
 
 export async function fetchSuggestionsPage(
   page: number,
@@ -20,19 +25,42 @@ export async function fetchSuggestionsPage(
   for (const personId of excludedPersonIds) {
     params.append("excluded_person_ids", personId);
   }
-  const response = await fetch(`/api/v1/suggestions/faces?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`Suggestions request failed (${response.status})`);
+
+  const requestUrl = `/api/v1/suggestions/faces?${params.toString()}`;
+  const existingRequest = inFlightSuggestionsRequests.get(requestUrl);
+  if (existingRequest) {
+    return existingRequest;
   }
-  return (await response.json()) as SuggestionListPayload;
+
+  const requestPromise = (async () => {
+    const response = await fetch(requestUrl);
+    if (!response.ok) {
+      throw new Error(`Suggestions request failed (${response.status})`);
+    }
+    return (await response.json()) as SuggestionListPayload;
+  })();
+
+  inFlightSuggestionsRequests.set(requestUrl, requestPromise);
+  try {
+    return await requestPromise;
+  } finally {
+    inFlightSuggestionsRequests.delete(requestUrl);
+  }
 }
 
 export async function fetchPeopleDirectory(): Promise<PersonRecord[]> {
-  const response = await fetch("/api/v1/people");
-  if (!response.ok) {
-    throw new Error(`People request failed (${response.status})`);
+  if (inFlightPeopleDirectoryRequest) {
+    return inFlightPeopleDirectoryRequest;
   }
-  return (await response.json()) as PersonRecord[];
+
+  const requestPromise = fetchPeople() as Promise<PersonRecord[]>;
+
+  inFlightPeopleDirectoryRequest = requestPromise;
+  try {
+    return await requestPromise;
+  } finally {
+    inFlightPeopleDirectoryRequest = null;
+  }
 }
 
 export async function confirmSuggestions(
@@ -53,14 +81,4 @@ export async function confirmSuggestions(
   return (await response.json()) as SuggestionConfirmPayload;
 }
 
-export async function readErrorDetail(response: Response): Promise<string | null> {
-  try {
-    const payload = (await response.json()) as { detail?: unknown };
-    if (typeof payload.detail === "string" && payload.detail.trim().length > 0) {
-      return payload.detail;
-    }
-  } catch {
-    // Fall through to fallback message.
-  }
-  return null;
-}
+export { readErrorDetail };

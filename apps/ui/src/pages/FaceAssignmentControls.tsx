@@ -1,4 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import {
+  FaceLabelingApiError,
+  assignFace,
+  correctFace,
+  markFaceUnknown,
+} from "./face-labeling/faceLabelingApi";
 
 type FaceLabelSource = "human_confirmed" | "machine_suggested" | null;
 
@@ -26,67 +32,6 @@ interface FaceAssignmentControlsProps {
   onAssigned: (faceId: string, personId: string) => void;
   onCorrected: (faceId: string, personId: string) => void;
   requestedExpandedProvenanceFaceId?: string | null;
-}
-
-async function readErrorDetail(response: Response): Promise<string | null> {
-  try {
-    const payload = (await response.json()) as { detail?: unknown };
-    if (typeof payload.detail === "string" && payload.detail.trim().length > 0) {
-      return payload.detail;
-    }
-  } catch {
-    // Ignore parsing errors and use fallback message mapping.
-  }
-
-  return null;
-}
-
-function mapAssignmentError(status: number, detail: string | null): string {
-  if (status === 403) {
-    return "You do not have permission to assign faces.";
-  }
-
-  if (status === 404) {
-    return detail ?? "Face or person no longer exists.";
-  }
-
-  if (status === 409) {
-    return detail ?? "Face is already assigned.";
-  }
-
-  return `Assignment request failed (${status}).`;
-}
-
-function mapCorrectionError(status: number, detail: string | null): string {
-  if (status === 403) {
-    return "You do not have permission to correct face assignments.";
-  }
-
-  if (status === 404) {
-    return detail ?? "Face or person no longer exists.";
-  }
-
-  if (status === 409) {
-    return detail ?? "Face correction could not be applied.";
-  }
-
-  return `Correction request failed (${status}).`;
-}
-
-function mapUnknownIdentityError(status: number, detail: string | null): string {
-  if (status === 403) {
-    return "You do not have permission to assign faces.";
-  }
-
-  if (status === 404) {
-    return detail ?? "Face no longer exists.";
-  }
-
-  if (status === 409) {
-    return detail ?? "Face assignment could not be applied.";
-  }
-
-  return `Unknown-identity request failed (${status}).`;
 }
 
 function resolvePersonLabel(people: FaceAssignmentPerson[], personId: string): string {
@@ -198,25 +143,15 @@ export function FaceAssignmentControls({
     setCorrectionProvenance(null);
 
     try {
-      const response = await fetch(`/api/v1/faces/${faceId}/assignments`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Face-Validation-Role": "contributor"
-        },
-        body: JSON.stringify({ person_id: personId })
-      });
-
-      if (!response.ok) {
-        const detail = await readErrorDetail(response);
-        setAssignmentError(mapAssignmentError(response.status, detail));
-        return;
-      }
-
-      onAssigned(faceId, personId);
+      const payload = await assignFace(faceId, personId);
+      onAssigned(faceId, payload.person_id ?? personId);
       setActiveIndex((current) => current + 1);
-    } catch {
-      setAssignmentError("Could not assign face.");
+    } catch (caughtError: unknown) {
+      setAssignmentError(
+        caughtError instanceof FaceLabelingApiError && caughtError.message.trim().length > 0
+          ? caughtError.message
+          : "Could not assign face."
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -228,30 +163,15 @@ export function FaceAssignmentControls({
     setCorrectionProvenance(null);
 
     try {
-      const response = await fetch(`/api/v1/faces/${faceId}/unknown-identities`, {
-        method: "POST",
-        headers: {
-          "X-Face-Validation-Role": "contributor"
-        }
-      });
-
-      if (!response.ok) {
-        const detail = await readErrorDetail(response);
-        setAssignmentError(mapUnknownIdentityError(response.status, detail));
-        return;
-      }
-
-      const payload = (await response.json()) as { person_id?: unknown };
-      const personId = typeof payload.person_id === "string" ? payload.person_id : "";
-      if (!personId) {
-        setAssignmentError("Unknown-identity response was missing person information.");
-        return;
-      }
-
-      onAssigned(faceId, personId);
+      const payload = await markFaceUnknown(faceId);
+      onAssigned(faceId, payload.person_id);
       setActiveIndex((current) => current + 1);
-    } catch {
-      setAssignmentError("Could not assign face.");
+    } catch (caughtError: unknown) {
+      setAssignmentError(
+        caughtError instanceof FaceLabelingApiError && caughtError.message.trim().length > 0
+          ? caughtError.message
+          : "Could not assign face."
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -264,22 +184,7 @@ export function FaceAssignmentControls({
     setCorrectionProvenance(null);
 
     try {
-      const response = await fetch(`/api/v1/faces/${faceId}/corrections`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Face-Validation-Role": "contributor"
-        },
-        body: JSON.stringify({ person_id: personId })
-      });
-
-      if (!response.ok) {
-        const detail = await readErrorDetail(response);
-        setCorrectionError(mapCorrectionError(response.status, detail));
-        return;
-      }
-
-      const payload = (await response.json()) as { previous_person_id?: string; person_id?: string };
+      const payload = await correctFace(faceId, personId);
       const previousId = payload.previous_person_id ?? previousPersonId;
       const nextId = payload.person_id ?? personId;
       onCorrected(faceId, nextId);
@@ -290,8 +195,12 @@ export function FaceAssignmentControls({
       setCorrectionProvenance(
         `Correction recorded: ${resolvePersonLabel(people, previousId)} -> ${resolvePersonLabel(people, nextId)}.`
       );
-    } catch {
-      setCorrectionError("Could not correct face assignment.");
+    } catch (caughtError: unknown) {
+      setCorrectionError(
+        caughtError instanceof FaceLabelingApiError && caughtError.message.trim().length > 0
+          ? caughtError.message
+          : "Could not correct face assignment."
+      );
     } finally {
       setCorrectionFaceIdInFlight(null);
     }
