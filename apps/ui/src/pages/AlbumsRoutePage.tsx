@@ -1,4 +1,19 @@
+import { useEffect, useMemo, useReducer, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { fetchPhotoDetail, fetchPeopleDirectory } from "./photo-detail/photoDetailApi";
+import type { PhotoDetailPayload, PersonRecord } from "./photo-detail/photoDetailTypes";
+import { FaceAssignmentModal } from "./photo-interactions/FaceAssignmentModal";
+import { PhotoMetadataFlyout } from "./photo-interactions/PhotoMetadataFlyout";
+import {
+  DEFAULT_PHOTO_INSPECTOR_STATE,
+  photoInspectorReducer
+} from "./photo-interactions/photoInspectorState";
+import {
+  DEFAULT_PHOTO_SELECTION_STATE,
+  photoSelectionReducer
+} from "./photo-interactions/photoSelectionState";
+import { adaptPhotoDetail } from "./photo-interactions/photoInteractionAdapters";
+import { applyFaceAssignment, applyFaceDismissal } from "./face-labeling/faceLabelingState";
 import { buildLibraryQueryForAlbum } from "./albums/albumLibraryQuery";
 import { AlbumsGrid } from "./albums/AlbumsGrid";
 import { useAlbumsRouteState } from "./albums/useAlbumsRouteState";
@@ -6,6 +21,18 @@ import type { AlbumRecord } from "./library/libraryRouteApi";
 
 export function AlbumsRoutePage() {
   const navigate = useNavigate();
+  const [selectionState, dispatchSelection] = useReducer(
+    photoSelectionReducer,
+    DEFAULT_PHOTO_SELECTION_STATE
+  );
+  const [photoInspectorState, dispatchPhotoInspector] = useReducer(
+    photoInspectorReducer,
+    DEFAULT_PHOTO_INSPECTOR_STATE
+  );
+  const [photoDetailById, setPhotoDetailById] = useState<Record<string, PhotoDetailPayload>>({});
+  const [photoDetailErrorById, setPhotoDetailErrorById] = useState<Record<string, string>>({});
+  const [loadingPhotoDetailId, setLoadingPhotoDetailId] = useState<string | null>(null);
+  const [peopleDirectory, setPeopleDirectory] = useState<PersonRecord[]>([]);
   const {
     sortedAlbums,
     selectedAlbumId,
@@ -31,6 +58,104 @@ export function AlbumsRoutePage() {
     handleUpdateRowName,
     handleUpdateRowSavedFilterJsonDraft
   } = useAlbumsRouteState();
+
+  useEffect(() => {
+    let canceled = false;
+
+    async function loadPeople() {
+      try {
+        const payload = await fetchPeopleDirectory();
+        if (!canceled) {
+          setPeopleDirectory(payload);
+        }
+      } catch {
+        if (!canceled) {
+          setPeopleDirectory([]);
+        }
+      }
+    }
+
+    void loadPeople();
+    return () => {
+      canceled = true;
+    };
+  }, []);
+
+  const activeInspectorPhotoId =
+    photoInspectorState.activeMetadataPhotoId ?? photoInspectorState.activeFaceAssignment?.photoId ?? null;
+
+  useEffect(() => {
+    if (!activeInspectorPhotoId || photoDetailById[activeInspectorPhotoId]) {
+      return;
+    }
+    let canceled = false;
+    setLoadingPhotoDetailId(activeInspectorPhotoId);
+    setPhotoDetailErrorById((current) => {
+      if (!current[activeInspectorPhotoId]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[activeInspectorPhotoId];
+      return next;
+    });
+
+    void fetchPhotoDetail(activeInspectorPhotoId)
+      .then((payload) => {
+        if (!canceled) {
+          setPhotoDetailById((current) => ({
+            ...current,
+            [activeInspectorPhotoId]: payload
+          }));
+        }
+      })
+      .catch((caughtError: unknown) => {
+        if (!canceled) {
+          setPhotoDetailErrorById((current) => ({
+            ...current,
+            [activeInspectorPhotoId]:
+              caughtError instanceof Error ? caughtError.message : "Could not load photo detail."
+          }));
+        }
+      })
+      .finally(() => {
+        if (!canceled) {
+          setLoadingPhotoDetailId((current) =>
+            current === activeInspectorPhotoId ? null : current
+          );
+        }
+      });
+
+    return () => {
+      canceled = true;
+    };
+  }, [activeInspectorPhotoId, photoDetailById]);
+
+  const activeMetadataDetail = photoInspectorState.activeMetadataPhotoId
+    ? photoDetailById[photoInspectorState.activeMetadataPhotoId] ?? null
+    : null;
+  const activeMetadataError = photoInspectorState.activeMetadataPhotoId
+    ? photoDetailErrorById[photoInspectorState.activeMetadataPhotoId] ?? null
+    : null;
+  const isLoadingMetadataDetail =
+    photoInspectorState.activeMetadataPhotoId !== null
+    && loadingPhotoDetailId === photoInspectorState.activeMetadataPhotoId;
+
+  const activeFaceSummary = useMemo(() => {
+    const activeFaceAssignment = photoInspectorState.activeFaceAssignment;
+    if (!activeFaceAssignment) {
+      return null;
+    }
+    const detailPayload = photoDetailById[activeFaceAssignment.photoId];
+    return detailPayload ? adaptPhotoDetail(detailPayload) : null;
+  }, [photoDetailById, photoInspectorState.activeFaceAssignment]);
+
+  const activeFace = useMemo(() => {
+    const activeFaceAssignment = photoInspectorState.activeFaceAssignment;
+    if (!activeFaceAssignment || !activeFaceSummary) {
+      return null;
+    }
+    return activeFaceSummary.faces.find((face) => face.faceId === activeFaceAssignment.faceId) ?? null;
+  }, [activeFaceSummary, photoInspectorState.activeFaceAssignment]);
 
   function handleOpenAlbum(album: AlbumRecord) {
     const query = buildLibraryQueryForAlbum(album);
@@ -63,6 +188,9 @@ export function AlbumsRoutePage() {
         albums={sortedAlbums}
         selectedAlbumId={selectedAlbumId}
         detail={detail}
+        selectedPhotoIds={selectionState.selectedPhotoIds}
+        faceBoxesVisible={photoInspectorState.areFaceBoxesVisible}
+        activeMetadataPhotoId={photoInspectorState.activeMetadataPhotoId}
         createName={createName}
         createType={createType}
         createSavedFilterJsonDraft={createSavedFilterJsonDraft}
@@ -82,6 +210,138 @@ export function AlbumsRoutePage() {
         onSelectPage={(albumId, page) => void handleSelectRow(albumId, page)}
         onRowNameChange={handleUpdateRowName}
         onRowSavedFilterJsonDraftChange={handleUpdateRowSavedFilterJsonDraft}
+        onTogglePhotoSelected={(photoId) => {
+          dispatchSelection({
+            type: "togglePhotoSelection",
+            photoId
+          });
+        }}
+        onFaceBoxesVisibleChange={(visible) => {
+          dispatchPhotoInspector({
+            type: "setFaceBoxesVisible",
+            visible
+          });
+        }}
+        onOpenMetadata={(photoId, sourceSurfaceId) => {
+          dispatchPhotoInspector({
+            type: "openMetadata",
+            photoId,
+            sourceSurfaceId
+          });
+        }}
+        onOpenFace={(photoId, faceId, sourceSurfaceId) => {
+          dispatchPhotoInspector({
+            type: "openFaceAssignment",
+            photoId,
+            faceId,
+            sourceSurfaceId
+          });
+        }}
+      />
+
+      <PhotoMetadataFlyout
+        isOpen={photoInspectorState.activeMetadataPhotoId !== null}
+        summary={
+          activeMetadataDetail
+            ? {
+                photoId: activeMetadataDetail.photo_id,
+                title: activeMetadataDetail.photo_id,
+                path: activeMetadataDetail.path,
+                thumbnail: activeMetadataDetail.thumbnail
+                  ? {
+                      mimeType: activeMetadataDetail.thumbnail.mime_type,
+                      width: activeMetadataDetail.thumbnail.width,
+                      height: activeMetadataDetail.thumbnail.height,
+                      dataBase64: activeMetadataDetail.thumbnail.data_base64
+                    }
+                  : null
+              }
+            : photoInspectorState.activeMetadataPhotoId
+              ? {
+                  photoId: photoInspectorState.activeMetadataPhotoId,
+                  title: photoInspectorState.activeMetadataPhotoId,
+                  path: photoInspectorState.activeMetadataPhotoId,
+                  thumbnail: null
+                }
+              : null
+        }
+        detail={activeMetadataDetail}
+        isLoadingDetail={isLoadingMetadataDetail}
+        detailError={activeMetadataError}
+        onClose={() => dispatchPhotoInspector({ type: "closeMetadata" })}
+        onRetry={() => {
+          const photoId = photoInspectorState.activeMetadataPhotoId;
+          if (!photoId) {
+            return;
+          }
+          setPhotoDetailById((current) => {
+            const next = { ...current };
+            delete next[photoId];
+            return next;
+          });
+        }}
+      />
+
+      <FaceAssignmentModal
+        isOpen={activeFace !== null}
+        photo={activeFaceSummary}
+        face={activeFace}
+        people={peopleDirectory.map((person) => ({
+          person_id: person.person_id,
+          display_name: person.display_name,
+          created_ts: person.created_ts,
+          updated_ts: person.updated_ts
+        }))}
+        onClose={() => dispatchPhotoInspector({ type: "closeFaceAssignment" })}
+        onFaceUpdated={(faceId, personId) => {
+          const activeFaceAssignment = photoInspectorState.activeFaceAssignment;
+          if (!activeFaceAssignment) {
+            return;
+          }
+          setPhotoDetailById((current) => {
+            const existing = current[activeFaceAssignment.photoId];
+            if (!existing) {
+              return current;
+            }
+            return {
+              ...current,
+              [activeFaceAssignment.photoId]: applyFaceAssignment(existing, faceId, personId)
+            };
+          });
+        }}
+        onFaceDismissed={(faceId) => {
+          const activeFaceAssignment = photoInspectorState.activeFaceAssignment;
+          if (!activeFaceAssignment) {
+            return;
+          }
+          setPhotoDetailById((current) => {
+            const existing = current[activeFaceAssignment.photoId];
+            if (!existing) {
+              return current;
+            }
+            return {
+              ...current,
+              [activeFaceAssignment.photoId]: applyFaceDismissal(existing, faceId)
+            };
+          });
+          dispatchPhotoInspector({ type: "closeFaceAssignment" });
+        }}
+        onPersonCreated={(person) => {
+          setPeopleDirectory((current) => {
+            if (current.some((candidate) => candidate.person_id === person.person_id)) {
+              return current;
+            }
+            return [
+              ...current,
+              {
+                person_id: person.person_id,
+                display_name: person.display_name,
+                created_ts: person.created_ts ?? new Date().toISOString(),
+                updated_ts: person.updated_ts ?? new Date().toISOString()
+              }
+            ];
+          });
+        }}
       />
     </section>
   );
