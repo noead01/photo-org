@@ -16,6 +16,7 @@ packages/*/.venv/
 .local/
 .vite/
 .codex
+.superpowers/
 apps/api/.generated/
 *.egg-info/
 apps/ui/node_modules/
