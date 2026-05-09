@@ -7,15 +7,19 @@ import {
 interface LibrarySelectionPanelProps {
   selectionState: LibrarySelectionState;
   activeScopeCount: number;
+  areFaceBoxesVisible: boolean;
   onSetScope: (scope: LibrarySelectionScope) => void;
   onClearExplicitSelection: () => void;
+  onFaceBoxesVisibleChange: (visible: boolean) => void;
 }
 
 export function LibrarySelectionPanel({
   selectionState,
   activeScopeCount,
+  areFaceBoxesVisible,
   onSetScope,
-  onClearExplicitSelection
+  onClearExplicitSelection,
+  onFaceBoxesVisibleChange
 }: LibrarySelectionPanelProps) {
   return (
     <section className="browse-selection-panel" aria-label="Library selection controls">
@@ -62,6 +66,16 @@ export function LibrarySelectionPanel({
       >
         Clear selected
       </button>
+      <label>
+        <input
+          type="checkbox"
+          checked={areFaceBoxesVisible}
+          onChange={(event) => {
+            onFaceBoxesVisibleChange(event.currentTarget.checked);
+          }}
+        />
+        Show face boxes on all photos
+      </label>
     </section>
   );
 }

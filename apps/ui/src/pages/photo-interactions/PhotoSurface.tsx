@@ -8,6 +8,11 @@ interface PhotoSurfaceProps {
   faceBoxesVisible: boolean;
   activeMetadata: boolean;
   detailTo: string;
+  detailState?: unknown;
+  selectionLabel?: string;
+  detailLabel?: string;
+  metadataLabel?: string;
+  supportingText?: string;
   onToggleSelected: (photoId: string) => void;
   onOpenMetadata: (photoId: string, sourceSurfaceId: string) => void;
   onOpenFace: (photoId: string, faceId: string, sourceSurfaceId: string) => void;
@@ -23,6 +28,11 @@ export function PhotoSurface({
   faceBoxesVisible,
   activeMetadata,
   detailTo,
+  detailState,
+  selectionLabel,
+  detailLabel,
+  metadataLabel,
+  supportingText,
   onToggleSelected,
   onOpenMetadata,
   onOpenFace,
@@ -39,7 +49,7 @@ export function PhotoSurface({
         <input
           type="checkbox"
           checked={selected}
-          aria-label={`Select photo ${photo.title}`}
+          aria-label={selectionLabel ?? `Select photo ${photo.title}`}
           onChange={() => onToggleSelected(photo.photoId)}
         />
       </label>
@@ -48,7 +58,12 @@ export function PhotoSurface({
         className="photo-surface-media"
         style={thumbnail ? { aspectRatio: `${thumbnail.width} / ${thumbnail.height}` } : undefined}
       >
-        <Link className="photo-surface-link" to={detailTo} aria-label={`Open details for ${photo.title}`}>
+        <Link
+          className="photo-surface-link"
+          to={detailTo}
+          state={detailState}
+          aria-label={detailLabel ?? `Open details for ${photo.title}`}
+        >
           {thumbnail ? (
             <img
               className="photo-surface-image"
@@ -76,11 +91,12 @@ export function PhotoSurface({
         <p className="photo-surface-title" title={photo.path}>
           {photo.title}
         </p>
+        {supportingText ? <p className="photo-surface-supporting-text">{supportingText}</p> : null}
         <button
           type="button"
           className="photo-surface-metadata-button"
           onClick={() => onOpenMetadata(photo.photoId, surfaceId)}
-          aria-label={`Show metadata for ${photo.title}`}
+          aria-label={metadataLabel ?? `Show metadata for ${photo.title}`}
         >
           Show metadata
         </button>

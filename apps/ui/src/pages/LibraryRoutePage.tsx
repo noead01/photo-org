@@ -14,6 +14,7 @@ import {
   SEARCH_PAGE_LIMIT_OPTIONS,
   type AlbumRecord
 } from "./library/libraryRouteApi";
+import { applyFaceAssignment, applyFaceDismissal } from "./face-labeling/faceLabelingState";
 import { AddToAlbumDialog } from "./library/AddToAlbumDialog";
 import { LibraryPhotoGrid } from "./library/LibraryPhotoGrid";
 import { LibraryRouteHeader } from "./library/LibraryRouteHeader";
@@ -33,16 +34,27 @@ import {
 import {
   createLibrarySelectionState,
   librarySelectionReducer,
-  parseLibrarySelectionRouteState,
   resolveSelectionScopeCount,
   serializeLibrarySelectionState
 } from "./library/librarySelection";
+import {
+  adaptLibraryPhoto,
+  adaptPhotoDetail
+} from "./photo-interactions/photoInteractionAdapters";
+import { FaceAssignmentModal } from "./photo-interactions/FaceAssignmentModal";
+import { PhotoMetadataFlyout } from "./photo-interactions/PhotoMetadataFlyout";
+import {
+  DEFAULT_PHOTO_INSPECTOR_STATE,
+  photoInspectorReducer
+} from "./photo-interactions/photoInspectorState";
 import { useRouteRequestState } from "./library/requestLifecycle";
 import { parsePositiveIntParam } from "./library/urlSerialization";
 import {
   loadLibraryViewState,
   saveLibraryViewState
 } from "./library/libraryRouteMemory";
+import { fetchPhotoDetail } from "./photo-detail/photoDetailApi";
+import type { PhotoDetailPayload } from "./photo-detail/photoDetailTypes";
 import {
   normalizePathHintFilters,
   type FacetCountEntry
@@ -66,6 +78,31 @@ import { useLibraryRouteStateSync } from "./library/useLibraryRouteStateSync";
 import { useLibraryUrlSync } from "./library/useLibraryUrlSync";
 
 const LIBRARY_FILTER_FINGERPRINT = "library:route";
+
+function sortLibraryPeopleDirectory(people: PersonRecord[]): PersonRecord[] {
+  return [...people].sort((left, right) => {
+    const displayNameComparison = left.display_name.localeCompare(right.display_name, "en-US");
+    if (displayNameComparison !== 0) {
+      return displayNameComparison;
+    }
+    return left.person_id.localeCompare(right.person_id, "en-US");
+  });
+}
+
+function syncPeopleFromFaces(detail: PhotoDetailPayload): PhotoDetailPayload {
+  const nextPeople = Array.from(
+    new Set(
+      detail.faces
+        .map((face) => face.person_id)
+        .filter((value): value is string => value !== null)
+    )
+  );
+  return {
+    ...detail,
+    people: nextPeople
+  };
+}
+
 function toEditableAlbumOptions(albums: AlbumRecord[]): Array<{ albumId: string; albumName: string }> {
   return albums
     .filter((album) => album.kind === "editable")
@@ -154,6 +191,13 @@ export function LibraryRoutePage() {
     initialReturnState?.librarySelection ?? null,
     createLibrarySelectionState
   );
+  const [photoInspectorState, dispatchPhotoInspector] = useReducer(
+    photoInspectorReducer,
+    DEFAULT_PHOTO_INSPECTOR_STATE
+  );
+  const [photoDetailById, setPhotoDetailById] = useState<Record<string, PhotoDetailPayload>>({});
+  const [loadingPhotoDetailId, setLoadingPhotoDetailId] = useState<string | null>(null);
+  const [photoDetailErrorById, setPhotoDetailErrorById] = useState<Record<string, string>>({});
   const pendingReturnFocusPhotoIdRef = useRef<string | null>(
     initialReturnState?.restoreFocusPhotoId ?? consumePendingLibraryFocusPhotoId()
   );
@@ -290,7 +334,7 @@ export function LibraryRoutePage() {
       try {
         const payload = await fetchPeopleDirectory();
         if (!isCanceled) {
-          setPeopleDirectory(payload);
+          setPeopleDirectory(sortLibraryPeopleDirectory(payload));
         }
       } catch {
         if (!isCanceled) {
@@ -341,6 +385,81 @@ export function LibraryRoutePage() {
       activeFilterFingerprint: LIBRARY_FILTER_FINGERPRINT
     });
   }, []);
+
+  const photoSummaryById = useMemo(() => {
+    const next = new Map<string, ReturnType<typeof adaptLibraryPhoto>>();
+    for (const photo of photos) {
+      next.set(photo.photo_id, adaptLibraryPhoto(photo));
+    }
+    return next;
+  }, [photos]);
+
+  const visiblePhotoIds = useMemo(() => new Set(photos.map((photo) => photo.photo_id)), [photos]);
+
+  useEffect(() => {
+    dispatchPhotoInspector({
+      type: "closeMetadataIfTargetMissing",
+      visiblePhotoIds
+    });
+  }, [visiblePhotoIds]);
+
+  const activeInspectorPhotoId =
+    photoInspectorState.activeMetadataPhotoId ?? photoInspectorState.activeFaceAssignment?.photoId ?? null;
+
+  const loadPhotoInspectorDetail = useCallback(
+    async (photoId: string, force: boolean, signal?: AbortSignal) => {
+      if (!force && photoDetailById[photoId]) {
+        return;
+      }
+
+      setLoadingPhotoDetailId(photoId);
+      setPhotoDetailErrorById((current) => {
+        if (!current[photoId]) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[photoId];
+        return next;
+      });
+
+      try {
+        const detail = await fetchPhotoDetail(photoId);
+        if (signal?.aborted) {
+          return;
+        }
+        setPhotoDetailById((current) => ({
+          ...current,
+          [photoId]: detail
+        }));
+      } catch (caughtError: unknown) {
+        if (signal?.aborted) {
+          return;
+        }
+        setPhotoDetailErrorById((current) => ({
+          ...current,
+          [photoId]:
+            caughtError instanceof Error ? caughtError.message : "Could not load photo detail."
+        }));
+      } finally {
+        if (!signal?.aborted) {
+          setLoadingPhotoDetailId((current) => (current === photoId ? null : current));
+        }
+      }
+    },
+    [photoDetailById]
+  );
+
+  useEffect(() => {
+    if (!activeInspectorPhotoId) {
+      return;
+    }
+
+    const controller = new AbortController();
+    void loadPhotoInspectorDetail(activeInspectorPhotoId, false, controller.signal);
+    return () => {
+      controller.abort();
+    };
+  }, [activeInspectorPhotoId, loadPhotoInspectorDetail]);
 
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil(totalCount / pageSize)),
@@ -398,6 +517,108 @@ export function LibraryRoutePage() {
     error,
     photos
   });
+
+  const activeMetadataSummary = photoInspectorState.activeMetadataPhotoId
+    ? photoSummaryById.get(photoInspectorState.activeMetadataPhotoId) ?? null
+    : null;
+  const activeMetadataDetail = photoInspectorState.activeMetadataPhotoId
+    ? photoDetailById[photoInspectorState.activeMetadataPhotoId] ?? null
+    : null;
+  const activeMetadataError = photoInspectorState.activeMetadataPhotoId
+    ? photoDetailErrorById[photoInspectorState.activeMetadataPhotoId] ?? null
+    : null;
+  const isLoadingMetadataDetail =
+    photoInspectorState.activeMetadataPhotoId !== null
+    && loadingPhotoDetailId === photoInspectorState.activeMetadataPhotoId;
+
+  const activeFaceSummary = useMemo(() => {
+    const activeFaceAssignment = photoInspectorState.activeFaceAssignment;
+    if (!activeFaceAssignment) {
+      return null;
+    }
+
+    const detail = photoDetailById[activeFaceAssignment.photoId];
+    if (detail) {
+      return adaptPhotoDetail(detail);
+    }
+
+    return photoSummaryById.get(activeFaceAssignment.photoId) ?? null;
+  }, [photoDetailById, photoInspectorState.activeFaceAssignment, photoSummaryById]);
+
+  const activeFace = useMemo(() => {
+    const activeFaceAssignment = photoInspectorState.activeFaceAssignment;
+    if (!activeFaceAssignment || !activeFaceSummary) {
+      return null;
+    }
+
+    return activeFaceSummary.faces.find((face) => face.faceId === activeFaceAssignment.faceId) ?? null;
+  }, [activeFaceSummary, photoInspectorState.activeFaceAssignment]);
+
+  function handleFaceUpdated(faceId: string, personId: string) {
+    const activeFaceAssignment = photoInspectorState.activeFaceAssignment;
+    if (!activeFaceAssignment) {
+      return;
+    }
+
+    setPhotoDetailById((current) => {
+      const detail = current[activeFaceAssignment.photoId];
+      if (!detail) {
+        return current;
+      }
+      return {
+        ...current,
+        [activeFaceAssignment.photoId]: syncPeopleFromFaces(
+          applyFaceAssignment(detail, faceId, personId)
+        )
+      };
+    });
+  }
+
+  function handleFaceDismissed(faceId: string) {
+    const activeFaceAssignment = photoInspectorState.activeFaceAssignment;
+    if (!activeFaceAssignment) {
+      return;
+    }
+
+    setPhotoDetailById((current) => {
+      const detail = current[activeFaceAssignment.photoId];
+      if (!detail) {
+        return current;
+      }
+      const next = applyFaceDismissal(detail, faceId);
+      return {
+        ...current,
+        [activeFaceAssignment.photoId]: syncPeopleFromFaces({
+          ...next,
+          metadata: {
+            ...next.metadata,
+            faces_count: next.faces.length
+          }
+        })
+      };
+    });
+    dispatchPhotoInspector({ type: "closeFaceAssignment" });
+  }
+
+  function handlePersonCreated(person: {
+    person_id: string;
+    display_name: string;
+    created_ts?: string;
+    updated_ts?: string;
+  }) {
+    setPeopleDirectory((current) => {
+      if (current.some((candidate) => candidate.person_id === person.person_id)) {
+        return current;
+      }
+      return sortLibraryPeopleDirectory([
+        ...current,
+        {
+          person_id: person.person_id,
+          display_name: person.display_name
+        }
+      ]);
+    });
+  }
 
   function handleSubmit(event: { preventDefault: () => void }) {
     event.preventDefault();
@@ -686,6 +907,7 @@ export function LibraryRoutePage() {
       <LibrarySelectionPanel
         selectionState={selectionState}
         activeScopeCount={activeScopeCount}
+        areFaceBoxesVisible={photoInspectorState.areFaceBoxesVisible}
         onSetScope={(scope) =>
           dispatchSelection({
             type: "setScope",
@@ -694,6 +916,12 @@ export function LibraryRoutePage() {
           })
         }
         onClearExplicitSelection={() => dispatchSelection({ type: "clearExplicitSelection" })}
+        onFaceBoxesVisibleChange={(visible) => {
+          dispatchPhotoInspector({
+            type: "setFaceBoxesVisible",
+            visible
+          });
+        }}
       />
 
       <LibraryActionBar
@@ -748,15 +976,81 @@ export function LibraryRoutePage() {
             selectionRouteState={selectionRouteState}
             libraryViewRouteState={libraryViewRouteState}
             selectedPhotoIds={selectionState.selectedPhotoIds}
+            faceBoxesVisible={photoInspectorState.areFaceBoxesVisible}
+            activeMetadataPhotoId={photoInspectorState.activeMetadataPhotoId}
             onTogglePhotoSelection={(photoId) => {
               dispatchSelection({
                 type: "togglePhotoSelection",
                 photoId
               });
             }}
+            onOpenMetadata={(photoId, sourceSurfaceId) => {
+              dispatchPhotoInspector({
+                type: "openMetadata",
+                photoId,
+                sourceSurfaceId
+              });
+            }}
+            onOpenFace={(photoId, faceId, sourceSurfaceId) => {
+              dispatchPhotoInspector({
+                type: "openFaceAssignment",
+                photoId,
+                faceId,
+                sourceSurfaceId
+              });
+            }}
           />
         ) : null}
       </FeedbackSurface>
+
+      <PhotoMetadataFlyout
+        isOpen={photoInspectorState.activeMetadataPhotoId !== null}
+        summary={
+          activeMetadataSummary
+            ? {
+                photoId: activeMetadataSummary.photoId,
+                title: activeMetadataSummary.title,
+                path: activeMetadataSummary.path,
+                thumbnail: activeMetadataSummary.media.thumbnail
+                  ? {
+                      mimeType: activeMetadataSummary.media.thumbnail.mimeType,
+                      width: activeMetadataSummary.media.thumbnail.width,
+                      height: activeMetadataSummary.media.thumbnail.height,
+                      dataBase64: activeMetadataSummary.media.thumbnail.dataBase64
+                    }
+                  : null
+              }
+            : null
+        }
+        detail={activeMetadataDetail}
+        isLoadingDetail={isLoadingMetadataDetail}
+        detailError={activeMetadataError}
+        onClose={() => {
+          dispatchPhotoInspector({ type: "closeMetadata" });
+        }}
+        onRetry={() => {
+          if (!photoInspectorState.activeMetadataPhotoId) {
+            return;
+          }
+          void loadPhotoInspectorDetail(photoInspectorState.activeMetadataPhotoId, true);
+        }}
+      />
+
+      <FaceAssignmentModal
+        isOpen={activeFace !== null}
+        photo={activeFaceSummary}
+        face={activeFace}
+        people={peopleDirectory.map((person) => ({
+          person_id: person.person_id,
+          display_name: person.display_name
+        }))}
+        onClose={() => {
+          dispatchPhotoInspector({ type: "closeFaceAssignment" });
+        }}
+        onFaceUpdated={handleFaceUpdated}
+        onFaceDismissed={handleFaceDismissed}
+        onPersonCreated={handlePersonCreated}
+      />
     </section>
   );
 }

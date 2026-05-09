@@ -50,10 +50,6 @@ export function PhotoMetadataFlyout({
 }: PhotoMetadataFlyoutProps) {
   const [isExifAttributesOpen, setIsExifAttributesOpen] = useState(false);
 
-  if (!summary) {
-    return null;
-  }
-
   const facesLabel = useMemo(() => {
     const count = detail?.metadata.faces_count ?? 0;
     return count === 1 ? "1 detected" : `${count} detected`;
@@ -68,6 +64,10 @@ export function PhotoMetadataFlyout({
       leftName.localeCompare(rightName, "en-US")
     );
   }, [detail?.metadata.exif_attributes]);
+
+  if (!summary) {
+    return null;
+  }
 
   return (
     <>

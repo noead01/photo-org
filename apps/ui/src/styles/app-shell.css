@@ -68,6 +68,12 @@
   text-overflow: ellipsis;
 }
 
+.photo-surface-supporting-text {
+  margin: 0;
+  font-size: 0.74rem;
+  color: #0f172a;
+}
+
 .photo-surface-metadata-button {
   border: 1px solid #cbd5e1;
   border-radius: 0.45rem;
@@ -1297,55 +1303,6 @@ body {
   grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
 }
 
-.browse-card {
-  border: 1px solid #cbd5e1;
-  border-radius: 0.7rem;
-  background: #ffffff;
-  overflow: visible;
-  display: grid;
-  grid-template-rows: auto 1fr;
-  position: relative;
-}
-
-.browse-card-selected {
-  border-width: 2px;
-  border-color: #1d4ed8;
-}
-
-.browse-thumbnail-shell {
-  position: relative;
-  overflow: hidden;
-  border-radius: 0.7rem 0.7rem 0 0;
-}
-
-.browse-thumbnail-link {
-  position: relative;
-  display: block;
-  aspect-ratio: 4 / 3;
-  background: #e2e8f0;
-}
-
-.browse-card-checkbox-badge {
-  position: absolute;
-  top: 0;
-  left: 0;
-  transform: translate(-50%, -50%);
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.6rem;
-  height: 1.6rem;
-  border-radius: 999px;
-  border: 1px solid rgba(15, 23, 42, 0.3);
-  background: rgba(248, 250, 252, 0.95);
-  cursor: pointer;
-}
-
-.browse-card-checkbox-badge input {
-  margin: 0;
-}
-
 .browse-thumbnail {
   width: 100%;
   height: 100%;
@@ -1360,12 +1317,6 @@ body {
   font-size: 0.85rem;
 }
 
-.browse-card-body {
-  padding: 0.55rem 0.6rem 0.65rem;
-  display: grid;
-  gap: 0.45rem;
-}
-
 .browse-path {
   margin: 0;
   color: #475569;
@@ -1375,64 +1326,6 @@ body {
   text-overflow: clip;
   display: flex;
   justify-content: flex-end;
-}
-
-.browse-card-summary {
-  margin: 0;
-  font-size: 0.74rem;
-  color: #0f172a;
-}
-
-.library-face-panel {
-  border-top: 1px solid #e2e8f0;
-  padding: 0.55rem 0.75rem 0.75rem;
-  display: grid;
-  gap: 0.55rem;
-}
-
-.library-face-panel-toggle {
-  justify-self: start;
-  border: 1px solid #bfdbfe;
-  background: #eff6ff;
-  color: #1d4ed8;
-  border-radius: 0.45rem;
-  padding: 0.28rem 0.5rem;
-  font: inherit;
-}
-
-.library-face-panel-body {
-  border: 1px solid #cbd5e1;
-  border-radius: 0.55rem;
-  background: #f8fafc;
-  padding: 0.55rem;
-  display: grid;
-  gap: 0.55rem;
-}
-
-.library-face-panel-status {
-  margin: 0;
-  color: #334155;
-  font-size: 0.82rem;
-}
-
-.library-face-panel-error {
-  display: grid;
-  gap: 0.5rem;
-}
-
-.library-face-panel-error p {
-  margin: 0;
-  color: #7f1d1d;
-  font-size: 0.82rem;
-}
-
-.library-face-panel-error button {
-  justify-self: start;
-}
-
-.library-face-panel-content {
-  display: grid;
-  gap: 0.65rem;
 }
 
 .library-face-confirmation {
