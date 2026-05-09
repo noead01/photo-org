@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { deriveIngestStatus } from "../app/ingestStatus";
 import { buildFaceOverlayRegions, type FaceOverlayRegion } from "./FaceBBoxOverlay";
@@ -6,6 +6,11 @@ import { applyFaceAssignment, applyFaceDismissal } from "./face-labeling/faceLab
 import { resolveDetailReturnState, setPendingLibraryFocusPhotoId } from "./libraryRouteState";
 import { sortPeopleDirectory } from "./people/peopleState";
 import { adaptPhotoDetail } from "./photo-interactions/photoInteractionAdapters";
+import {
+  createPhotoSelectionState,
+  parsePhotoSelectionRouteState,
+  photoSelectionReducer,
+} from "./photo-interactions/photoSelectionState";
 import { FaceAssignmentModal } from "./photo-interactions/FaceAssignmentModal";
 import { PhotoMetadataFlyout } from "./photo-interactions/PhotoMetadataFlyout";
 import { fetchPeopleDirectory } from "./photo-detail/photoDetailApi";
@@ -52,6 +57,19 @@ export function PhotoDetailRoutePage() {
   const location = useLocation();
   const { photoId } = useParams<{ photoId: string }>();
   const returnState = resolveDetailReturnState(location.state);
+  const incomingSelectionRouteState = useMemo(() => {
+    if (!location.state || typeof location.state !== "object") {
+      return null;
+    }
+    return parsePhotoSelectionRouteState(
+      (location.state as { photoSelection?: unknown }).photoSelection
+    );
+  }, [location.state]);
+  const [photoSelectionState, dispatchPhotoSelection] = useReducer(
+    photoSelectionReducer,
+    incomingSelectionRouteState,
+    createPhotoSelectionState
+  );
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   const { detail, setDetail, isLoading, error, isNotFound, retry } = usePhotoDetail(photoId);
   const [imageScalePercent, setImageScalePercent] = useState(100);
@@ -231,6 +249,11 @@ export function PhotoDetailRoutePage() {
                   restoreFocusPhotoId: backLinkFocusPhotoId ?? undefined,
                   librarySelection: returnState.librarySelection,
                   libraryViewState: returnState.libraryViewState,
+                  photoSelection: {
+                    scope: photoSelectionState.scope,
+                    selectedPhotoIds: Array.from(photoSelectionState.selectedPhotoIds).sort(),
+                    allFilteredFingerprint: photoSelectionState.allFilteredFingerprint,
+                  },
                 }
               : undefined
           }
@@ -263,6 +286,7 @@ export function PhotoDetailRoutePage() {
         <div className="detail-workspace">
           <PhotoPreviewPanel
             detailPhotoId={detail.photo_id}
+            selected={photoSelectionState.selectedPhotoIds.has(detail.photo_id)}
             previewImageSrc={previewImageSrc}
             shouldUseOriginalImage={shouldUseOriginalImage}
             activeOriginalImageSrc={activeOriginalImageSrc}
@@ -277,6 +301,12 @@ export function PhotoDetailRoutePage() {
             faceOverlayRegions={faceOverlayRegions}
             faceBadgeInitialsById={faceBadgeInitialsById}
             faceRegionState={faceRegionState}
+            onToggleSelected={(selectedPhotoId) =>
+              dispatchPhotoSelection({
+                type: "togglePhotoSelection",
+                photoId: selectedPhotoId,
+              })
+            }
             onShowFaceBoxesChange={setShowFaceBoxes}
             onImageScalePercentChange={setImageScalePercent}
             onToggleDetails={() => setIsDetailFlyoutOpen((current) => !current)}

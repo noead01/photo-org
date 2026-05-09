@@ -457,6 +457,22 @@ describe("PhotoDetailRoutePage", () => {
     expect(image).toHaveAttribute("src", "/api/v1/photos/photo-1/original");
   });
 
+  it("exposes photo selection on detail without disabling original image loading", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => buildPayload(),
+    } as Response);
+
+    renderDetail();
+
+    const image = await screen.findByRole("img", { name: /preview for photo-1/i });
+    expect(image).toHaveAttribute("src", "/api/v1/photos/photo-1/original");
+
+    await user.click(screen.getByRole("checkbox", { name: /select photo/i }));
+    expect(screen.getByRole("checkbox", { name: /select photo/i })).toBeChecked();
+  });
+
   it("prefers loading the original preview even when availability metadata is stale", async () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
