@@ -1,4 +1,4 @@
-import * as Slider from "@radix-ui/react-slider";
+import { Range, getTrackBackground } from "react-range";
 
 interface ConfidenceSingleSliderProps {
   value: number;
@@ -39,23 +39,52 @@ export function ConfidenceSingleSlider({
   return (
     <div className="confidence-slider-wrapper">
       <p>{`Suggestion threshold: ${normalizedValue}%`}</p>
-      <Slider.Root
-        className="confidence-slider"
+      <Range
         min={0}
         max={100}
         step={1}
-        value={[normalizedValue]}
+        values={[normalizedValue]}
         disabled={disabled}
-        onValueChange={(next) => {
+        onChange={(next) => {
           const [first = normalizedValue] = next;
           onValueChange(clampPercent(first));
         }}
-      >
-        <Slider.Track className="confidence-slider-track">
-          <Slider.Range className="confidence-slider-range" />
-        </Slider.Track>
-        <Slider.Thumb className="confidence-slider-thumb" aria-label="Suggestion threshold" />
-      </Slider.Root>
+        renderTrack={({ props, children }) => (
+          <div
+            onMouseDown={props.onMouseDown}
+            onTouchStart={props.onTouchStart}
+            style={props.style}
+            className="confidence-slider"
+            data-disabled={disabled ? "" : undefined}
+          >
+            <div
+              ref={props.ref}
+              className="confidence-slider-track"
+              style={{
+                background: getTrackBackground({
+                  values: [normalizedValue],
+                  colors: ["#3b82f6", "#dbeafe"],
+                  min: 0,
+                  max: 100,
+                }),
+              }}
+            >
+              {children}
+            </div>
+          </div>
+        )}
+        renderThumb={({ props }) => {
+          const { key, ...thumbProps } = props as typeof props & { key?: string };
+          return (
+            <div
+              key={key}
+              {...thumbProps}
+              className="confidence-slider-thumb"
+              aria-label="Suggestion threshold"
+            />
+          );
+        }}
+      />
     </div>
   );
 }
@@ -67,30 +96,59 @@ export function ConfidenceRangeSlider({
   disabled = false,
 }: ConfidenceRangeSliderProps) {
   const [normalizedMin, normalizedMax] = normalizeRange(minValue, maxValue);
+  const sliderValues = [normalizedMin, normalizedMax];
 
   return (
     <div className="confidence-slider-wrapper">
       <p>{`Minimum certainty: ${normalizedMin}%`}</p>
       <p>{`Maximum certainty: ${normalizedMax}%`}</p>
-      <Slider.Root
-        className="confidence-slider"
+      <Range
         min={0}
         max={100}
         step={1}
-        value={[normalizedMin, normalizedMax]}
+        values={sliderValues}
         disabled={disabled}
-        onValueChange={(next) => {
+        onChange={(next) => {
           const [nextMin = normalizedMin, nextMax = normalizedMax] = next;
           const [safeMin, safeMax] = normalizeRange(nextMin, nextMax);
           onValueChange(safeMin, safeMax);
         }}
-      >
-        <Slider.Track className="confidence-slider-track">
-          <Slider.Range className="confidence-slider-range" />
-        </Slider.Track>
-        <Slider.Thumb className="confidence-slider-thumb" aria-label="Minimum suggestion certainty" />
-        <Slider.Thumb className="confidence-slider-thumb" aria-label="Maximum suggestion certainty" />
-      </Slider.Root>
+        renderTrack={({ props, children }) => (
+          <div
+            onMouseDown={props.onMouseDown}
+            onTouchStart={props.onTouchStart}
+            style={props.style}
+            className="confidence-slider"
+            data-disabled={disabled ? "" : undefined}
+          >
+            <div
+              ref={props.ref}
+              className="confidence-slider-track"
+              style={{
+                background: getTrackBackground({
+                  values: sliderValues,
+                  colors: ["#dbeafe", "#3b82f6", "#dbeafe"],
+                  min: 0,
+                  max: 100,
+                }),
+              }}
+            >
+              {children}
+            </div>
+          </div>
+        )}
+        renderThumb={({ props, index }) => {
+          const { key, ...thumbProps } = props as typeof props & { key?: string };
+          return (
+            <div
+              key={key}
+              {...thumbProps}
+              className="confidence-slider-thumb"
+              aria-label={index === 0 ? "Minimum suggestion certainty" : "Maximum suggestion certainty"}
+            />
+          );
+        }}
+      />
     </div>
   );
 }
