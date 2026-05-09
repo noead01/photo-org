@@ -270,7 +270,7 @@ export function SuggestionsRoutePage() {
         [...current, {
           albumId: createdAlbum.album_id,
           name: createdAlbum.name,
-          kind: "manual",
+          kind: "manual" as const,
           canAcceptManualAdditions: true
         }].sort((left, right) => left.name.localeCompare(right.name, "en-US"))
       );

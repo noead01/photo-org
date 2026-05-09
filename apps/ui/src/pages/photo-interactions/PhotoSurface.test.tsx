@@ -34,7 +34,7 @@ describe("PhotoSurface", () => {
     const onOpenMetadata = vi.fn();
 
     render(
-      <MemoryRouter>
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <PhotoSurface
           photo={photo}
           selected={false}
@@ -64,7 +64,7 @@ describe("PhotoSurface", () => {
 
   it("marks the active metadata source", () => {
     render(
-      <MemoryRouter>
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <PhotoSurface
           photo={photo}
           selected={false}

@@ -13,7 +13,10 @@ type MockReply = {
 function renderPage(path = "/suggestions", onUrlUpdate?: OnUrlUpdateFunction) {
   const url = new URL(path, "https://photo-org.test");
   return render(
-    <MemoryRouter initialEntries={[path]}>
+    <MemoryRouter
+      initialEntries={[path]}
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+    >
       <NuqsTestingAdapter hasMemory searchParams={url.search} onUrlUpdate={onUrlUpdate}>
         <SuggestionsRoutePage />
       </NuqsTestingAdapter>
@@ -25,7 +28,10 @@ function renderPageStrict(path = "/suggestions", onUrlUpdate?: OnUrlUpdateFuncti
   const url = new URL(path, "https://photo-org.test");
   return render(
     <StrictMode>
-      <MemoryRouter initialEntries={[path]}>
+      <MemoryRouter
+        initialEntries={[path]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <NuqsTestingAdapter hasMemory searchParams={url.search} onUrlUpdate={onUrlUpdate}>
           <SuggestionsRoutePage />
         </NuqsTestingAdapter>
