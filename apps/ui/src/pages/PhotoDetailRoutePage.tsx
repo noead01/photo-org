@@ -6,7 +6,7 @@ import { PhotoFaceAssignmentModal } from "./PhotoFaceAssignmentModal";
 import { applyFaceAssignment, applyFaceDismissal } from "./face-labeling/faceLabelingState";
 import { resolveDetailReturnState, setPendingLibraryFocusPhotoId } from "./libraryRouteState";
 import { sortPeopleDirectory } from "./people/peopleState";
-import { PhotoMetadataFlyout } from "./photo-detail/PhotoMetadataFlyout";
+import { PhotoMetadataFlyout } from "./photo-interactions/PhotoMetadataFlyout";
 import { fetchPeopleDirectory } from "./photo-detail/photoDetailApi";
 import { MISSING_VALUE } from "./photo-detail/photoDetailFormatting";
 import { PhotoPreviewPanel } from "./photo-detail/PhotoPreviewPanel";
@@ -295,11 +295,27 @@ export function PhotoDetailRoutePage() {
           />
 
           <PhotoMetadataFlyout
-            key={detail.photo_id}
+            key={`detail-metadata-${detail.photo_id}`}
+            summary={{
+              photoId: detail.photo_id,
+              title: detail.photo_id,
+              path: detail.path,
+              thumbnail: detail.thumbnail
+                ? {
+                    mimeType: detail.thumbnail.mime_type,
+                    width: detail.thumbnail.width,
+                    height: detail.thumbnail.height,
+                    dataBase64: detail.thumbnail.data_base64
+                  }
+                : null
+            }}
             detail={detail}
             ingestStatus={ingestStatus}
             isOpen={isDetailFlyoutOpen}
+            isLoadingDetail={false}
+            detailError={null}
             onClose={() => setIsDetailFlyoutOpen(false)}
+            onRetry={retry}
           />
         </div>
       ) : null}
