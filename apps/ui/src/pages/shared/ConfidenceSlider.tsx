@@ -1,4 +1,5 @@
-import * as Slider from "@radix-ui/react-slider";
+import { useEffect, useState } from "react";
+import { Range, getTrackBackground } from "react-range";
 
 interface ConfidenceSingleSliderProps {
   value: number;
@@ -35,27 +36,65 @@ export function ConfidenceSingleSlider({
   disabled = false,
 }: ConfidenceSingleSliderProps) {
   const normalizedValue = clampPercent(value);
+  const [draftValue, setDraftValue] = useState(normalizedValue);
+
+  useEffect(() => {
+    setDraftValue(normalizedValue);
+  }, [normalizedValue]);
 
   return (
     <div className="confidence-slider-wrapper">
-      <p>{`Suggestion threshold: ${normalizedValue}%`}</p>
-      <Slider.Root
-        className="confidence-slider"
+      <p>{`Suggestion threshold: ${draftValue}%`}</p>
+      <Range
         min={0}
         max={100}
         step={1}
-        value={[normalizedValue]}
+        values={[draftValue]}
         disabled={disabled}
-        onValueChange={(next) => {
-          const [first = normalizedValue] = next;
+        onChange={(next) => {
+          const [first = draftValue] = next;
+          setDraftValue(clampPercent(first));
+        }}
+        onFinalChange={(next) => {
+          const [first = draftValue] = next;
           onValueChange(clampPercent(first));
         }}
-      >
-        <Slider.Track className="confidence-slider-track">
-          <Slider.Range className="confidence-slider-range" />
-        </Slider.Track>
-        <Slider.Thumb className="confidence-slider-thumb" aria-label="Suggestion threshold" />
-      </Slider.Root>
+        renderTrack={({ props, children }) => (
+          <div
+            onMouseDown={props.onMouseDown}
+            onTouchStart={props.onTouchStart}
+            style={props.style}
+            className="confidence-slider"
+            data-disabled={disabled ? "" : undefined}
+          >
+            <div
+              ref={props.ref}
+              className="confidence-slider-track"
+              style={{
+                background: getTrackBackground({
+                  values: [draftValue],
+                  colors: ["#3b82f6", "#dbeafe"],
+                  min: 0,
+                  max: 100,
+                }),
+              }}
+            >
+              {children}
+            </div>
+          </div>
+        )}
+        renderThumb={({ props }) => {
+          const { key, ...thumbProps } = props as typeof props & { key?: string };
+          return (
+            <div
+              key={key}
+              {...thumbProps}
+              className="confidence-slider-thumb"
+              aria-label="Suggestion threshold"
+            />
+          );
+        }}
+      />
     </div>
   );
 }
@@ -67,30 +106,69 @@ export function ConfidenceRangeSlider({
   disabled = false,
 }: ConfidenceRangeSliderProps) {
   const [normalizedMin, normalizedMax] = normalizeRange(minValue, maxValue);
+  const [draftRange, setDraftRange] = useState<[number, number]>([normalizedMin, normalizedMax]);
+  const [draftMin, draftMax] = draftRange;
+
+  useEffect(() => {
+    setDraftRange([normalizedMin, normalizedMax]);
+  }, [normalizedMin, normalizedMax]);
 
   return (
     <div className="confidence-slider-wrapper">
-      <p>{`Minimum certainty: ${normalizedMin}%`}</p>
-      <p>{`Maximum certainty: ${normalizedMax}%`}</p>
-      <Slider.Root
-        className="confidence-slider"
+      <p>{`Minimum certainty: ${draftMin}%`}</p>
+      <p>{`Maximum certainty: ${draftMax}%`}</p>
+      <Range
         min={0}
         max={100}
         step={1}
-        value={[normalizedMin, normalizedMax]}
+        values={draftRange}
         disabled={disabled}
-        onValueChange={(next) => {
-          const [nextMin = normalizedMin, nextMax = normalizedMax] = next;
+        onChange={(next) => {
+          const [nextMin = draftMin, nextMax = draftMax] = next;
+          const [safeMin, safeMax] = normalizeRange(nextMin, nextMax);
+          setDraftRange([safeMin, safeMax]);
+        }}
+        onFinalChange={(next) => {
+          const [nextMin = draftMin, nextMax = draftMax] = next;
           const [safeMin, safeMax] = normalizeRange(nextMin, nextMax);
           onValueChange(safeMin, safeMax);
         }}
-      >
-        <Slider.Track className="confidence-slider-track">
-          <Slider.Range className="confidence-slider-range" />
-        </Slider.Track>
-        <Slider.Thumb className="confidence-slider-thumb" aria-label="Minimum suggestion certainty" />
-        <Slider.Thumb className="confidence-slider-thumb" aria-label="Maximum suggestion certainty" />
-      </Slider.Root>
+        renderTrack={({ props, children }) => (
+          <div
+            onMouseDown={props.onMouseDown}
+            onTouchStart={props.onTouchStart}
+            style={props.style}
+            className="confidence-slider"
+            data-disabled={disabled ? "" : undefined}
+          >
+            <div
+              ref={props.ref}
+              className="confidence-slider-track"
+              style={{
+                background: getTrackBackground({
+                  values: draftRange,
+                  colors: ["#dbeafe", "#3b82f6", "#dbeafe"],
+                  min: 0,
+                  max: 100,
+                }),
+              }}
+            >
+              {children}
+            </div>
+          </div>
+        )}
+        renderThumb={({ props, index }) => {
+          const { key, ...thumbProps } = props as typeof props & { key?: string };
+          return (
+            <div
+              key={key}
+              {...thumbProps}
+              className="confidence-slider-thumb"
+              aria-label={index === 0 ? "Minimum suggestion certainty" : "Maximum suggestion certainty"}
+            />
+          );
+        }}
+      />
     </div>
   );
 }

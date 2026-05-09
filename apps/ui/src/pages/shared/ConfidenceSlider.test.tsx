@@ -12,7 +12,12 @@ describe("ConfidenceSlider", () => {
 
     expect(screen.getByText("Suggestion threshold: 91%")).toBeInTheDocument();
 
-    fireEvent.keyDown(screen.getByLabelText("Suggestion threshold"), { key: "ArrowRight" });
+    const thumb = screen.getByLabelText("Suggestion threshold");
+    expect(thumb.tagName).toBe("DIV");
+
+    fireEvent.keyDown(thumb, { key: "ArrowRight" });
+    expect(onValueChange).not.toHaveBeenCalled();
+    fireEvent.keyUp(thumb, { key: "ArrowRight" });
 
     expect(onValueChange).toHaveBeenCalledWith(92);
   });
@@ -28,7 +33,10 @@ describe("ConfidenceSlider", () => {
     expect(screen.getByText("Maximum certainty: 80%")).toBeInTheDocument();
 
     const minThumb = screen.getByLabelText("Minimum suggestion certainty");
+    expect(minThumb.tagName).toBe("DIV");
     fireEvent.keyDown(minThumb, { key: "ArrowRight" });
+    expect(onValueChange).not.toHaveBeenCalled();
+    fireEvent.keyUp(minThumb, { key: "ArrowRight" });
 
     expect(onValueChange).toHaveBeenCalledWith(31, 80);
   });
