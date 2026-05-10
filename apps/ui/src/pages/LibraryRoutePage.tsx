@@ -8,6 +8,8 @@ import { resolveInitialSessionIdentity } from "../session/sessionIdentity";
 import { LibraryActionBar } from "./library/LibraryActionBar";
 import { LibraryActiveFilterChips } from "./library/LibraryActiveFilterChips";
 import {
+  addPhotosToAlbum,
+  createAlbum,
   DEFAULT_SEARCH_PAGE_LIMIT,
   fetchAlbums,
   fetchPeopleDirectory,
@@ -41,6 +43,7 @@ import {
   adaptLibraryPhoto,
   adaptPhotoDetail
 } from "./photo-interactions/photoInteractionAdapters";
+import type { PhotoSummary } from "./photo-interactions/photoInteractionTypes";
 import { FaceAssignmentModal } from "./photo-interactions/FaceAssignmentModal";
 import { PhotoMetadataFlyout } from "./photo-interactions/PhotoMetadataFlyout";
 import {
@@ -110,6 +113,65 @@ function toEditableAlbumOptions(albums: AlbumRecord[]): Array<{ albumId: string;
     .sort((left, right) => left.albumName.localeCompare(right.albumName, "en-US"));
 }
 
+function isPhotoDetailPayload(value: unknown): value is PhotoDetailPayload {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<PhotoDetailPayload>;
+  return (
+    typeof candidate.photo_id === "string"
+    && typeof candidate.path === "string"
+    && Array.isArray(candidate.faces)
+  );
+}
+
+type FaceAssignmentOverride = {
+  personId: string;
+  displayName: string | null;
+};
+
+function applyFaceAssignmentOverrides(
+  summary: PhotoSummary,
+  overridesByFaceId: Record<string, FaceAssignmentOverride> | undefined
+): PhotoSummary {
+  if (!overridesByFaceId || Object.keys(overridesByFaceId).length === 0) {
+    return summary;
+  }
+
+  let hasChanges = false;
+  const nextFaces = summary.faces.map((face) => {
+    const override = overridesByFaceId[face.faceId];
+    if (!override) {
+      return face;
+    }
+
+    hasChanges = true;
+    return {
+      ...face,
+      personId: override.personId,
+      assignedPerson: override.displayName
+        ? {
+            personId: override.personId,
+            displayName: override.displayName
+          }
+        : null,
+      canAssign: false,
+      canCorrect: true,
+      canDismiss: false,
+      canConfirm: false
+    };
+  });
+
+  if (!hasChanges) {
+    return summary;
+  }
+
+  return {
+    ...summary,
+    faces: nextFaces
+  };
+}
+
 export function LibraryRoutePage() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -175,6 +237,9 @@ export function LibraryRoutePage() {
   const [albumOptions, setAlbumOptions] = useState<Array<{ albumId: string; albumName: string }>>(
     []
   );
+  const [isAlbumInteractionEnabled, setIsAlbumInteractionEnabled] = useState(false);
+  const [isAlbumActionSubmitting, setIsAlbumActionSubmitting] = useState(false);
+  const [albumActionResultByPhotoId, setAlbumActionResultByPhotoId] = useState<Record<string, string>>({});
 
   const [sortDirection, setSortDirection] = useState<SortDirection>(
     initialReturnState?.libraryViewState?.sortDirection
@@ -196,6 +261,9 @@ export function LibraryRoutePage() {
     DEFAULT_PHOTO_INSPECTOR_STATE
   );
   const [photoDetailById, setPhotoDetailById] = useState<Record<string, PhotoDetailPayload>>({});
+  const [faceAssignmentOverridesByPhotoId, setFaceAssignmentOverridesByPhotoId] = useState<
+    Record<string, Record<string, FaceAssignmentOverride>>
+  >({});
   const [loadingPhotoDetailId, setLoadingPhotoDetailId] = useState<string | null>(null);
   const [photoDetailErrorById, setPhotoDetailErrorById] = useState<Record<string, string>>({});
   const pendingReturnFocusPhotoIdRef = useRef<string | null>(
@@ -231,6 +299,16 @@ export function LibraryRoutePage() {
     }
     return next;
   }, [albumOptions]);
+  const albumTargets = useMemo(
+    () =>
+      albumOptions.map((option) => ({
+        albumId: option.albumId,
+        name: option.albumName,
+        kind: "manual" as const,
+        canAcceptManualAdditions: true
+      })),
+    [albumOptions]
+  );
 
   const libraryViewRouteState = useMemo<LibraryViewRouteState>(
     () => ({
@@ -268,7 +346,8 @@ export function LibraryRoutePage() {
     requestedPage,
     pageSize,
     dateRangeError,
-    locationError
+    locationError,
+    includeFaceInfo: photoInspectorState.areFaceBoxesVisible
   });
   const applyParsedUrlState = useCallback(
     (nextParsedState: SearchUrlState, shouldApplyViewState: boolean) => {
@@ -389,10 +468,35 @@ export function LibraryRoutePage() {
   const photoSummaryById = useMemo(() => {
     const next = new Map<string, ReturnType<typeof adaptLibraryPhoto>>();
     for (const photo of photos) {
-      next.set(photo.photo_id, adaptLibraryPhoto(photo));
+      const baseSummary = adaptLibraryPhoto(photo);
+      next.set(
+        photo.photo_id,
+        applyFaceAssignmentOverrides(baseSummary, faceAssignmentOverridesByPhotoId[photo.photo_id])
+      );
     }
     return next;
-  }, [photos]);
+  }, [faceAssignmentOverridesByPhotoId, photos]);
+
+  const photoSurfaceSummaryById = useMemo(() => {
+    const next = new Map<string, ReturnType<typeof adaptLibraryPhoto>>();
+    for (const photo of photos) {
+      const baseSummary = adaptLibraryPhoto(photo);
+      const detailPayload = photoDetailById[photo.photo_id];
+      if (isPhotoDetailPayload(detailPayload)) {
+        const detailSummary = adaptPhotoDetail(detailPayload);
+        next.set(photo.photo_id, {
+          ...baseSummary,
+          faces: detailSummary.faces
+        });
+      } else {
+        next.set(
+          photo.photo_id,
+          applyFaceAssignmentOverrides(baseSummary, faceAssignmentOverridesByPhotoId[photo.photo_id])
+        );
+      }
+    }
+    return next;
+  }, [faceAssignmentOverridesByPhotoId, photoDetailById, photos]);
 
   const visiblePhotoIds = useMemo(() => new Set(photos.map((photo) => photo.photo_id)), [photos]);
 
@@ -403,8 +507,19 @@ export function LibraryRoutePage() {
     });
   }, [visiblePhotoIds]);
 
-  const activeInspectorPhotoId =
-    photoInspectorState.activeMetadataPhotoId ?? photoInspectorState.activeFaceAssignment?.photoId ?? null;
+  useEffect(() => {
+    setFaceAssignmentOverridesByPhotoId((current) => {
+      const nextEntries = Object.entries(current).filter(([photoId]) =>
+        photos.some((photo) => photo.photo_id === photoId)
+      );
+      if (nextEntries.length === Object.keys(current).length) {
+        return current;
+      }
+      return Object.fromEntries(nextEntries);
+    });
+  }, [photos]);
+
+  const activeInspectorPhotoId = photoInspectorState.activeMetadataPhotoId;
 
   const loadPhotoInspectorDetail = useCallback(
     async (photoId: string, force: boolean, signal?: AbortSignal) => {
@@ -531,34 +646,80 @@ export function LibraryRoutePage() {
     photoInspectorState.activeMetadataPhotoId !== null
     && loadingPhotoDetailId === photoInspectorState.activeMetadataPhotoId;
 
-  const activeFaceSummary = useMemo(() => {
+  const activeFaceContext = useMemo(() => {
     const activeFaceAssignment = photoInspectorState.activeFaceAssignment;
     if (!activeFaceAssignment) {
       return null;
     }
 
-    const detail = photoDetailById[activeFaceAssignment.photoId];
+    const summary = photoSummaryById.get(activeFaceAssignment.photoId) ?? null;
+    const detailPayload = photoDetailById[activeFaceAssignment.photoId];
+    const detail = isPhotoDetailPayload(detailPayload) ? adaptPhotoDetail(detailPayload) : null;
+
     if (detail) {
-      return adaptPhotoDetail(detail);
+      const directMatch = detail.faces.find((face) => face.faceId === activeFaceAssignment.faceId) ?? null;
+      if (directMatch) {
+        return {
+          photo: detail,
+          face: directMatch
+        };
+      }
+
+      if (
+        typeof activeFaceAssignment.faceIndex === "number"
+        && activeFaceAssignment.faceIndex >= 0
+        && activeFaceAssignment.faceIndex < detail.faces.length
+      ) {
+        return {
+          photo: detail,
+          face: detail.faces[activeFaceAssignment.faceIndex]
+        };
+      }
     }
 
-    return photoSummaryById.get(activeFaceAssignment.photoId) ?? null;
-  }, [photoDetailById, photoInspectorState.activeFaceAssignment, photoSummaryById]);
-
-  const activeFace = useMemo(() => {
-    const activeFaceAssignment = photoInspectorState.activeFaceAssignment;
-    if (!activeFaceAssignment || !activeFaceSummary) {
+    if (!summary) {
       return null;
     }
 
-    return activeFaceSummary.faces.find((face) => face.faceId === activeFaceAssignment.faceId) ?? null;
-  }, [activeFaceSummary, photoInspectorState.activeFaceAssignment]);
+    const directMatch = summary.faces.find((face) => face.faceId === activeFaceAssignment.faceId) ?? null;
+    if (directMatch) {
+      return {
+        photo: summary,
+        face: directMatch
+      };
+    }
+
+    if (
+      typeof activeFaceAssignment.faceIndex === "number"
+      && activeFaceAssignment.faceIndex >= 0
+      && activeFaceAssignment.faceIndex < summary.faces.length
+    ) {
+      return {
+        photo: summary,
+        face: summary.faces[activeFaceAssignment.faceIndex]
+      };
+    }
+
+    return null;
+  }, [photoDetailById, photoInspectorState.activeFaceAssignment, photoSummaryById]);
 
   function handleFaceUpdated(faceId: string, personId: string) {
     const activeFaceAssignment = photoInspectorState.activeFaceAssignment;
     if (!activeFaceAssignment) {
       return;
     }
+
+    const matchedPerson = peopleDirectory.find((person) => person.person_id === personId) ?? null;
+    setFaceAssignmentOverridesByPhotoId((current) => ({
+      ...current,
+      [activeFaceAssignment.photoId]: {
+        ...(current[activeFaceAssignment.photoId] ?? {}),
+        [faceId]: {
+          personId,
+          displayName: matchedPerson?.display_name ?? null
+        }
+      }
+    }));
 
     setPhotoDetailById((current) => {
       const detail = current[activeFaceAssignment.photoId];
@@ -749,6 +910,81 @@ export function LibraryRoutePage() {
     setPage(nextPage);
   }
 
+  async function handleAddToAlbum(albumId: string, photoIds: string[], sourcePhotoId: string) {
+    if (isAlbumActionSubmitting) {
+      return;
+    }
+
+    const userId = resolveInitialSessionIdentity()?.userId ?? null;
+    setIsAlbumActionSubmitting(true);
+    setAlbumActionResultByPhotoId((current) => {
+      const next = { ...current };
+      delete next[sourcePhotoId];
+      return next;
+    });
+    try {
+      const result = await addPhotosToAlbum(albumId, photoIds, userId);
+      const details: string[] = [];
+      if (result.duplicate_photo_ids.length > 0) {
+        details.push(`${result.duplicate_photo_ids.length} already in album`);
+      }
+      if (result.missing_photo_ids.length > 0) {
+        details.push(`${result.missing_photo_ids.length} missing`);
+      }
+      const summary = `Added ${result.added_photo_ids.length} photo${result.added_photo_ids.length === 1 ? "" : "s"} to album.`;
+      setAlbumActionResultByPhotoId((current) => ({
+        ...current,
+        [sourcePhotoId]: details.length > 0 ? `${summary} (${details.join(", ")}).` : summary
+      }));
+    } catch (caughtError: unknown) {
+      setAlbumActionResultByPhotoId((current) => ({
+        ...current,
+        [sourcePhotoId]:
+          caughtError instanceof Error ? caughtError.message : "Could not add photos to album."
+      }));
+    } finally {
+      setIsAlbumActionSubmitting(false);
+    }
+  }
+
+  async function handleCreateAlbumAndAdd(name: string, photoIds: string[], sourcePhotoId: string) {
+    if (isAlbumActionSubmitting) {
+      return;
+    }
+
+    const userId = resolveInitialSessionIdentity()?.userId ?? null;
+    setIsAlbumActionSubmitting(true);
+    setAlbumActionResultByPhotoId((current) => {
+      const next = { ...current };
+      delete next[sourcePhotoId];
+      return next;
+    });
+    try {
+      const created = await createAlbum({ name, kind: "editable" }, userId);
+      await addPhotosToAlbum(created.album_id, photoIds, userId);
+      setAlbumOptions((current) => {
+        if (current.some((option) => option.albumId === created.album_id)) {
+          return current;
+        }
+        return [...current, { albumId: created.album_id, albumName: created.name }].sort((left, right) =>
+          left.albumName.localeCompare(right.albumName, "en-US")
+        );
+      });
+      setAlbumActionResultByPhotoId((current) => ({
+        ...current,
+        [sourcePhotoId]: `Created album "${created.name}" and added ${photoIds.length} photo${photoIds.length === 1 ? "" : "s"}.`
+      }));
+    } catch (caughtError: unknown) {
+      setAlbumActionResultByPhotoId((current) => ({
+        ...current,
+        [sourcePhotoId]:
+          caughtError instanceof Error ? caughtError.message : "Could not create album."
+      }));
+    } finally {
+      setIsAlbumActionSubmitting(false);
+    }
+  }
+
   return (
     <section aria-labelledby="page-title" className="page browse-page">
       <LibraryRouteHeader
@@ -908,6 +1144,7 @@ export function LibraryRoutePage() {
         selectionState={selectionState}
         activeScopeCount={activeScopeCount}
         areFaceBoxesVisible={photoInspectorState.areFaceBoxesVisible}
+        areAlbumInteractionsVisible={isAlbumInteractionEnabled}
         onSetScope={(scope) =>
           dispatchSelection({
             type: "setScope",
@@ -921,6 +1158,12 @@ export function LibraryRoutePage() {
             type: "setFaceBoxesVisible",
             visible
           });
+        }}
+        onAlbumInteractionsVisibleChange={(visible) => {
+          setIsAlbumInteractionEnabled(visible);
+          if (!visible) {
+            setAlbumActionResultByPhotoId({});
+          }
         }}
       />
 
@@ -972,17 +1215,28 @@ export function LibraryRoutePage() {
         {!error && !isLoading && photos.length > 0 ? (
           <LibraryPhotoGrid
             photos={photos}
+            photoSummaryById={photoSurfaceSummaryById}
             locationSearch={location.search}
             selectionRouteState={selectionRouteState}
             libraryViewRouteState={libraryViewRouteState}
             selectedPhotoIds={selectionState.selectedPhotoIds}
             faceBoxesVisible={photoInspectorState.areFaceBoxesVisible}
             activeMetadataPhotoId={photoInspectorState.activeMetadataPhotoId}
+            albumAssignmentWidgetsVisible={isAlbumInteractionEnabled}
+            albumTargets={albumTargets}
+            albumActionResultByPhotoId={albumActionResultByPhotoId}
+            isAlbumActionSubmitting={isAlbumActionSubmitting}
             onTogglePhotoSelection={(photoId) => {
               dispatchSelection({
                 type: "togglePhotoSelection",
                 photoId
               });
+            }}
+            onAddSinglePhotoToAlbum={(photoId, albumId) => {
+              void handleAddToAlbum(albumId, [photoId], photoId);
+            }}
+            onCreateAlbumAndAddSinglePhoto={(photoId, name) => {
+              void handleCreateAlbumAndAdd(name, [photoId], photoId);
             }}
             onOpenMetadata={(photoId, sourceSurfaceId) => {
               dispatchPhotoInspector({
@@ -991,11 +1245,12 @@ export function LibraryRoutePage() {
                 sourceSurfaceId
               });
             }}
-            onOpenFace={(photoId, faceId, sourceSurfaceId) => {
+            onOpenFace={(photoId, faceId, sourceSurfaceId, faceIndex) => {
               dispatchPhotoInspector({
                 type: "openFaceAssignment",
                 photoId,
                 faceId,
+                faceIndex,
                 sourceSurfaceId
               });
             }}
@@ -1037,9 +1292,9 @@ export function LibraryRoutePage() {
       />
 
       <FaceAssignmentModal
-        isOpen={activeFace !== null}
-        photo={activeFaceSummary}
-        face={activeFace}
+        isOpen={activeFaceContext !== null}
+        photo={activeFaceContext?.photo ?? null}
+        face={activeFaceContext?.face ?? null}
         people={peopleDirectory.map((person) => ({
           person_id: person.person_id,
           display_name: person.display_name

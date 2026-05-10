@@ -29,6 +29,7 @@ interface UseLibraryResultsArgs {
   pageSize: number;
   dateRangeError: string | null;
   locationError: string | null;
+  includeFaceInfo: boolean;
 }
 
 export function useLibraryResults({
@@ -47,6 +48,7 @@ export function useLibraryResults({
   pageSize,
   dateRangeError,
   locationError,
+  includeFaceInfo,
 }: UseLibraryResultsArgs) {
   const [photos, setPhotos] = useState<LibraryPhoto[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -90,7 +92,8 @@ export function useLibraryResults({
       pathHintFilters,
       sortDirection,
       requestOffset,
-      pageSize
+      pageSize,
+      includeFaceInfo
     )
       .then((payload) => {
         if (controller.signal.aborted) {
@@ -133,6 +136,7 @@ export function useLibraryResults({
     sortDirection,
     suggestionConfidenceMinDraft,
     toDate,
+    includeFaceInfo,
   ]);
 
   useEffect(() => {

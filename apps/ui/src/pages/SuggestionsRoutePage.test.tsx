@@ -245,8 +245,8 @@ describe("SuggestionsRoutePage", () => {
     const overlay = screen.getByRole("list", {
       name: "Detected face regions"
     });
-    expect(within(overlay).getByText("1")).toBeInTheDocument();
-    expect(within(overlay).getByText("2")).toBeInTheDocument();
+    expect(within(overlay).getByText("Alex")).toBeInTheDocument();
+    expect(within(overlay).getByText("Blair")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Previous page" })).toHaveAttribute(
       "aria-disabled",
       "true"
@@ -254,6 +254,65 @@ describe("SuggestionsRoutePage", () => {
     expect(screen.getByRole("button", { name: "Page 1" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("button", { name: "Page 2" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next page" })).toHaveAttribute("aria-disabled", "false");
+  });
+
+  it("supports toggling shared interaction surfaces and opens face assignment from overlay", async () => {
+    const user = userEvent.setup();
+
+    installFetchRoutes(fetchMock, {
+      "GET /api/v1/people": reply(buildPeoplePayload()),
+      "GET /api/v1/albums": reply([]),
+      "GET /api/v1/suggestions/faces?page=1&page_size=24": reply(
+        buildSuggestionsPayload({
+          items: [
+            {
+              photo_id: "photo-1",
+              path: "/photos/photo-1.jpg",
+              thumbnail: {
+                mime_type: "image/jpeg",
+                width: 64,
+                height: 48,
+                data_base64: "ZmFrZS10aHVtYi1ieXRlcw=="
+              },
+              faces: [
+                {
+                  face_id: "face-1",
+                  bbox_x: 10,
+                  bbox_y: 10,
+                  bbox_w: 20,
+                  bbox_h: 20,
+                  top_suggestion: {
+                    person_id: "person-1",
+                    display_name: "Alex",
+                    confidence: 0.97
+                  }
+                }
+              ]
+            }
+          ]
+        })
+      )
+    });
+
+    renderPage();
+
+    expect(await screen.findByLabelText("Enable face assignment interactions")).toBeChecked();
+    expect(screen.getByLabelText("Enable album interactions")).toBeChecked();
+    expect(screen.getByRole("region", { name: "Album actions" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Open face 1 actions" }));
+    expect(await screen.findByRole("dialog", { name: "Face assignment" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Close face assignment modal" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Face assignment" })).not.toBeInTheDocument();
+    });
+
+    await user.click(screen.getByLabelText("Enable album interactions"));
+    expect(screen.queryByRole("region", { name: "Album actions" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Enable face assignment interactions"));
+    expect(screen.queryByRole("button", { name: "Open face 1 actions" })).not.toBeInTheDocument();
   });
 
   it("keeps photo selection separate from selected suggestion faces", async () => {

@@ -8,6 +8,7 @@ type SuggestionFaceRowProps = {
   isLoading: boolean;
   isConfirming: boolean;
   isFaceActionInFlight: boolean;
+  isInteractionsDisabled: boolean;
   choiceDraft: string;
   onToggleSelected: (faceId: string) => void;
   onChoiceChange: (faceId: string, value: string) => void;
@@ -23,6 +24,7 @@ export function SuggestionFaceRow({
   isLoading,
   isConfirming,
   isFaceActionInFlight,
+  isInteractionsDisabled,
   choiceDraft,
   onToggleSelected,
   onChoiceChange,
@@ -57,7 +59,7 @@ export function SuggestionFaceRow({
           aria-label={`Confirm suggestion for face ${face.face_id}`}
           checked={isSelected}
           onChange={() => onToggleSelected(face.face_id)}
-          disabled={isLoading || isConfirming || isFaceActionInFlight}
+          disabled={isLoading || isConfirming || isFaceActionInFlight || isInteractionsDisabled}
         />
         <span>{`Face ${faceNumber}`}</span>
         <input
@@ -66,7 +68,7 @@ export function SuggestionFaceRow({
           onChange={(event) => {
             onChoiceChange(face.face_id, event.currentTarget.value);
           }}
-          disabled={isLoading || isConfirming || isFaceActionInFlight}
+          disabled={isLoading || isConfirming || isFaceActionInFlight || isInteractionsDisabled}
           aria-label={`Choose suggestion for face ${face.face_id}`}
           className="suggestions-face-choice-input"
         />
@@ -86,7 +88,7 @@ export function SuggestionFaceRow({
           type="button"
           className="suggestions-face-confirm-button"
           onClick={() => onConfirmFace(face)}
-          disabled={isLoading || isConfirming || isFaceActionInFlight}
+          disabled={isLoading || isConfirming || isFaceActionInFlight || isInteractionsDisabled}
         >
           Confirm face
         </button>
@@ -94,7 +96,7 @@ export function SuggestionFaceRow({
           type="button"
           className="suggestions-face-secondary-button"
           onClick={() => onMarkUnknown(face)}
-          disabled={isLoading || isConfirming || isFaceActionInFlight}
+          disabled={isLoading || isConfirming || isFaceActionInFlight || isInteractionsDisabled}
           aria-label={`Mark face ${face.face_id} as unknown`}
         >
           Mark unknown
@@ -103,7 +105,7 @@ export function SuggestionFaceRow({
           type="button"
           className="suggestions-face-secondary-button"
           onClick={() => onDismissFalsePositive(face)}
-          disabled={isLoading || isConfirming || isFaceActionInFlight}
+          disabled={isLoading || isConfirming || isFaceActionInFlight || isInteractionsDisabled}
           aria-label={`Discard face ${face.face_id} as false positive`}
         >
           False positive

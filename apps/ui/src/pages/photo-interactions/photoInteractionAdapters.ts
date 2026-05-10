@@ -11,6 +11,10 @@ import type {
 type FaceLike = {
   face_id?: string;
   person_id?: string | null;
+  assigned_person?: {
+    person_id: string;
+    display_name: string;
+  } | null;
   bbox_x?: number | null;
   bbox_y?: number | null;
   bbox_w?: number | null;
@@ -101,9 +105,17 @@ function adaptSuggestions(face: FaceLike): PhotoFaceSuggestion[] {
 function adaptFace(face: FaceLike, fallbackFaceId: string): PhotoFace {
   const personId = face.person_id ?? null;
   const labelSource = face.label_source ?? null;
+  const assignedPerson =
+    face.assigned_person && typeof face.assigned_person.person_id === "string"
+      ? {
+          personId: face.assigned_person.person_id,
+          displayName: face.assigned_person.display_name,
+        }
+      : null;
   return {
     faceId: face.face_id ?? fallbackFaceId,
     personId,
+    assignedPerson,
     bbox: {
       x: face.bbox_x ?? null,
       y: face.bbox_y ?? null,

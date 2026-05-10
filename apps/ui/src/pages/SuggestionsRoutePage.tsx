@@ -7,6 +7,9 @@ import {
   fetchAlbums
 } from "./library/libraryRouteApi";
 import { AlbumActionSurface } from "./photo-interactions/AlbumActionSurface";
+import { FaceAssignmentModal } from "./photo-interactions/FaceAssignmentModal";
+import { PhotoMetadataFlyout } from "./photo-interactions/PhotoMetadataFlyout";
+import { adaptSuggestionPhoto } from "./photo-interactions/photoInteractionAdapters";
 import {
   DEFAULT_PHOTO_INSPECTOR_STATE,
   photoInspectorReducer
@@ -16,6 +19,8 @@ import {
   photoSelectionReducer
 } from "./photo-interactions/photoSelectionState";
 import type { AlbumTarget } from "./photo-interactions/photoInteractionTypes";
+import { fetchPhotoDetail } from "./photo-detail/photoDetailApi";
+import type { PhotoDetailPayload } from "./photo-detail/photoDetailTypes";
 import { BrowsePagination } from "./shared/BrowsePagination";
 
 import { SuggestionsFilters } from "./suggestions/SuggestionsFilters";
@@ -65,6 +70,11 @@ export function SuggestionsRoutePage() {
   const [albumTargets, setAlbumTargets] = useState<AlbumTarget[]>([]);
   const [isAlbumActionSubmitting, setIsAlbumActionSubmitting] = useState(false);
   const [albumActionResultMessage, setAlbumActionResultMessage] = useState<string | null>(null);
+  const [isFaceInteractionEnabled, setIsFaceInteractionEnabled] = useState(true);
+  const [isAlbumInteractionEnabled, setIsAlbumInteractionEnabled] = useState(true);
+  const [photoDetailById, setPhotoDetailById] = useState<Record<string, PhotoDetailPayload>>({});
+  const [photoDetailErrorById, setPhotoDetailErrorById] = useState<Record<string, string>>({});
+  const [loadingPhotoDetailId, setLoadingPhotoDetailId] = useState<string | null>(null);
   const sessionIdentity = resolveInitialSessionIdentity();
   const sessionUserId = sessionIdentity?.userId ?? null;
 
@@ -161,6 +171,62 @@ export function SuggestionsRoutePage() {
     };
   }, [sessionUserId]);
 
+  useEffect(() => {
+    if (isFaceInteractionEnabled) {
+      return;
+    }
+    dispatchPhotoInspector({ type: "closeFaceAssignment" });
+  }, [isFaceInteractionEnabled]);
+
+  const activeInspectorPhotoId =
+    photoInspectorState.activeMetadataPhotoId ?? photoInspectorState.activeFaceAssignment?.photoId ?? null;
+
+  useEffect(() => {
+    if (!activeInspectorPhotoId || photoDetailById[activeInspectorPhotoId]) {
+      return;
+    }
+    let canceled = false;
+    setLoadingPhotoDetailId(activeInspectorPhotoId);
+    setPhotoDetailErrorById((current) => {
+      if (!current[activeInspectorPhotoId]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[activeInspectorPhotoId];
+      return next;
+    });
+
+    void fetchPhotoDetail(activeInspectorPhotoId)
+      .then((detailPayload) => {
+        if (!canceled) {
+          setPhotoDetailById((current) => ({
+            ...current,
+            [activeInspectorPhotoId]: detailPayload
+          }));
+        }
+      })
+      .catch((caughtError: unknown) => {
+        if (!canceled) {
+          setPhotoDetailErrorById((current) => ({
+            ...current,
+            [activeInspectorPhotoId]:
+              caughtError instanceof Error ? caughtError.message : "Could not load photo detail."
+          }));
+        }
+      })
+      .finally(() => {
+        if (!canceled) {
+          setLoadingPhotoDetailId((current) => (
+            current === activeInspectorPhotoId ? null : current
+          ));
+        }
+      });
+
+    return () => {
+      canceled = true;
+    };
+  }, [activeInspectorPhotoId, photoDetailById]);
+
   const currentPageFaceIdsOrdered = useMemo(() => flattenFaceIds(payload?.items ?? []), [payload]);
   const currentPagePhotoIdsOrdered = useMemo(
     () => (payload?.items ?? []).map((item) => item.photo_id),
@@ -175,6 +241,62 @@ export function SuggestionsRoutePage() {
     const selected = selectedFaceIds;
     return currentPageFaceIdsOrdered.filter((faceId) => selected.has(faceId));
   }, [currentPageFaceIdsOrdered, selectedFaceIds]);
+
+  const summaryByPhotoId = useMemo(() => {
+    const summaries = new Map<string, ReturnType<typeof adaptSuggestionPhoto>>();
+    for (const item of payload?.items ?? []) {
+      summaries.set(item.photo_id, adaptSuggestionPhoto(item));
+    }
+    return summaries;
+  }, [payload?.items]);
+
+  const activeMetadataSummary = useMemo(() => {
+    const photoId = photoInspectorState.activeMetadataPhotoId;
+    if (!photoId) {
+      return null;
+    }
+    const summary = summaryByPhotoId.get(photoId);
+    if (summary) {
+      return {
+        photoId: summary.photoId,
+        title: summary.title,
+        path: summary.path,
+        thumbnail: summary.media.thumbnail
+      };
+    }
+    return {
+      photoId,
+      title: photoId,
+      path: photoId,
+      thumbnail: null
+    };
+  }, [photoInspectorState.activeMetadataPhotoId, summaryByPhotoId]);
+
+  const activeMetadataDetail = photoInspectorState.activeMetadataPhotoId
+    ? photoDetailById[photoInspectorState.activeMetadataPhotoId] ?? null
+    : null;
+  const activeMetadataError = photoInspectorState.activeMetadataPhotoId
+    ? photoDetailErrorById[photoInspectorState.activeMetadataPhotoId] ?? null
+    : null;
+  const isLoadingMetadataDetail =
+    photoInspectorState.activeMetadataPhotoId !== null
+    && loadingPhotoDetailId === photoInspectorState.activeMetadataPhotoId;
+
+  const activeFaceSummary = useMemo(() => {
+    const activeFaceAssignment = photoInspectorState.activeFaceAssignment;
+    if (!activeFaceAssignment || !isFaceInteractionEnabled) {
+      return null;
+    }
+    return summaryByPhotoId.get(activeFaceAssignment.photoId) ?? null;
+  }, [photoInspectorState.activeFaceAssignment, isFaceInteractionEnabled, summaryByPhotoId]);
+
+  const activeFace = useMemo(() => {
+    const activeFaceAssignment = photoInspectorState.activeFaceAssignment;
+    if (!activeFaceAssignment || !activeFaceSummary) {
+      return null;
+    }
+    return activeFaceSummary.faces.find((face) => face.faceId === activeFaceAssignment.faceId) ?? null;
+  }, [activeFaceSummary, photoInspectorState.activeFaceAssignment]);
 
   const excludedPeople = useMemo(
     () => peopleDirectory.filter((person) => excludedPersonIdSet.has(person.person_id)),
@@ -319,16 +441,61 @@ export function SuggestionsRoutePage() {
             onClick={() => {
               void handleConfirmFaces();
             }}
-            disabled={isLoading || isConfirming || selectedFaceIdsOrdered.length === 0}
+            disabled={
+              isLoading
+              || isConfirming
+              || !isFaceInteractionEnabled
+              || selectedFaceIdsOrdered.length === 0
+            }
           >
             Confirm faces
           </button>
         </div>
       </div>
 
-      {isLoading ? <p role="status">Loading suggestions workflow.</p> : null}
+      <section className="suggestions-interaction-toggles" aria-label="Interaction toggles">
+        <label className="suggestions-toggle">
+          <input
+            type="checkbox"
+            checked={isFaceInteractionEnabled}
+            onChange={(event) => {
+              setIsFaceInteractionEnabled(event.currentTarget.checked);
+            }}
+            aria-label="Enable face assignment interactions"
+          />
+          Enable face assignment interactions
+        </label>
+        <label className="suggestions-toggle">
+          <input
+            type="checkbox"
+            checked={photoInspectorState.areFaceBoxesVisible}
+            disabled={!isFaceInteractionEnabled}
+            onChange={(event) => {
+              dispatchPhotoInspector({
+                type: "setFaceBoxesVisible",
+                visible: event.currentTarget.checked
+              });
+            }}
+            aria-label="Show face boxes on all photos"
+          />
+          Show face boxes on all photos
+        </label>
+        <label className="suggestions-toggle">
+          <input
+            type="checkbox"
+            checked={isAlbumInteractionEnabled}
+            onChange={(event) => {
+              setIsAlbumInteractionEnabled(event.currentTarget.checked);
+            }}
+            aria-label="Enable album interactions"
+          />
+          Enable album interactions
+        </label>
+      </section>
+
+      {isLoading ? <p className="suggestions-status" role="status">Loading suggestions workflow.</p> : null}
       {!isLoading && error ? (
-        <div>
+        <div className="suggestions-error">
           <p>{error}</p>
           <button
             type="button"
@@ -340,20 +507,22 @@ export function SuggestionsRoutePage() {
           </button>
         </div>
       ) : null}
-      {message ? <p>{message}</p> : null}
+      {message ? <p className="suggestions-message">{message}</p> : null}
 
-      <AlbumActionSurface
-        albums={albumTargets}
-        selectedPhotoIds={selectedPhotoIdsOrdered}
-        isSubmitting={isAlbumActionSubmitting}
-        resultMessage={albumActionResultMessage}
-        onAddToAlbum={(albumId, photoIds) => {
-          void handleAddToAlbum(albumId, photoIds);
-        }}
-        onCreateAlbumAndAdd={(name, photoIds) => {
-          void handleCreateAlbumAndAdd(name, photoIds);
-        }}
-      />
+      {isAlbumInteractionEnabled ? (
+        <AlbumActionSurface
+          albums={albumTargets}
+          selectedPhotoIds={selectedPhotoIdsOrdered}
+          isSubmitting={isAlbumActionSubmitting}
+          resultMessage={albumActionResultMessage}
+          onAddToAlbum={(albumId, photoIds) => {
+            void handleAddToAlbum(albumId, photoIds);
+          }}
+          onCreateAlbumAndAdd={(name, photoIds) => {
+            void handleCreateAlbumAndAdd(name, photoIds);
+          }}
+        />
+      ) : null}
 
       {!isLoading && !error && payload && payload.items.length === 0 ? (
         <p className="suggestions-empty">No pending suggestions.</p>
@@ -364,7 +533,8 @@ export function SuggestionsRoutePage() {
           items={payload.items}
           selectedPhotoIds={selectionState.selectedPhotoIds}
           selectedFaceIds={selectedFaceIds}
-          faceBoxesVisible={photoInspectorState.areFaceBoxesVisible}
+          faceBoxesVisible={isFaceInteractionEnabled && photoInspectorState.areFaceBoxesVisible}
+          isFaceInteractionEnabled={isFaceInteractionEnabled}
           activeMetadataPhotoId={photoInspectorState.activeMetadataPhotoId}
           faceActionInFlightIds={faceActionInFlightIds}
           faceChoiceDrafts={faceChoiceDrafts}
@@ -395,6 +565,9 @@ export function SuggestionsRoutePage() {
             });
           }}
           onOpenFace={(face, photoId, sourceSurfaceId) => {
+            if (!isFaceInteractionEnabled) {
+              return;
+            }
             dispatchPhotoInspector({
               type: "openFaceAssignment",
               photoId,
@@ -410,12 +583,21 @@ export function SuggestionsRoutePage() {
             });
           }}
           onConfirmSingleFace={(face) => {
+            if (!isFaceInteractionEnabled) {
+              return;
+            }
             void handleConfirmSingleFace(face);
           }}
           onMarkFaceUnknown={(face) => {
+            if (!isFaceInteractionEnabled) {
+              return;
+            }
             void handleMarkFaceUnknown(face);
           }}
           onDismissFalsePositive={(face) => {
+            if (!isFaceInteractionEnabled) {
+              return;
+            }
             void handleDismissFalsePositive(face);
           }}
         />
@@ -428,6 +610,59 @@ export function SuggestionsRoutePage() {
         canGoNext={canGoNext}
         ariaLabel="Suggestion pagination"
         onPageChange={setPage}
+      />
+
+      <PhotoMetadataFlyout
+        isOpen={photoInspectorState.activeMetadataPhotoId !== null}
+        summary={activeMetadataSummary}
+        detail={activeMetadataDetail}
+        isLoadingDetail={isLoadingMetadataDetail}
+        detailError={activeMetadataError}
+        onClose={() => dispatchPhotoInspector({ type: "closeMetadata" })}
+        onRetry={() => {
+          const photoId = photoInspectorState.activeMetadataPhotoId;
+          if (!photoId) {
+            return;
+          }
+          setPhotoDetailById((current) => {
+            const next = { ...current };
+            delete next[photoId];
+            return next;
+          });
+        }}
+      />
+
+      <FaceAssignmentModal
+        isOpen={activeFace !== null}
+        photo={activeFaceSummary}
+        face={activeFace}
+        people={peopleDirectory.map((person) => ({
+          person_id: person.person_id,
+          display_name: person.display_name
+        }))}
+        onClose={() => dispatchPhotoInspector({ type: "closeFaceAssignment" })}
+        onFaceUpdated={() => {
+          dispatchPhotoInspector({ type: "closeFaceAssignment" });
+          void loadPage(page);
+        }}
+        onFaceDismissed={() => {
+          dispatchPhotoInspector({ type: "closeFaceAssignment" });
+          void loadPage(page);
+        }}
+        onPersonCreated={(person) => {
+          setPeopleDirectory((current) => {
+            if (current.some((candidate) => candidate.person_id === person.person_id)) {
+              return current;
+            }
+            return [
+              ...current,
+              {
+                person_id: person.person_id,
+                display_name: person.display_name
+              }
+            ];
+          });
+        }}
       />
     </section>
   );

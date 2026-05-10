@@ -31,6 +31,10 @@ export type PhotoFaceSuggestion = {
 export type PhotoFace = {
   faceId: string;
   personId: string | null;
+  assignedPerson?: {
+    personId: string;
+    displayName: string;
+  } | null;
   bbox: {
     x: number | null;
     y: number | null;

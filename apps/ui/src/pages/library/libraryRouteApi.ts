@@ -88,7 +88,8 @@ export async function fetchLibraryPage(
   pathHints: string[],
   sortDirection: SortDirection,
   offset: number,
-  pageLimit: number
+  pageLimit: number,
+  includeFaceInfo = false
 ): Promise<SearchResponsePayload> {
   const searchFilters = buildSearchFilters(
     fromDate,
@@ -104,6 +105,7 @@ export async function fetchLibraryPage(
   const requestBody = {
     ...(query ? { q: query } : {}),
     ...(searchFilters ? { filters: searchFilters } : {}),
+    ...(includeFaceInfo ? { include_face_info: true } : {}),
     sort: {
       by: "shot_ts",
       dir: sortDirection

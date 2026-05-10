@@ -17,7 +17,14 @@ type SearchResponsePayload = {
       filesize: number;
       people: string[];
       faces: Array<{
+        face_id?: string;
         person_id: string | null;
+        bbox_x?: number | null;
+        bbox_y?: number | null;
+        bbox_w?: number | null;
+        bbox_h?: number | null;
+        bbox_space_width?: number | null;
+        bbox_space_height?: number | null;
         label_source?: "human_confirmed" | "machine_suggested" | null;
         confidence?: number | null;
         suggestions?: Array<{
@@ -302,7 +309,402 @@ describe("LibraryRoutePage", () => {
     expect(screen.queryByRole("button", { name: "Review faces" })).not.toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Select photo photo-a" })).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Show face boxes on all photos" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", { name: "Enable album assignment widgets" })
+    ).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "View details" })).not.toBeInTheDocument();
+  });
+
+  it("shows shared album assignment widgets when enabled", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+
+      if (input === "/api/v1/albums") {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              album_id: "album-1",
+              name: "Family",
+              owner_user_id: "operator-1",
+              kind: "editable",
+              created_ts: "2026-05-08T12:00:00Z",
+              updated_ts: "2026-05-08T12:00:00Z",
+              item_count: 3,
+              saved_filter: null
+            }
+          ]
+        } as Response;
+      }
+
+      if (input === "/api/v1/albums/album-1/items") {
+        return {
+          ok: true,
+          json: async () => ({
+            album_id: "album-1",
+            added_photo_ids: ["photo-a"],
+            duplicate_photo_ids: [],
+            missing_photo_ids: []
+          })
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-a"])
+      } as Response;
+    });
+
+    renderLibraryAt("/library");
+    expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Album actions" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "Enable album assignment widgets" }));
+    expect(await screen.findByRole("region", { name: "Album actions" })).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Album target"), "album-1");
+    await user.click(screen.getByRole("button", { name: "Add 1 photo" }));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(([requestInput]) => String(requestInput) === "/api/v1/albums/album-1/items")
+      ).toBe(true);
+    });
+  });
+
+  it("shows face action widgets when face boxes are enabled", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+
+      const payload = buildPayload(["photo-a"]);
+      payload.hits.items[0].thumbnail = {
+        mime_type: "image/jpeg",
+        width: 120,
+        height: 80,
+        data_base64: "dGh1bWI="
+      };
+      payload.hits.items[0].faces = [
+        {
+          face_id: "face-1",
+          person_id: null
+        }
+      ];
+
+      return {
+        ok: true,
+        json: async () => payload
+      } as Response;
+    });
+
+    renderLibraryAt("/library");
+    expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open face 1 actions" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "Show face boxes on all photos" }));
+    expect(await screen.findByRole("button", { name: "Open face 1 actions" })).toBeInTheDocument();
+  });
+
+  it("does not fan out per-photo detail requests when face boxes are enabled", async () => {
+    const user = userEvent.setup();
+
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+
+      const payload = buildPayload(["photo-a", "photo-b"]);
+      payload.hits.items[0].thumbnail = {
+        mime_type: "image/jpeg",
+        width: 120,
+        height: 80,
+        data_base64: "dGh1bWI="
+      };
+      payload.hits.items[1].thumbnail = {
+        mime_type: "image/jpeg",
+        width: 120,
+        height: 80,
+        data_base64: "dGh1bWI="
+      };
+      payload.hits.items[0].faces = [{ face_id: "face-a", person_id: null, bbox_x: 1, bbox_y: 1, bbox_w: 10, bbox_h: 10 }];
+      payload.hits.items[1].faces = [{ face_id: "face-b", person_id: null, bbox_x: 1, bbox_y: 1, bbox_w: 10, bbox_h: 10 }];
+
+      return {
+        ok: true,
+        json: async () => payload
+      } as Response;
+    });
+
+    renderLibraryAt("/library");
+    expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "Show face boxes on all photos" }));
+
+    await screen.findAllByRole("button", { name: "Open face 1 actions" });
+
+    const detailCalls = fetchMock.mock.calls.filter(([requestInput]) => String(requestInput).startsWith("/api/v1/photos/"));
+    expect(detailCalls).toHaveLength(0);
+  });
+
+  it("requests search face regions when face boxes are enabled", async () => {
+    const user = userEvent.setup();
+
+    fetchMock.mockImplementation(async (input: string, init?: RequestInit) => {
+      if (input === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+
+      if (input === "/api/v1/search") {
+        return {
+          ok: true,
+          json: async () => buildPayload(["photo-a"])
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => []
+      } as Response;
+    });
+
+    renderLibraryAt("/library");
+    expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
+
+    const initialSearchCall = fetchMock.mock.calls.find(([requestInput]) => requestInput === "/api/v1/search");
+    expect(initialSearchCall).toBeDefined();
+    const initialSearchBody = JSON.parse(String(initialSearchCall?.[1]?.body ?? "{}")) as Record<string, unknown>;
+    expect(initialSearchBody.include_face_info).toBeUndefined();
+
+    await user.click(screen.getByRole("checkbox", { name: "Show face boxes on all photos" }));
+
+    await waitFor(() => {
+      const searchCalls = fetchMock.mock.calls.filter(([requestInput]) => requestInput === "/api/v1/search");
+      expect(searchCalls.length).toBeGreaterThan(1);
+    });
+
+    const latestSearchCall = fetchMock.mock.calls
+      .filter(([requestInput]) => requestInput === "/api/v1/search")
+      .at(-1);
+    const latestSearchBody = JSON.parse(String(latestSearchCall?.[1]?.body ?? "{}")) as Record<string, unknown>;
+    expect(latestSearchBody.include_face_info).toBe(true);
+  });
+
+  it("keeps face assignment modal open when detail face ids differ from library search payload", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+
+      if (input === "/api/v1/photos/photo-a") {
+        return {
+          ok: true,
+          json: async () => ({
+            ...buildPhotoDetailPayload("photo-a"),
+            faces: [
+              {
+                face_id: "face-real-1",
+                person_id: null,
+                bbox_x: 12,
+                bbox_y: 14,
+                bbox_w: 20,
+                bbox_h: 24,
+                bbox_space_width: 120,
+                bbox_space_height: 80,
+                label_source: null,
+                confidence: null,
+                model_version: null,
+                provenance: null,
+                label_recorded_ts: null,
+                suggestions: []
+              }
+            ],
+            thumbnail: {
+              mime_type: "image/jpeg",
+              width: 120,
+              height: 80,
+              data_base64: "dGh1bWI="
+            }
+          })
+        } as Response;
+      }
+
+      const payload = buildPayload(["photo-a"]);
+      payload.hits.items[0].thumbnail = {
+        mime_type: "image/jpeg",
+        width: 120,
+        height: 80,
+        data_base64: "dGh1bWI="
+      };
+      payload.hits.items[0].faces = [
+        {
+          person_id: null,
+          bbox_x: 0.1,
+          bbox_y: 0.2,
+          bbox_w: 0.2,
+          bbox_h: 0.2
+        }
+      ];
+
+      return {
+        ok: true,
+        json: async () => payload
+      } as Response;
+    });
+
+    renderLibraryAt("/library");
+    expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "Show face boxes on all photos" }));
+    await user.click(await screen.findByRole("button", { name: "Open face 1 actions" }));
+
+    expect(await screen.findByRole("dialog", { name: "Face assignment" })).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(([requestInput]) => String(requestInput) === "/api/v1/photos/photo-a")
+    ).toBe(false);
+    expect(screen.getByRole("dialog", { name: "Face assignment" })).toBeInTheDocument();
+  });
+
+  it("updates face label locally after saving assignment from the modal", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+
+      if (url === "/api/v1/people") {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              person_id: "person-1",
+              display_name: "Inez",
+              created_ts: "2026-05-09T12:00:00Z",
+              updated_ts: "2026-05-09T12:00:00Z"
+            }
+          ]
+        } as Response;
+      }
+
+      if (url === "/api/v1/faces/face-1/candidates?enforce_min_confidence=false") {
+        return {
+          ok: true,
+          json: async () => ({
+            face_id: "face-1",
+            candidates: [
+              {
+                person_id: "person-1",
+                display_name: "Inez",
+                matched_face_id: "face-7",
+                distance: 0.11,
+                confidence: 0.88
+              }
+            ],
+            suggestion_policy: {
+              decision: "review_needed",
+              review_threshold: 0.5,
+              auto_accept_threshold: 0.9,
+              top_candidate_confidence: 0.88
+            },
+            review_needed_suggestion: null,
+            auto_applied_assignment: null
+          })
+        } as Response;
+      }
+
+      if (url === "/api/v1/faces/face-1/assignments" && init?.method === "POST") {
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({
+            face_id: "face-1",
+            photo_id: "photo-a",
+            person_id: "person-1"
+          })
+        } as Response;
+      }
+
+      const payload = buildPayload(["photo-a"]);
+      payload.hits.items[0].thumbnail = {
+        mime_type: "image/jpeg",
+        width: 120,
+        height: 80,
+        data_base64: "dGh1bWI="
+      };
+      payload.hits.items[0].faces = [
+        {
+          face_id: "face-1",
+          person_id: null,
+          bbox_x: 10,
+          bbox_y: 10,
+          bbox_w: 30,
+          bbox_h: 30,
+          bbox_space_width: 120,
+          bbox_space_height: 80,
+          suggestions: [
+            {
+              person_id: "person-top",
+              display_name: "Alex",
+              rank: 1,
+              confidence: 0.92,
+              model_version: "recognition-v1",
+              provenance: null
+            }
+          ]
+        }
+      ];
+
+      return {
+        ok: true,
+        json: async () => payload
+      } as Response;
+    });
+
+    renderLibraryAt("/library");
+    expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "Show face boxes on all photos" }));
+    const openFaceButton = await screen.findByRole("button", { name: "Open face 1 actions" });
+    expect(openFaceButton).toHaveTextContent("Alex");
+
+    await user.click(openFaceButton);
+    expect(await screen.findByRole("dialog", { name: "Face assignment" })).toBeInTheDocument();
+
+    const assignPersonInput = screen.getByLabelText("Assign person");
+    await user.clear(assignPersonInput);
+    await user.type(assignPersonInput, "Inez");
+    await user.click(screen.getByRole("button", { name: "Save and close" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Face assignment" })).not.toBeInTheDocument();
+    });
+    expect(await screen.findByRole("button", { name: "Open face 1 actions" })).toHaveTextContent("Inez");
+    expect(
+      fetchMock.mock.calls.some(([requestInput]) => String(requestInput) === "/api/v1/photos/photo-a")
+    ).toBe(false);
   });
 
   it("deduplicates initial strict-mode service requests", async () => {
@@ -495,7 +897,7 @@ describe("LibraryRoutePage", () => {
     renderLibraryAt("/library");
     expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
 
-    expect(screen.getByText("Faces detected/assigned: 4/2 - 2 suggestions")).toBeInTheDocument();
+    expect(screen.queryByText(/Faces detected\/assigned:/i)).not.toBeInTheDocument();
     expect(screen.queryByText("People assigned (human)")).not.toBeInTheDocument();
     expect(screen.queryByText("Machine suggestions")).not.toBeInTheDocument();
   });

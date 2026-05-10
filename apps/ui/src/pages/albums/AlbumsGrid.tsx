@@ -34,7 +34,7 @@ interface AlbumsGridProps {
   onTogglePhotoSelected: (photoId: string) => void;
   onFaceBoxesVisibleChange: (visible: boolean) => void;
   onOpenMetadata: (photoId: string, sourceSurfaceId: string) => void;
-  onOpenFace: (photoId: string, faceId: string, sourceSurfaceId: string) => void;
+  onOpenFace: (photoId: string, faceId: string, sourceSurfaceId: string, faceIndex?: number) => void;
 }
 
 export function AlbumsGrid({

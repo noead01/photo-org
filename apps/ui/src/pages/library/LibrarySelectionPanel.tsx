@@ -8,18 +8,22 @@ interface LibrarySelectionPanelProps {
   selectionState: LibrarySelectionState;
   activeScopeCount: number;
   areFaceBoxesVisible: boolean;
+  areAlbumInteractionsVisible: boolean;
   onSetScope: (scope: LibrarySelectionScope) => void;
   onClearExplicitSelection: () => void;
   onFaceBoxesVisibleChange: (visible: boolean) => void;
+  onAlbumInteractionsVisibleChange: (visible: boolean) => void;
 }
 
 export function LibrarySelectionPanel({
   selectionState,
   activeScopeCount,
   areFaceBoxesVisible,
+  areAlbumInteractionsVisible,
   onSetScope,
   onClearExplicitSelection,
-  onFaceBoxesVisibleChange
+  onFaceBoxesVisibleChange,
+  onAlbumInteractionsVisibleChange
 }: LibrarySelectionPanelProps) {
   return (
     <section className="browse-selection-panel" aria-label="Library selection controls">
@@ -75,6 +79,16 @@ export function LibrarySelectionPanel({
           }}
         />
         Show face boxes on all photos
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          checked={areAlbumInteractionsVisible}
+          onChange={(event) => {
+            onAlbumInteractionsVisibleChange(event.currentTarget.checked);
+          }}
+        />
+        Enable album assignment widgets
       </label>
     </section>
   );

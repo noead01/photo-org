@@ -1,10 +1,13 @@
+import { AlbumActionSurface } from "../photo-interactions/AlbumActionSurface";
 import { adaptLibraryPhoto } from "../photo-interactions/photoInteractionAdapters";
 import { PhotoSurface } from "../photo-interactions/PhotoSurface";
+import type { AlbumTarget } from "../photo-interactions/photoInteractionTypes";
 import type { LibraryPhoto } from "./libraryRouteTypes";
 import type { serializeLibrarySelectionState } from "./librarySelection";
 
 interface LibraryPhotoGridProps {
   photos: LibraryPhoto[];
+  photoSummaryById: Map<string, ReturnType<typeof adaptLibraryPhoto>>;
   locationSearch: string;
   selectionRouteState: ReturnType<typeof serializeLibrarySelectionState>;
   selectedPhotoIds: Set<string>;
@@ -12,7 +15,13 @@ interface LibraryPhotoGridProps {
   faceBoxesVisible: boolean;
   activeMetadataPhotoId: string | null;
   onOpenMetadata: (photoId: string, sourceSurfaceId: string) => void;
-  onOpenFace: (photoId: string, faceId: string, sourceSurfaceId: string) => void;
+  onOpenFace: (photoId: string, faceId: string, sourceSurfaceId: string, faceIndex?: number) => void;
+  albumAssignmentWidgetsVisible: boolean;
+  albumTargets: AlbumTarget[];
+  albumActionResultByPhotoId: Record<string, string>;
+  isAlbumActionSubmitting: boolean;
+  onAddSinglePhotoToAlbum: (photoId: string, albumId: string) => void;
+  onCreateAlbumAndAddSinglePhoto: (photoId: string, albumName: string) => void;
   libraryViewRouteState: {
     sortDirection: "asc" | "desc";
     page: number;
@@ -41,48 +50,9 @@ function formatDisplayPath(path: string): string {
   return `.../${sourceRelativePath}`;
 }
 
-function summarizePhotoFaces(photo: LibraryPhoto): {
-  detectedFaces: number;
-  assignedFaces: number;
-  suggestedFaces: number;
-} {
-  const faces = photo.faces ?? [];
-  let assignedFaces = 0;
-  let suggestedFaces = 0;
-
-  faces.forEach((face) => {
-    if (face.person_id) {
-      assignedFaces += 1;
-    }
-
-    if (face.person_id === null) {
-      const hasSuggestions =
-        (face.suggestions?.length ?? 0) > 0
-        || (face.label_source === "machine_suggested" && typeof face.confidence === "number");
-      if (hasSuggestions) {
-        suggestedFaces += 1;
-      }
-    }
-  });
-
-  return {
-    detectedFaces: faces.length,
-    assignedFaces,
-    suggestedFaces
-  };
-}
-
-function formatFaceSummary(metrics: ReturnType<typeof summarizePhotoFaces>): string {
-  const base = `Faces detected/assigned: ${metrics.detectedFaces}/${metrics.assignedFaces}`;
-  if (metrics.suggestedFaces <= 0) {
-    return base;
-  }
-  const noun = metrics.suggestedFaces === 1 ? "suggestion" : "suggestions";
-  return `${base} - ${metrics.suggestedFaces} ${noun}`;
-}
-
 export function LibraryPhotoGrid({
   photos,
+  photoSummaryById,
   locationSearch,
   selectionRouteState,
   selectedPhotoIds,
@@ -91,14 +61,19 @@ export function LibraryPhotoGrid({
   faceBoxesVisible,
   activeMetadataPhotoId,
   onOpenMetadata,
-  onOpenFace
+  onOpenFace,
+  albumAssignmentWidgetsVisible,
+  albumTargets,
+  albumActionResultByPhotoId,
+  isAlbumActionSubmitting,
+  onAddSinglePhotoToAlbum,
+  onCreateAlbumAndAddSinglePhoto
 }: LibraryPhotoGridProps) {
   return (
     <ol className="browse-grid" aria-label="Photo gallery">
       {photos.map((photo) => {
-        const summary = adaptLibraryPhoto(photo);
+        const summary = photoSummaryById.get(photo.photo_id) ?? adaptLibraryPhoto(photo);
         const displayPath = formatDisplayPath(photo.path);
-        const faceSummary = formatFaceSummary(summarizePhotoFaces(photo));
         return (
           <li key={photo.photo_id}>
             <PhotoSurface
@@ -119,7 +94,22 @@ export function LibraryPhotoGrid({
               selectionLabel={`Select photo ${photo.photo_id}`}
               detailLabel={`Open details for ${photo.path}`}
               metadataLabel={`Show metadata for ${summary.title}`}
-              supportingText={faceSummary}
+              albumAssignmentWidget={
+                albumAssignmentWidgetsVisible ? (
+                  <AlbumActionSurface
+                    albums={albumTargets}
+                    selectedPhotoIds={[photo.photo_id]}
+                    isSubmitting={isAlbumActionSubmitting}
+                    resultMessage={albumActionResultByPhotoId[photo.photo_id] ?? null}
+                    onAddToAlbum={(albumId) => {
+                      onAddSinglePhotoToAlbum(photo.photo_id, albumId);
+                    }}
+                    onCreateAlbumAndAdd={(name) => {
+                      onCreateAlbumAndAddSinglePhoto(photo.photo_id, name);
+                    }}
+                  />
+                ) : null
+              }
               onToggleSelected={onTogglePhotoSelection}
               onOpenMetadata={onOpenMetadata}
               onOpenFace={onOpenFace}

@@ -509,6 +509,152 @@ class TestSearchServiceExecution:
         assert response.facets["date"]["years"] == []
         assert response.facets["duplicates"]["exact"] == 0
 
+    def test_given_include_face_info_when_executing_search_then_passes_flag_to_repository(self):
+        mock_repo = Mock()
+        service = SearchService(repo=mock_repo)
+
+        mock_repo.search_photos.return_value = ([], 0, None)
+        mock_repo.get_filtered_photo_ids.return_value = []
+        mock_repo.compute_facets.return_value = {}
+
+        request = SearchRequest(
+            filters=SearchFilters(),
+            sort=SortSpec(by="shot_ts", dir="desc"),
+            page=PageSpec(limit=50),
+            include_face_info=True,
+        )
+
+        service.execute(request)
+
+        mock_repo.search_photos.assert_called_once_with(
+            filters=request.filters,
+            sort=request.sort,
+            page=request.page,
+            text_query=None,
+            include_face_info=True,
+        )
+
+
+def test_search_repository_include_face_info_keeps_suggestions_for_unlabeled_faces_when_labeled_faces_exist(
+    tmp_path,
+):
+    database_url = f"sqlite:///{tmp_path / 'search-include-face-info-suggestions.db'}"
+    upgrade_database(database_url)
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 4, 3, tzinfo=UTC)
+
+    with engine.begin() as connection:
+        connection.execute(
+            insert(photos).values(
+                photo_id="photo-1",
+                path="seed-corpus/family/image_001.jpg",
+                sha256="a" * 64,
+                phash=None,
+                filesize=100,
+                ext="jpg",
+                created_ts=now,
+                modified_ts=now,
+                shot_ts=now,
+                shot_ts_source=None,
+                camera_make=None,
+                camera_model=None,
+                software=None,
+                orientation=None,
+                gps_latitude=None,
+                gps_longitude=None,
+                gps_altitude=None,
+                updated_ts=now,
+                deleted_ts=None,
+                faces_count=2,
+                faces_detected_ts=now,
+            )
+        )
+        connection.execute(
+            insert(people),
+            [
+                {"person_id": "person-1", "display_name": "Alex", "created_ts": now, "updated_ts": now},
+                {"person_id": "person-2", "display_name": "Blair", "created_ts": now, "updated_ts": now},
+            ],
+        )
+        connection.execute(
+            insert(faces),
+            [
+                {
+                    "face_id": "face-labeled",
+                    "photo_id": "photo-1",
+                    "person_id": "person-1",
+                    "bbox_x": 0,
+                    "bbox_y": 0,
+                    "bbox_w": 10,
+                    "bbox_h": 10,
+                    "bitmap": None,
+                    "embedding": None,
+                    "detector_name": "seed",
+                    "detector_version": "1",
+                    "provenance": None,
+                    "created_ts": now,
+                },
+                {
+                    "face_id": "face-unlabeled",
+                    "photo_id": "photo-1",
+                    "person_id": None,
+                    "bbox_x": 10,
+                    "bbox_y": 10,
+                    "bbox_w": 10,
+                    "bbox_h": 10,
+                    "bitmap": None,
+                    "embedding": None,
+                    "detector_name": "seed",
+                    "detector_version": "1",
+                    "provenance": None,
+                    "created_ts": now,
+                },
+            ],
+        )
+        connection.execute(
+            insert(face_labels).values(
+                face_label_id="label-1",
+                face_id="face-labeled",
+                person_id="person-1",
+                label_source="human_confirmed",
+                confidence=1.0,
+                model_version="recognition-v1",
+                provenance=None,
+                created_ts=now,
+                updated_ts=now,
+            )
+        )
+        connection.execute(
+                insert(face_suggestions).values(
+                    face_suggestion_id="suggestion-1",
+                    face_id="face-unlabeled",
+                    person_id="person-2",
+                    confidence=0.82,
+                    rank=1,
+                    scoring_version="hybrid-v1",
+                    model_version="recognition-v1",
+                    provenance=None,
+                    created_ts=now,
+                updated_ts=now,
+            )
+        )
+
+    with Session(engine) as session:
+        repo = PhotosRepository(session)
+        items, total, _ = repo.search_photos(
+            filters=SearchFilters(),
+            sort=SortSpec(by="shot_ts", dir="desc"),
+            page=PageSpec(limit=50),
+            include_face_info=True,
+        )
+
+    assert total == 1
+    assert len(items) == 1
+    faces_payload = items[0]["faces"]
+    unlabeled_face = next(face for face in faces_payload if face["face_id"] == "face-unlabeled")
+    assert len(unlabeled_face["suggestions"]) == 1
+    assert unlabeled_face["suggestions"][0]["display_name"] == "Blair"
+
 
 class TestSearchServiceFacetComputation:
     """Test facet computation coordination."""

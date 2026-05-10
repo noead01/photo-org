@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import "./photo-interactions.css";
 import type { AlbumTarget } from "./photoInteractionTypes";
 
 interface AlbumActionSurfaceProps {

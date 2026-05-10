@@ -64,6 +64,24 @@ function inferFaceOverlayCoordinateSpace(
     return explicitCoordinateSpace;
   }
 
+  // Some payloads provide normalized [0..1] bbox values.
+  const hasNormalizedCoordinateSpace = faces.some(
+    (face) =>
+      face.bbox_x !== null &&
+      face.bbox_y !== null &&
+      face.bbox_w !== null &&
+      face.bbox_h !== null &&
+      face.bbox_x >= 0 &&
+      face.bbox_y >= 0 &&
+      face.bbox_w > 0 &&
+      face.bbox_h > 0 &&
+      face.bbox_x + face.bbox_w <= 1 &&
+      face.bbox_y + face.bbox_h <= 1
+  );
+  if (hasNormalizedCoordinateSpace) {
+    return { width: 1, height: 1 };
+  }
+
   // Fallback for legacy records without explicit coordinate-space dimensions.
   const coordinateSpace = faces.reduce(
     (acc, face) => {

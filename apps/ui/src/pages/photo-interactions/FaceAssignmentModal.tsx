@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import "./photo-interactions.css";
 import {
   FaceLabelingApiError,
   assignFace,

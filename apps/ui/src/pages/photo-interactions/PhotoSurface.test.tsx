@@ -27,6 +27,34 @@ const photo: PhotoSummary = {
   defaultFaceBoxesVisible: false,
 };
 
+const photoWithFace: PhotoSummary = {
+  ...photo,
+  faces: [
+    {
+      faceId: "face-1",
+      personId: null,
+      bbox: {
+        x: 10,
+        y: 10,
+        width: 20,
+        height: 20,
+        spaceWidth: 100,
+        spaceHeight: 100,
+      },
+      labelSource: null,
+      confidence: null,
+      modelVersion: null,
+      provenance: null,
+      labelRecordedTs: null,
+      suggestions: [],
+      canAssign: true,
+      canCorrect: false,
+      canDismiss: true,
+      canConfirm: false,
+    },
+  ],
+};
+
 describe("PhotoSurface", () => {
   it("keeps selection, metadata, and detail navigation separate", async () => {
     const user = userEvent.setup();
@@ -79,5 +107,28 @@ describe("PhotoSurface", () => {
     );
 
     expect(screen.getByTestId("photo-surface-photo-1")).toHaveClass("photo-surface-active-metadata");
+  });
+
+  it("opens face actions from the face bbox overlay", async () => {
+    const user = userEvent.setup();
+    const onOpenFace = vi.fn();
+
+    render(
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <PhotoSurface
+          photo={photoWithFace}
+          selected={false}
+          faceBoxesVisible={true}
+          activeMetadata={false}
+          detailTo="/library/photo-1"
+          onToggleSelected={vi.fn()}
+          onOpenMetadata={vi.fn()}
+          onOpenFace={onOpenFace}
+        />
+      </MemoryRouter>
+    );
+
+    await user.click(screen.getByRole("button", { name: "Open face 1 actions" }));
+    expect(onOpenFace).toHaveBeenCalledWith("photo-1", "face-1", "photo-surface-photo-1", 0);
   });
 });
