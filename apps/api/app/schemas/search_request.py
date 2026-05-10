@@ -113,5 +113,6 @@ class SearchRequest(BaseModel):
     filters: SearchFilters = SearchFilters()
     sort: SortSpec = SortSpec()
     page: PageSpec = PageSpec()
+    include_face_info: bool = False
     vector: Optional[VectorSpec] = None
     similarity_k: Optional[int] = None

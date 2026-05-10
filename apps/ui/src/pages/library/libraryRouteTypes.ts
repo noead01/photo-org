@@ -13,6 +13,10 @@ export type LibraryPhoto = {
   faces?: Array<{
     face_id?: string;
     person_id: string | null;
+    assigned_person?: {
+      person_id: string;
+      display_name: string;
+    } | null;
     bbox_x?: number | null;
     bbox_y?: number | null;
     bbox_w?: number | null;

@@ -61,7 +61,7 @@ export PHOTO_ORG_COMPOSE_DATABASE_URL
 export PHOTO_ORG_UI_API_BASE_URL
 export PHOTO_ORG_API_CORS_ALLOWED_ORIGINS
 
-.PHONY: help sync lint test test-all ui-test ui-build test-e2e check pre-push migrate env-create compose-up compose-migrate compose-down compose-down-volumes compose-smoke compose-e2e-smoke print-compose-db-url print-compose-api-base-url print-compose-ui-base-url seed-corpus-check seed-corpus-load ensure-environment
+.PHONY: help sync lint test test-all ui-test ui-test-coverage ui-build test-e2e check pre-push migrate env-create compose-up compose-migrate compose-down compose-down-volumes compose-smoke compose-e2e-smoke print-compose-db-url print-compose-api-base-url print-compose-ui-base-url seed-corpus-check seed-corpus-load ensure-environment
 
 help:
 	@printf '%s\n' \
@@ -70,10 +70,11 @@ help:
 		'make test      - run the current schema/migration/ingest verification slice' \
 		'make test-all  - run the full apps/api pytest suite with the enforced coverage gate' \
 		'make ui-test   - run the apps/ui unit test suite' \
+		'make ui-test-coverage - run the apps/ui unit test suite with enforced coverage thresholds' \
 		'make ui-build  - run the apps/ui production build' \
 		'make test-e2e  - run the seed-corpus end-to-end verification slice' \
 		'make check     - run lint and the focused test slice' \
-		'make pre-push  - run lint, full API tests, plus UI test and UI build checks' \
+		'make pre-push  - run lint, full API tests, plus UI coverage validation and UI build checks' \
 		'make migrate   - apply database migrations through the repo-root wrapper' \
 		'make env-create PHOTO_ORG_ENVIRONMENT=<name> PHOTO_ORG_ENV_STORAGE_MODE=<persistent|ephemeral> - register a local environment with immutable storage mode' \
 		'make compose-up PHOTO_ORG_ENVIRONMENT=<name> - build and start the selected registered environment (postgres + api + ui)' \
@@ -100,6 +101,9 @@ test-all:
 ui-test:
 	npm --prefix apps/ui run test
 
+ui-test-coverage:
+	npm --prefix apps/ui run test:coverage
+
 ui-build:
 	npm --prefix apps/ui run build
 
@@ -108,7 +112,7 @@ test-e2e:
 
 check: lint test
 
-pre-push: lint test-all ui-test ui-build
+pre-push: lint test-all ui-test-coverage ui-build
 
 migrate:
 	./scripts/photo-org migrate

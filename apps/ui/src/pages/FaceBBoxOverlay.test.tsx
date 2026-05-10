@@ -58,6 +58,52 @@ describe("FaceBBoxOverlay", () => {
     expect(regions[0]!.heightPercent).toBeCloseTo(46.666666666666664, 8);
   });
 
+  it("interprets normalized coordinate-space values", () => {
+    const regions = buildFaceOverlayRegions(
+      [
+        {
+          face_id: "face-1",
+          person_id: null,
+          bbox_x: 0.1,
+          bbox_y: 0.2,
+          bbox_w: 0.3,
+          bbox_h: 0.4
+        }
+      ],
+      160,
+      120
+    );
+
+    expect(regions).toHaveLength(1);
+    expect(regions[0]!.leftPercent).toBeCloseTo(10, 8);
+    expect(regions[0]!.topPercent).toBeCloseTo(20, 8);
+    expect(regions[0]!.widthPercent).toBeCloseTo(30, 8);
+    expect(regions[0]!.heightPercent).toBeCloseTo(40, 8);
+  });
+
+  it("treats small numeric coordinates as thumbnail-space pixels when no explicit space is provided", () => {
+    const regions = buildFaceOverlayRegions(
+      [
+        {
+          face_id: "face-1",
+          person_id: null,
+          bbox_x: 10,
+          bbox_y: 20,
+          bbox_w: 30,
+          bbox_h: 40
+        }
+      ],
+      160,
+      120
+    );
+
+    expect(regions).toHaveLength(1);
+    expect(regions[0]!.leftPercent).toBeCloseTo(6.25, 8);
+    expect(regions[0]!.topPercent).toBeCloseTo(16.666666666666668, 8);
+    expect(regions[0]!.widthPercent).toBeCloseTo(18.75, 8);
+    expect(regions[0]!.heightPercent).toBeCloseTo(33.333333333333336, 8);
+  });
+
   it("renders region overlays and optional region content", () => {
     render(
       <FaceBBoxOverlay

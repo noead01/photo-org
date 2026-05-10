@@ -9,6 +9,7 @@ type SuggestionsGridProps = {
   selectedPhotoIds: Set<string>;
   selectedFaceIds: Set<string>;
   faceBoxesVisible: boolean;
+  isFaceInteractionEnabled: boolean;
   activeMetadataPhotoId: string | null;
   faceActionInFlightIds: Set<string>;
   faceChoiceDrafts: Map<string, string>;
@@ -29,6 +30,7 @@ export function SuggestionsGrid({
   selectedPhotoIds,
   selectedFaceIds,
   faceBoxesVisible,
+  isFaceInteractionEnabled,
   activeMetadataPhotoId,
   faceActionInFlightIds,
   faceChoiceDrafts,
@@ -75,6 +77,9 @@ export function SuggestionsGrid({
                 onToggleSelected={onTogglePhotoSelected}
                 onOpenMetadata={onOpenMetadata}
                 onOpenFace={(_photoId, faceId, sourceSurfaceId) => {
+                  if (!isFaceInteractionEnabled) {
+                    return;
+                  }
                   const selectedFace = faceById.get(faceId);
                   if (selectedFace) {
                     onOpenFace(selectedFace, photo.photo_id, sourceSurfaceId);
@@ -93,6 +98,7 @@ export function SuggestionsGrid({
                     isLoading={isLoading}
                     isConfirming={isConfirming}
                     isFaceActionInFlight={faceActionInFlightIds.has(face.face_id)}
+                    isInteractionsDisabled={!isFaceInteractionEnabled}
                     choiceDraft={faceChoiceDrafts.get(face.face_id) ?? face.top_suggestion.display_name}
                     onToggleSelected={onToggleFaceSelected}
                     onChoiceChange={onFaceChoiceChange}

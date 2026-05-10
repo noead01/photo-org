@@ -1,6 +1,7 @@
 export type ActiveFaceAssignmentTarget = {
   photoId: string;
   faceId: string;
+  faceIndex: number | null;
   sourceSurfaceId: string;
 };
 
@@ -22,7 +23,13 @@ export type PhotoInspectorAction =
   | { type: "openMetadata"; photoId: string; sourceSurfaceId: string }
   | { type: "closeMetadata" }
   | { type: "closeMetadataIfTargetMissing"; visiblePhotoIds: Set<string> }
-  | { type: "openFaceAssignment"; photoId: string; faceId: string; sourceSurfaceId: string }
+  | {
+      type: "openFaceAssignment";
+      photoId: string;
+      faceId: string;
+      faceIndex?: number | null;
+      sourceSurfaceId: string;
+    }
   | { type: "closeFaceAssignment" }
   | { type: "setFaceBoxesVisible"; visible: boolean };
 
@@ -64,6 +71,7 @@ export function photoInspectorReducer(
       activeFaceAssignment: {
         photoId: action.photoId,
         faceId: action.faceId,
+        faceIndex: action.faceIndex ?? null,
         sourceSurfaceId: action.sourceSurfaceId
       }
     };

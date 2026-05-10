@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import "./photo-interactions.css";
 import type { PhotoDetailPayload } from "../photo-detail/photoDetailTypes";
 import {
   MISSING_VALUE,

@@ -1,4 +1,6 @@
 import { Link } from "react-router-dom";
+import type { ReactNode } from "react";
+import "./photo-interactions.css";
 import { FaceOverlayLayer } from "./FaceOverlayLayer";
 import type { PhotoSummary } from "./photoInteractionTypes";
 
@@ -13,9 +15,10 @@ interface PhotoSurfaceProps {
   detailLabel?: string;
   metadataLabel?: string;
   supportingText?: string;
+  albumAssignmentWidget?: ReactNode;
   onToggleSelected: (photoId: string) => void;
   onOpenMetadata: (photoId: string, sourceSurfaceId: string) => void;
-  onOpenFace: (photoId: string, faceId: string, sourceSurfaceId: string) => void;
+  onOpenFace: (photoId: string, faceId: string, sourceSurfaceId: string, faceIndex?: number) => void;
 }
 
 export function buildPhotoSurfaceId(photoId: string): string {
@@ -33,6 +36,7 @@ export function PhotoSurface({
   detailLabel,
   metadataLabel,
   supportingText,
+  albumAssignmentWidget,
   onToggleSelected,
   onOpenMetadata,
   onOpenFace,
@@ -83,23 +87,31 @@ export function PhotoSurface({
           faces={photo.faces}
           thumbnailSize={thumbnail ? { width: thumbnail.width, height: thumbnail.height } : null}
           visible={faceBoxesVisible}
-          onOpenFace={(faceId) => onOpenFace(photo.photoId, faceId, surfaceId)}
+          onOpenFace={(faceId, faceIndex) => onOpenFace(photo.photoId, faceId, surfaceId, faceIndex)}
         />
       </div>
 
       <div className="photo-surface-body">
-        <p className="photo-surface-title" title={photo.path}>
-          {photo.title}
-        </p>
+        <div className="photo-surface-title-row">
+          <p className="photo-surface-title" title={photo.path}>
+            {photo.title}
+          </p>
+          <button
+            type="button"
+            className="photo-surface-metadata-icon-button"
+            onClick={() => onOpenMetadata(photo.photoId, surfaceId)}
+            aria-label={metadataLabel ?? `Show metadata for ${photo.title}`}
+            title={metadataLabel ?? `Show metadata for ${photo.title}`}
+          >
+            <span aria-hidden="true">(i)</span>
+          </button>
+        </div>
         {supportingText ? <p className="photo-surface-supporting-text">{supportingText}</p> : null}
-        <button
-          type="button"
-          className="photo-surface-metadata-button"
-          onClick={() => onOpenMetadata(photo.photoId, surfaceId)}
-          aria-label={metadataLabel ?? `Show metadata for ${photo.title}`}
-        >
-          Show metadata
-        </button>
+        {albumAssignmentWidget ? (
+          <div className="photo-surface-album-widget">
+            {albumAssignmentWidget}
+          </div>
+        ) : null}
       </div>
     </article>
   );

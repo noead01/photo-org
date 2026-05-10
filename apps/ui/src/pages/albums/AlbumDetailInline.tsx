@@ -13,7 +13,7 @@ interface AlbumDetailInlineProps {
   onTogglePhotoSelected: (photoId: string) => void;
   onFaceBoxesVisibleChange: (visible: boolean) => void;
   onOpenMetadata: (photoId: string, sourceSurfaceId: string) => void;
-  onOpenFace: (photoId: string, faceId: string, sourceSurfaceId: string) => void;
+  onOpenFace: (photoId: string, faceId: string, sourceSurfaceId: string, faceIndex?: number) => void;
 }
 
 function adaptAlbumItem(detail: AlbumDetail, item: AlbumDetail["items"][number]): PhotoSummary {

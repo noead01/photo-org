@@ -284,8 +284,14 @@ class PhotosRepository:
 
         return None
 
-    def search_photos(self, filters: SearchFilters, sort: SortSpec, page: PageSpec,
-                     text_query: Optional[str] = None) -> Tuple[List[Dict[str, Any]], int, Optional[str]]:
+    def search_photos(
+        self,
+        filters: SearchFilters,
+        sort: SortSpec,
+        page: PageSpec,
+        text_query: Optional[str] = None,
+        include_face_info: bool = False,
+    ) -> Tuple[List[Dict[str, Any]], int, Optional[str]]:
         """
         Main search method that handles all query building and execution.
         Returns: (items, total_count, next_cursor)
@@ -304,7 +310,7 @@ class PhotosRepository:
         rows = list(self.db.execute(query).all())
         
         # Hydrate results with related data
-        items = self._hydrate_items(rows)
+        items = self._hydrate_items(rows, include_face_info=include_face_info)
         
         # Generate next cursor
         next_cursor = self._generate_cursor(items, sort) if items else None
@@ -347,7 +353,7 @@ class PhotosRepository:
         if not rows:
             return None
 
-        item = self._hydrate_items(rows, include_face_regions=True)[0]
+        item = self._hydrate_items(rows, include_face_info=True)[0]
         row = rows[0]
         exif_attributes = self._load_photo_exif_attributes(photo_id)
         exif_unmapped_attributes = self._load_photo_exif_unmapped_attributes(photo_id)
@@ -835,7 +841,7 @@ class PhotosRepository:
             self.photos.c.shot_ts.is_(None),
         )
 
-    def _hydrate_items(self, rows: List[Row], *, include_face_regions: bool = False) -> List[Dict[str, Any]]:
+    def _hydrate_items(self, rows: List[Row], *, include_face_info: bool = False) -> List[Dict[str, Any]]:
         """Hydrate photo rows with related data (tags, people, faces)."""
         if not rows:
             return []
@@ -856,7 +862,7 @@ class PhotosRepository:
 
         # Load faces and people
         face_columns = [self.faces.c.photo_id, self.faces.c.face_id, self.faces.c.person_id]
-        if include_face_regions:
+        if include_face_info:
             face_columns.extend(
                 [
                     self.faces.c.bbox_x,
@@ -876,6 +882,15 @@ class PhotosRepository:
             .order_by(self.faces.c.photo_id, self.faces.c.face_id)
         ).all()
         face_ids = sorted({str(r.face_id) for r in face_rows if r.face_id is not None})
+        assigned_person_ids = sorted({str(r.person_id) for r in face_rows if r.person_id is not None})
+        person_display_name_by_id: Dict[str, str] = {}
+        if assigned_person_ids:
+            for row in self.db.execute(
+                select(self.people.c.person_id, self.people.c.display_name).where(
+                    self.people.c.person_id.in_(assigned_person_ids)
+                )
+            ).all():
+                person_display_name_by_id[str(row.person_id)] = str(row.display_name)
 
         provenance_map: Dict[tuple[str, str], Dict[str, Any]] = {}
         labeled_face_keys = {
@@ -884,7 +899,7 @@ class PhotosRepository:
             if r.person_id is not None and r.face_id is not None
         }
         if labeled_face_keys:
-            face_ids = sorted({face_id for face_id, _ in labeled_face_keys})
+            labeled_face_ids = sorted({face_id for face_id, _ in labeled_face_keys})
             label_rows = (
                 self.db.execute(
                     select(
@@ -898,7 +913,7 @@ class PhotosRepository:
                         self.face_labels.c.updated_ts,
                         self.face_labels.c.face_label_id,
                     )
-                    .where(self.face_labels.c.face_id.in_(face_ids))
+                    .where(self.face_labels.c.face_id.in_(labeled_face_ids))
                     .order_by(
                         self.face_labels.c.face_id,
                         self.face_labels.c.person_id,
@@ -985,8 +1000,28 @@ class PhotosRepository:
                 "confidence": provenance["confidence"] if provenance else None,
                 "suggestions": suggestion_map.get(str(r.face_id), []),
             }
-            if include_face_regions:
+            if include_face_info:
                 bbox_space_width, bbox_space_height = _extract_bbox_space_dimensions(r.provenance)
+                face_id = str(r.face_id) if r.face_id is not None else ""
+                suggestions = suggestion_map.get(face_id, [])
+                if (
+                    not suggestions
+                    and provenance is not None
+                    and r.person_id is not None
+                    and provenance.get("label_source") == "machine_suggested"
+                    and isinstance(provenance.get("confidence"), (float, int))
+                ):
+                    person_id = str(r.person_id)
+                    suggestions = [
+                        {
+                            "person_id": person_id,
+                            "display_name": person_display_name_by_id.get(person_id, person_id),
+                            "rank": 1,
+                            "confidence": float(provenance["confidence"]),
+                            "model_version": provenance.get("model_version"),
+                            "provenance": provenance.get("provenance"),
+                        }
+                    ]
                 face_item.update(
                     {
                         "face_id": r.face_id,
@@ -1001,9 +1036,15 @@ class PhotosRepository:
                         "model_version": provenance["model_version"] if provenance else None,
                         "provenance": provenance["provenance"] if provenance else None,
                         "label_recorded_ts": provenance["label_recorded_ts"] if provenance else None,
-                        "suggestions": suggestion_map.get(str(r.face_id), []),
+                        "suggestions": suggestions,
                     }
                 )
+                if r.person_id is not None:
+                    person_id = str(r.person_id)
+                    face_item["assigned_person"] = {
+                        "person_id": person_id,
+                        "display_name": person_display_name_by_id.get(person_id, person_id),
+                    }
             faces_map[r.photo_id].append(face_item)
 
         original_map = self._load_original_availability(pids)

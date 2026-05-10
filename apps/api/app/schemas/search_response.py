@@ -2,10 +2,26 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 
 
+class AssignedPersonHit(BaseModel):
+    person_id: str
+    display_name: str
+
+
 class FaceHit(BaseModel):
+    face_id: Optional[str] = None
     person_id: Optional[str] = None
+    assigned_person: Optional[AssignedPersonHit] = None
+    bbox_x: Optional[float] = None
+    bbox_y: Optional[float] = None
+    bbox_w: Optional[float] = None
+    bbox_h: Optional[float] = None
+    bbox_space_width: Optional[float] = None
+    bbox_space_height: Optional[float] = None
     label_source: Optional[str] = None
     confidence: Optional[float] = None
+    model_version: Optional[str] = None
+    provenance: Optional[Dict[str, Any]] = None
+    label_recorded_ts: Optional[str] = None
     suggestions: List[Dict[str, Any]] = []
 
 

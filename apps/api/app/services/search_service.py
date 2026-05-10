@@ -10,13 +10,18 @@ class SearchService:
 
     def execute(self, req: SearchRequest) -> SearchResponse:
         """Execute search based on the request and return SearchResponse."""
-        
+        search_kwargs: Dict[str, Any] = {
+            "filters": req.filters,
+            "sort": req.sort,
+            "page": req.page,
+            "text_query": req.q,
+        }
+        if req.include_face_info:
+            search_kwargs["include_face_info"] = True
+
         # Use repository for all data access
         items, total, next_cursor = self.repo.search_photos(
-            filters=req.filters,
-            sort=req.sort,
-            page=req.page,
-            text_query=req.q
+            **search_kwargs
         )
 
         # Get filtered photo IDs for facet computation
