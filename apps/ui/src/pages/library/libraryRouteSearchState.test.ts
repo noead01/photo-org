@@ -205,4 +205,32 @@ describe("libraryRouteSearchState", () => {
     });
     expect(filters?.faces).toEqual({ min_count: 0, max_count: 0 });
   });
+
+  it("parses and serializes face boxes and album widgets toggles", () => {
+    const state = parseLibraryUrlState("?showFaces=1&showAlbumWidgets=1");
+    expect(state.areFaceBoxesVisible).toBe(true);
+    expect(state.areAlbumAssignmentWidgetsVisible).toBe(true);
+
+    const query = buildLibraryUrlQuery({
+      queryChips: [],
+      fromDate: "",
+      toDate: "",
+      selectedPersonNames: [],
+      selectedAlbumIds: [],
+      personCertaintyMode: "human_only",
+      suggestionConfidenceMinDraft: "0.8",
+      locationRadius: null,
+      hasFacesFilter: null,
+      pathHintFilters: [],
+      facesFilter: state.facesFilter,
+      areFaceBoxesVisible: true,
+      areAlbumAssignmentWidgetsVisible: true,
+      page: 1,
+      pageSize: 60,
+      sortDirection: "desc"
+    });
+
+    expect(query).toContain("showFaces=1");
+    expect(query).toContain("showAlbumWidgets=1");
+  });
 });

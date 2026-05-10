@@ -95,4 +95,6 @@ export type SearchUrlState = {
   hasFacesFilter: boolean | null;
   pathHintFilters: string[];
   facesFilter: LibraryFacesFilterState;
+  areFaceBoxesVisible: boolean;
+  areAlbumAssignmentWidgetsVisible: boolean;
 };

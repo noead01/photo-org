@@ -28,6 +28,8 @@ interface UseLibraryUrlSyncArgs {
   hasFacesFilter: boolean | null;
   pathHintFilters: string[];
   facesFilter: LibraryFacesFilterState;
+  areFaceBoxesVisible: boolean;
+  areAlbumAssignmentWidgetsVisible: boolean;
   sortDirection: SortDirection;
   requestedPage: number;
   pageSize: number;
@@ -52,6 +54,8 @@ export function useLibraryUrlSync({
   hasFacesFilter,
   pathHintFilters,
   facesFilter,
+  areFaceBoxesVisible,
+  areAlbumAssignmentWidgetsVisible,
   sortDirection,
   requestedPage,
   pageSize,
@@ -119,6 +123,8 @@ export function useLibraryUrlSync({
       hasFacesFilter,
       pathHintFilters,
       facesFilter,
+      areFaceBoxesVisible,
+      areAlbumAssignmentWidgetsVisible,
       sortDirection,
       page: requestedPage,
       pageSize,
@@ -144,6 +150,8 @@ export function useLibraryUrlSync({
     committedQuery,
     fromDate,
     hasFacesFilter,
+    areFaceBoxesVisible,
+    areAlbumAssignmentWidgetsVisible,
     location.pathname,
     location.search,
     locationRadiusFilter,

@@ -366,6 +366,27 @@ describe("LibraryRoutePage", () => {
     expect(screen.getByRole("button", { name: "Done album filters" })).toBeInTheDocument();
   });
 
+  it("restores face boxes and album assignment toggles from URL", async () => {
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-a"])
+      } as Response;
+    });
+
+    renderLibraryAt("/library?showFaces=1&showAlbumWidgets=1");
+    await screen.findByRole("heading", { name: "Library", level: 1 });
+
+    expect(screen.getByRole("checkbox", { name: "Show face boxes on all photos" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Enable album assignment widgets" })).toBeChecked();
+  });
+
   it("reverts date edits on cancel", async () => {
     const user = userEvent.setup();
     fetchMock.mockImplementation(async (input: string) => {
@@ -1842,10 +1863,12 @@ describe("LibraryRoutePage", () => {
 
     await user.click(screen.getByRole("link", { name: "Back to library" }));
 
-    expect(await screen.findByRole("button", { name: "Page 3" })).toHaveAttribute(
-      "aria-current",
-      "page"
-    );
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Page 3" })).toHaveAttribute(
+        "aria-current",
+        "page"
+      );
+    });
     expect(screen.getByRole("combobox", { name: "Photos per page" })).toHaveValue("24");
   });
 

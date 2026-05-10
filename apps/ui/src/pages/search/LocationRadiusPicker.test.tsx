@@ -142,6 +142,7 @@ vi.mock("leaflet", () => {
     },
     marker(position: { lat: number; lng: number }, options: LayerOptions) {
       const layer = createLayer(options);
+      let markerPosition = { ...position };
       let marker: MockMarker;
       marker = {
         options: layer.options,
@@ -157,12 +158,15 @@ vi.mock("leaflet", () => {
           return marker;
         },
         getLatLng() {
-          return position;
+          return markerPosition;
         },
         fire(eventName, event) {
+          if (event?.latlng) {
+            markerPosition = { ...event.latlng };
+          }
           layer.fire(eventName, {
-            latlng: event?.latlng ?? position,
-            target: event?.target
+            latlng: event?.latlng ?? markerPosition,
+            target: marker
           });
         }
       };
@@ -206,5 +210,30 @@ describe("LocationRadiusPicker", () => {
     marker?.fire("mousedown");
 
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("updates radius only when drag ends", async () => {
+    const onChange = vi.fn();
+    render(<LocationRadiusPicker value={locationValue} onChange={onChange} />);
+
+    const leaflet = await import("leaflet");
+    const mockedLeaflet = leaflet.default as unknown as { __mock: MockLeafletState };
+    const marker = mockedLeaflet.__mock.lastMarker;
+
+    expect(marker).not.toBeNull();
+    marker?.fire("drag", {
+      latlng: { lat: locationValue.latitude, lng: locationValue.longitude + 0.2 }
+    });
+    expect(onChange).not.toHaveBeenCalled();
+
+    marker?.fire("dragend", {
+      latlng: { lat: locationValue.latitude, lng: locationValue.longitude + 0.2 }
+    });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange.mock.calls[0]?.[0]).toMatchObject({
+      latitude: locationValue.latitude,
+      longitude: locationValue.longitude
+    });
+    expect(onChange.mock.calls[0]?.[0]?.radiusKm).toBeGreaterThan(0.1);
   });
 });

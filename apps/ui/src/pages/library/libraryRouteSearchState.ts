@@ -261,6 +261,8 @@ export function parseLibraryUrlState(search: string): SearchUrlState {
   const pathHintFilters = normalizePathHintFilters(params.getAll("pathHint"));
   const hasFacesFilter = parseNullableBooleanParam(params.get("hasFaces"));
   const facesFilter = parseFacesFilterState(params);
+  const areFaceBoxesVisible = parseBooleanFlag(params.get("showFaces"));
+  const areAlbumAssignmentWidgetsVisible = parseBooleanFlag(params.get("showAlbumWidgets"));
 
   const latitudeCandidate = (params.get("lat") ?? "").trim();
   const longitudeCandidate = (params.get("lng") ?? "").trim();
@@ -299,7 +301,9 @@ export function parseLibraryUrlState(search: string): SearchUrlState {
     locationRadius,
     hasFacesFilter,
     pathHintFilters,
-    facesFilter
+    facesFilter,
+    areFaceBoxesVisible,
+    areAlbumAssignmentWidgetsVisible
   };
 }
 
@@ -315,6 +319,8 @@ export function buildLibraryUrlQuery(state: {
   hasFacesFilter: boolean | null;
   pathHintFilters: string[];
   facesFilter?: LibraryFacesFilterState;
+  areFaceBoxesVisible?: boolean;
+  areAlbumAssignmentWidgetsVisible?: boolean;
   sortDirection: SortDirection;
   page: number;
   pageSize: number;
@@ -375,6 +381,12 @@ export function buildLibraryUrlQuery(state: {
     if (facesFilter.hasUnknownPerson) {
       params.set("facesUnknown", "1");
     }
+  }
+  if (state.areFaceBoxesVisible) {
+    params.set("showFaces", "1");
+  }
+  if (state.areAlbumAssignmentWidgetsVisible) {
+    params.set("showAlbumWidgets", "1");
   }
   if (state.sortDirection !== DEFAULT_SORT_DIRECTION) {
     params.set("sort", state.sortDirection);

@@ -198,7 +198,9 @@ export function LibraryRoutePage() {
         radiusDraft: parsedUrlState.radiusDraft,
         hasFacesFilter: parsedUrlState.hasFacesFilter,
         pathHintFilters: parsedUrlState.pathHintFilters,
-        facesFilter: parsedUrlState.facesFilter
+        facesFilter: parsedUrlState.facesFilter,
+        areFaceBoxesVisible: parsedUrlState.areFaceBoxesVisible,
+        areAlbumAssignmentWidgetsVisible: parsedUrlState.areAlbumAssignmentWidgetsVisible
       }),
     [parsedUrlState]
   );
@@ -240,7 +242,9 @@ export function LibraryRoutePage() {
   const [albumOptions, setAlbumOptions] = useState<Array<{ albumId: string; albumName: string }>>(
     []
   );
-  const [isAlbumInteractionEnabled, setIsAlbumInteractionEnabled] = useState(false);
+  const [isAlbumInteractionEnabled, setIsAlbumInteractionEnabled] = useState(
+    parsedUrlState.areAlbumAssignmentWidgetsVisible
+  );
   const [isAlbumActionSubmitting, setIsAlbumActionSubmitting] = useState(false);
   const [albumActionResultByPhotoId, setAlbumActionResultByPhotoId] = useState<Record<string, string>>({});
 
@@ -261,7 +265,10 @@ export function LibraryRoutePage() {
   );
   const [photoInspectorState, dispatchPhotoInspector] = useReducer(
     photoInspectorReducer,
-    DEFAULT_PHOTO_INSPECTOR_STATE
+    {
+      ...DEFAULT_PHOTO_INSPECTOR_STATE,
+      areFaceBoxesVisible: parsedUrlState.areFaceBoxesVisible
+    }
   );
   const [photoDetailById, setPhotoDetailById] = useState<Record<string, PhotoDetailPayload>>({});
   const [faceAssignmentOverridesByPhotoId, setFaceAssignmentOverridesByPhotoId] = useState<
@@ -373,6 +380,11 @@ export function LibraryRoutePage() {
       setHasFacesFilter(nextParsedState.hasFacesFilter);
       setPathHintFilters(nextParsedState.pathHintFilters);
       setFacesFilter(nextParsedState.facesFilter);
+      dispatchPhotoInspector({
+        type: "setFaceBoxesVisible",
+        visible: nextParsedState.areFaceBoxesVisible
+      });
+      setIsAlbumInteractionEnabled(nextParsedState.areAlbumAssignmentWidgetsVisible);
       setFallbackPathHintCounts(nextParsedState.pathHintFilters);
       if (shouldApplyViewState) {
         setSortDirection(nextParsedState.sortDirection);
@@ -399,6 +411,8 @@ export function LibraryRoutePage() {
     hasFacesFilter,
     pathHintFilters,
     facesFilter,
+    areFaceBoxesVisible: photoInspectorState.areFaceBoxesVisible,
+    areAlbumAssignmentWidgetsVisible: isAlbumInteractionEnabled,
     sortDirection,
     requestedPage,
     pageSize,
