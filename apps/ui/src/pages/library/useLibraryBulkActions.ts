@@ -9,7 +9,13 @@ import {
 } from "./libraryRouteApi";
 import { buildSearchFilters } from "./libraryRouteSearchState";
 import type { LibrarySelectionState } from "./librarySelection";
-import type { LibraryLocationRadius, LibraryPhoto, PersonCertaintyMode, SortDirection } from "./libraryRouteTypes";
+import type {
+  LibraryFacesFilterState,
+  LibraryLocationRadius,
+  LibraryPhoto,
+  PersonCertaintyMode,
+  SortDirection
+} from "./libraryRouteTypes";
 
 const ACTION_SCOPE_FETCH_LIMIT = 120;
 
@@ -26,6 +32,7 @@ interface UseLibraryBulkActionsArgs {
   locationRadiusFilter: LibraryLocationRadius | null;
   hasFacesFilter: boolean | null;
   pathHintFilters: string[];
+  facesFilter: LibraryFacesFilterState;
   sortDirection: SortDirection;
 }
 
@@ -42,6 +49,7 @@ export function useLibraryBulkActions({
   locationRadiusFilter,
   hasFacesFilter,
   pathHintFilters,
+  facesFilter,
   sortDirection,
 }: UseLibraryBulkActionsArgs) {
   const [notifications, setNotifications] = useState<NotificationEntry[]>([]);
@@ -113,6 +121,7 @@ export function useLibraryBulkActions({
         locationRadiusFilter,
         hasFacesFilter,
         pathHintFilters,
+        facesFilter,
         sortDirection,
         offset,
         ACTION_SCOPE_FETCH_LIMIT
@@ -186,7 +195,8 @@ export function useLibraryBulkActions({
           suggestionConfidenceMinDraft,
           locationRadiusFilter,
           hasFacesFilter,
-          pathHintFilters
+          pathHintFilters,
+          facesFilter
         ) ?? {};
         const created = await createAlbum(
           {

@@ -4,6 +4,7 @@ import type { LibraryViewRouteState } from "../libraryRouteState";
 import { buildLibraryUrlQuery } from "./libraryRouteSearchState";
 import { saveLastLibraryUrl, saveLibraryViewState } from "./libraryRouteMemory";
 import type {
+  LibraryFacesFilterState,
   LibraryLocationRadius,
   PersonCertaintyMode,
   SearchUrlState,
@@ -26,6 +27,7 @@ interface UseLibraryUrlSyncArgs {
   locationRadiusFilter: LibraryLocationRadius | null;
   hasFacesFilter: boolean | null;
   pathHintFilters: string[];
+  facesFilter: LibraryFacesFilterState;
   sortDirection: SortDirection;
   requestedPage: number;
   pageSize: number;
@@ -49,6 +51,7 @@ export function useLibraryUrlSync({
   locationRadiusFilter,
   hasFacesFilter,
   pathHintFilters,
+  facesFilter,
   sortDirection,
   requestedPage,
   pageSize,
@@ -115,6 +118,7 @@ export function useLibraryUrlSync({
       locationRadius: locationRadiusFilter,
       hasFacesFilter,
       pathHintFilters,
+      facesFilter,
       sortDirection,
       page: requestedPage,
       pageSize,
@@ -145,6 +149,7 @@ export function useLibraryUrlSync({
     locationRadiusFilter,
     navigate,
     pathHintFilters,
+    facesFilter,
     pageSize,
     personCertaintyMode,
     requestedPage,

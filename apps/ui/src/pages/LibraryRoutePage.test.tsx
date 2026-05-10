@@ -300,6 +300,7 @@ describe("LibraryRoutePage", () => {
     expect(screen.getByRole("button", { name: "Location filter type" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Album filter type" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Path hints filter type" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Faces filter type" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Has faces filter type" })).toBeInTheDocument();
     expect(screen.queryByLabelText("From date")).not.toBeInTheDocument();
 
@@ -390,6 +391,52 @@ describe("LibraryRoutePage", () => {
 
     await user.click(screen.getByRole("button", { name: "Date filter type" }));
     expect(screen.getByLabelText("From date")).toHaveValue("2024-01-01");
+  });
+
+  it("renders faces range sliders and unknown checkbox in faces panel", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-a"])
+      } as Response;
+    });
+
+    renderLibraryAt("/library");
+    await screen.findByRole("heading", { name: "Library", level: 1 });
+
+    await user.click(screen.getByRole("button", { name: "Faces filter type" }));
+    expect(screen.getByText("Face count range")).toBeInTheDocument();
+    expect(screen.getByText("Top certainty range")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Has face assigned to unknown person" })).toBeInTheDocument();
+  });
+
+  it("shows infinity label when max faces handle is unbounded", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-a"])
+      } as Response;
+    });
+
+    renderLibraryAt("/library");
+    await screen.findByRole("heading", { name: "Library", level: 1 });
+
+    await user.click(screen.getByRole("button", { name: "Faces filter type" }));
+    expect(screen.getByText("At most faces: ∞")).toBeInTheDocument();
   });
 
   it("auto-closes date panel when both dates are chosen", async () => {
@@ -1156,6 +1203,114 @@ describe("LibraryRoutePage", () => {
           })
         })
       );
+    });
+  });
+
+  it("sends faces filter payload with count, certainty, and unknown fields", async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+      if (url === "/api/v1/people") {
+        return {
+          ok: true,
+          json: async () => []
+        } as Response;
+      }
+      if (url !== "/api/v1/search") {
+        throw new Error(`Unhandled fetch: ${url}`);
+      }
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-a"])
+      } as Response;
+    });
+
+    renderLibraryAt("/library?facesMin=2&facesMax=7&facesCertMin=60&facesCertMax=95&facesUnknown=1");
+    expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
+
+    await waitFor(() => {
+      const searchBodies = fetchMock.mock.calls
+        .filter(([requestInput]) => String(requestInput) === "/api/v1/search")
+        .map(([, requestInit]) =>
+          JSON.parse((requestInit?.body as string | undefined) ?? "{}") as {
+            filters?: {
+              faces?: {
+                min_count?: number;
+                max_count?: number;
+                top_certainty_min?: number;
+                top_certainty_max?: number;
+                has_unknown_person?: boolean;
+              };
+            };
+          }
+        );
+      const matchedRequest = searchBodies.find(
+        (body) =>
+          body.filters?.faces?.min_count === 2 &&
+          body.filters?.faces?.max_count === 7 &&
+          body.filters?.faces?.top_certainty_min === 0.6 &&
+          body.filters?.faces?.top_certainty_max === 0.95 &&
+          body.filters?.faces?.has_unknown_person === true
+      );
+      expect(matchedRequest).toBeDefined();
+    });
+  });
+
+  it("suppresses certainty and unknown fields when faces range is 0..0", async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+      if (url === "/api/v1/people") {
+        return {
+          ok: true,
+          json: async () => []
+        } as Response;
+      }
+      if (url !== "/api/v1/search") {
+        throw new Error(`Unhandled fetch: ${url}`);
+      }
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-a"])
+      } as Response;
+    });
+
+    renderLibraryAt("/library?facesMin=0&facesMax=0&facesCertMin=65&facesCertMax=95&facesUnknown=1");
+    expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
+
+    await waitFor(() => {
+      const searchBodies = fetchMock.mock.calls
+        .filter(([requestInput]) => String(requestInput) === "/api/v1/search")
+        .map(([, requestInit]) =>
+          JSON.parse((requestInit?.body as string | undefined) ?? "{}") as {
+            filters?: {
+              faces?: {
+                min_count?: number;
+                max_count?: number;
+                top_certainty_min?: number;
+                top_certainty_max?: number;
+                has_unknown_person?: boolean;
+              };
+            };
+          }
+        );
+      const matchedRequest = searchBodies.find(
+        (body) => body.filters?.faces?.min_count === 0 && body.filters?.faces?.max_count === 0
+      );
+      expect(matchedRequest?.filters?.faces).toEqual({
+        min_count: 0,
+        max_count: 0
+      });
     });
   });
 

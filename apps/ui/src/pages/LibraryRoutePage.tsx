@@ -69,6 +69,7 @@ import {
 } from "./search/locationFilter";
 import type { LocationRadiusValue } from "./search/types";
 import type {
+  LibraryFacesFilterState,
   PersonCertaintyMode,
   PersonRecord,
   SearchUrlState,
@@ -196,7 +197,8 @@ export function LibraryRoutePage() {
         longitudeDraft: parsedUrlState.longitudeDraft,
         radiusDraft: parsedUrlState.radiusDraft,
         hasFacesFilter: parsedUrlState.hasFacesFilter,
-        pathHintFilters: parsedUrlState.pathHintFilters
+        pathHintFilters: parsedUrlState.pathHintFilters,
+        facesFilter: parsedUrlState.facesFilter
       }),
     [parsedUrlState]
   );
@@ -234,6 +236,7 @@ export function LibraryRoutePage() {
   const [mapMessage, setMapMessage] = useState<string | null>(null);
   const [hasFacesFilter, setHasFacesFilter] = useState<boolean | null>(parsedUrlState.hasFacesFilter);
   const [pathHintFilters, setPathHintFilters] = useState<string[]>(parsedUrlState.pathHintFilters);
+  const [facesFilter, setFacesFilter] = useState<LibraryFacesFilterState>(parsedUrlState.facesFilter);
   const [albumOptions, setAlbumOptions] = useState<Array<{ albumId: string; albumName: string }>>(
     []
   );
@@ -342,6 +345,7 @@ export function LibraryRoutePage() {
     locationRadiusFilter,
     hasFacesFilter,
     pathHintFilters,
+    facesFilter,
     sortDirection,
     requestedPage,
     pageSize,
@@ -368,6 +372,7 @@ export function LibraryRoutePage() {
       setMapMessage(null);
       setHasFacesFilter(nextParsedState.hasFacesFilter);
       setPathHintFilters(nextParsedState.pathHintFilters);
+      setFacesFilter(nextParsedState.facesFilter);
       setFallbackPathHintCounts(nextParsedState.pathHintFilters);
       if (shouldApplyViewState) {
         setSortDirection(nextParsedState.sortDirection);
@@ -393,6 +398,7 @@ export function LibraryRoutePage() {
     locationRadiusFilter,
     hasFacesFilter,
     pathHintFilters,
+    facesFilter,
     sortDirection,
     requestedPage,
     pageSize,
@@ -623,6 +629,7 @@ export function LibraryRoutePage() {
     locationRadiusFilter,
     hasFacesFilter,
     pathHintFilters,
+    facesFilter,
     sortDirection
   });
   useLibraryReturnFocus({
@@ -1042,6 +1049,7 @@ export function LibraryRoutePage() {
             : null
         }
         hasFacesFilter={hasFacesFilter}
+        facesFilter={facesFilter}
         pathHintFilters={pathHintFilters}
         facetHasFacesCounts={facetHasFacesCounts}
         facetPathHintCounts={facetPathHintCounts}
@@ -1103,6 +1111,29 @@ export function LibraryRoutePage() {
         }}
         onTogglePathHintFilter={handleTogglePathHintFilter}
         onClearAllPathHints={handleClearAllPathHints}
+        onFacesCountRangeChange={(minCount, maxCount) => {
+          setFacesFilter((current) => ({
+            ...current,
+            minCount,
+            maxCount
+          }));
+          setPage(1);
+        }}
+        onFacesCertaintyRangeChange={(minCertaintyPct, maxCertaintyPct) => {
+          setFacesFilter((current) => ({
+            ...current,
+            certaintyMinPct: minCertaintyPct,
+            certaintyMaxPct: maxCertaintyPct
+          }));
+          setPage(1);
+        }}
+        onFacesUnknownPersonChange={(hasUnknownPerson) => {
+          setFacesFilter((current) => ({
+            ...current,
+            hasUnknownPerson
+          }));
+          setPage(1);
+        }}
       />
 
       <LibraryActiveFilterChips

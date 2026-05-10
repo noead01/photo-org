@@ -6,6 +6,7 @@ import {
   type SearchPageLimit
 } from "./libraryPageSize";
 import type {
+  LibraryFacesFilterState,
   LibraryLocationRadius,
   PersonCertaintyMode,
   PersonRecord,
@@ -86,6 +87,7 @@ export async function fetchLibraryPage(
   locationRadius: LibraryLocationRadius | null,
   hasFaces: boolean | null,
   pathHints: string[],
+  facesFilter: LibraryFacesFilterState,
   sortDirection: SortDirection,
   offset: number,
   pageLimit: number,
@@ -100,7 +102,8 @@ export async function fetchLibraryPage(
     suggestionConfidenceMinDraft,
     locationRadius,
     hasFaces,
-    pathHints
+    pathHints,
+    facesFilter
   );
   const requestBody = {
     ...(query ? { q: query } : {}),

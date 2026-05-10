@@ -142,8 +142,20 @@ vi.mock("leaflet", () => {
     },
     marker(position: { lat: number; lng: number }, options: LayerOptions) {
       const layer = createLayer(options);
-      const marker: MockMarker = {
-        ...layer,
+      let marker: MockMarker;
+      marker = {
+        options: layer.options,
+        addTo(map) {
+          layer.addTo(map);
+          return marker;
+        },
+        remove() {
+          layer.remove();
+        },
+        on(eventName, handler) {
+          layer.on(eventName, handler);
+          return marker;
+        },
         getLatLng() {
           return position;
         },

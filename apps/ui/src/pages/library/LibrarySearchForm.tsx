@@ -1,11 +1,15 @@
 import { useEffect, useState, type FormEventHandler } from "react";
-import { ConfidenceSingleSlider } from "../shared/ConfidenceSlider";
+import { ConfidenceRangeSlider, ConfidenceSingleSlider } from "../shared/ConfidenceSlider";
 import type { FacetCountEntry } from "../search/facetFilters";
 import { LocationRadiusPicker } from "../search/LocationRadiusPicker";
 import type { LocationRadiusValue } from "../search/types";
-import type { PersonCertaintyMode, PersonRecord } from "./libraryRouteTypes";
+import type {
+  LibraryFacesFilterState,
+  PersonCertaintyMode,
+  PersonRecord
+} from "./libraryRouteTypes";
 
-type OpenFilterPanel = "date" | "person" | "location" | "album" | "pathHints" | null;
+type OpenFilterPanel = "date" | "person" | "location" | "album" | "pathHints" | "faces" | null;
 
 interface LibrarySearchFormProps {
   queryInput: string;
@@ -22,6 +26,7 @@ interface LibrarySearchFormProps {
   radiusDraft: string;
   locationRadius: LocationRadiusValue | null;
   hasFacesFilter: boolean | null;
+  facesFilter: LibraryFacesFilterState;
   pathHintFilters: string[];
   facetHasFacesCounts: { true: number; false: number };
   facetPathHintCounts: FacetCountEntry[];
@@ -50,6 +55,9 @@ interface LibrarySearchFormProps {
   onClearAllAlbumFilters: () => void;
   onTogglePathHintFilter: (pathHint: string) => void;
   onClearAllPathHints: () => void;
+  onFacesCountRangeChange: (minCount: number, maxCount: number | null) => void;
+  onFacesCertaintyRangeChange: (minCertaintyPct: number, maxCertaintyPct: number) => void;
+  onFacesUnknownPersonChange: (hasUnknownPerson: boolean) => void;
 }
 
 export function LibrarySearchForm({
@@ -67,6 +75,7 @@ export function LibrarySearchForm({
   radiusDraft,
   locationRadius,
   hasFacesFilter,
+  facesFilter,
   pathHintFilters,
   facetHasFacesCounts,
   facetPathHintCounts,
@@ -94,7 +103,10 @@ export function LibrarySearchForm({
   onToggleAlbumFilter,
   onClearAllAlbumFilters,
   onTogglePathHintFilter,
-  onClearAllPathHints
+  onClearAllPathHints,
+  onFacesCountRangeChange,
+  onFacesCertaintyRangeChange,
+  onFacesUnknownPersonChange
 }: LibrarySearchFormProps) {
   const [openFilterPanel, setOpenFilterPanel] = useState<OpenFilterPanel>(null);
   const [dateSnapshot, setDateSnapshot] = useState<{ fromDate: string; toDate: string } | null>(null);
@@ -110,6 +122,9 @@ export function LibrarySearchForm({
   const hasLocationFilter = Boolean(locationRadius || latitudeDraft || longitudeDraft || radiusDraft);
   const hasAlbumFilter = selectedAlbumIds.length > 0;
   const hasPathHintFilter = pathHintFilters.length > 0;
+  const hasFacesAttributeFilter = isFacesAttributeFilterActive(facesFilter);
+  const isZeroFacesOnly = facesFilter.minCount === 0 && facesFilter.maxCount === 0;
+  const facesCountMax = facesFilter.maxCount ?? 10;
 
   useEffect(() => {
     if (openFilterPanel !== "date") {
@@ -199,6 +214,14 @@ export function LibrarySearchForm({
               onClick={() => handleFilterPanelClick("pathHints")}
             >
               Path hints
+            </button>
+            <button
+              type="button"
+              className={hasFacesAttributeFilter ? "search-filter-chip search-filter-chip-active" : "search-filter-chip"}
+              aria-label="Faces filter type"
+              onClick={() => handleFilterPanelClick("faces")}
+            >
+              Faces
             </button>
             <button
               type="button"
@@ -443,6 +466,60 @@ export function LibrarySearchForm({
             </div>
           </div>
         ) : null}
+
+        {openFilterPanel === "faces" ? (
+          <div className="search-filter-content">
+            <div className="search-faces-panel" aria-label="Faces filters">
+              <p className="search-filter-section-label">Face count range</p>
+              <ConfidenceRangeSlider
+                minBound={0}
+                maxBound={10}
+                minLabel="At least faces"
+                maxLabel="At most faces"
+                minValue={facesFilter.minCount}
+                maxValue={facesCountMax}
+                minValueFormatter={(value) => String(value)}
+                maxValueFormatter={(value) => (value === 10 ? "∞" : String(value))}
+                minThumbAriaLabel="Minimum face count"
+                maxThumbAriaLabel="Maximum face count"
+                onValueChange={(nextMin, nextMax) =>
+                  onFacesCountRangeChange(nextMin, nextMax === 10 ? null : nextMax)
+                }
+                disabled={false}
+              />
+              <p className="search-filter-section-label">Top certainty range</p>
+              <ConfidenceRangeSlider
+                minBound={0}
+                maxBound={100}
+                minLabel="Top certainty minimum"
+                maxLabel="Top certainty maximum"
+                minValue={facesFilter.certaintyMinPct}
+                maxValue={facesFilter.certaintyMaxPct}
+                onValueChange={onFacesCertaintyRangeChange}
+                disabled={isZeroFacesOnly}
+              />
+              <label className="search-filter-checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={facesFilter.hasUnknownPerson}
+                  disabled={isZeroFacesOnly}
+                  onChange={(event) => onFacesUnknownPersonChange(event.target.checked)}
+                />
+                Has face assigned to unknown person
+              </label>
+              {isZeroFacesOnly ? (
+                <p className="search-faces-helper-text">
+                  Face certainty and unknown-person filters are disabled for exactly zero faces.
+                </p>
+              ) : null}
+            </div>
+            <div className="search-person-input-row">
+              <button type="button" onClick={() => setOpenFilterPanel(null)}>
+                Done faces filters
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {dateRangeError ? (
@@ -500,4 +577,14 @@ function formatSuggestionThresholdDraft(percent: number): string {
 
 function hasSelectedPersonFilter(selectedPersonNames: string[], personDraft: string): boolean {
   return selectedPersonNames.length > 0 || personDraft.trim().length > 0;
+}
+
+function isFacesAttributeFilterActive(facesFilter: LibraryFacesFilterState): boolean {
+  return (
+    facesFilter.minCount > 0
+    || facesFilter.maxCount !== null
+    || facesFilter.certaintyMinPct > 0
+    || facesFilter.certaintyMaxPct < 100
+    || facesFilter.hasUnknownPerson
+  );
 }

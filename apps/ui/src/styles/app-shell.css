@@ -1984,6 +1984,24 @@ body {
   font-size: 0.88rem;
 }
 
+.search-faces-panel {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.search-faces-helper-text {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.88rem;
+}
+
+.search-filter-checkbox-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: #334155;
+}
+
 .search-location-row {
   display: grid;
   grid-template-columns: auto minmax(7rem, 1fr) auto minmax(8rem, 1fr) auto minmax(6rem, 1fr);

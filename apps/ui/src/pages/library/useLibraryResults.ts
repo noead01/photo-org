@@ -7,6 +7,7 @@ import {
 import { parseHasFacesFacetCounts, toPathHintFacetCounts, type FacetCountEntry } from "../search/facetFilters";
 import { useRouteRequestState } from "./requestLifecycle";
 import type {
+  LibraryFacesFilterState,
   LibraryLocationRadius,
   LibraryPhoto,
   PersonCertaintyMode,
@@ -24,6 +25,7 @@ interface UseLibraryResultsArgs {
   locationRadiusFilter: LibraryLocationRadius | null;
   hasFacesFilter: boolean | null;
   pathHintFilters: string[];
+  facesFilter: LibraryFacesFilterState;
   sortDirection: SortDirection;
   requestedPage: number;
   pageSize: number;
@@ -43,6 +45,7 @@ export function useLibraryResults({
   locationRadiusFilter,
   hasFacesFilter,
   pathHintFilters,
+  facesFilter,
   sortDirection,
   requestedPage,
   pageSize,
@@ -90,6 +93,7 @@ export function useLibraryResults({
       locationRadiusFilter,
       hasFacesFilter,
       pathHintFilters,
+      facesFilter,
       sortDirection,
       requestOffset,
       pageSize,
@@ -127,6 +131,7 @@ export function useLibraryResults({
     locationError,
     locationRadiusFilter,
     pathHintFilters,
+    facesFilter,
     reloadToken,
     requestOffset,
     selectedAlbumIds,
