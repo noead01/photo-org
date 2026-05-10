@@ -119,6 +119,30 @@ def test_location_radius_validation_rejects_non_finite_values(location_radius):
         SearchFilters(location_radius=location_radius)
 
 
+def test_faces_filter_validation_rejects_negative_counts():
+    with pytest.raises(ValidationError) as exc_info:
+        SearchFilters(faces={"min_count": -1})
+
+    assert "greater than or equal to 0" in str(exc_info.value)
+
+
+def test_faces_filter_validation_rejects_invalid_certainty_bounds():
+    with pytest.raises(ValidationError) as exc_info:
+        SearchFilters(faces={"top_certainty_min": 1.2})
+
+    assert "top certainty bounds must be between 0 and 1" in str(exc_info.value)
+
+
+def test_faces_filter_validation_rejects_inverted_ranges():
+    with pytest.raises(ValidationError) as count_exc:
+        SearchFilters(faces={"min_count": 5, "max_count": 2})
+    assert "min_count must be <= max_count" in str(count_exc.value)
+
+    with pytest.raises(ValidationError) as certainty_exc:
+        SearchFilters(faces={"top_certainty_min": 0.9, "top_certainty_max": 0.1})
+    assert "top_certainty_min must be <= top_certainty_max" in str(certainty_exc.value)
+
+
 def test_page_spec_validation_supports_offset_and_rejects_cursor_offset_conflict():
     page = PageSpec(limit=50, offset=120)
     assert page.offset == 120

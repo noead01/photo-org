@@ -75,6 +75,37 @@ class LocationRadiusFilter(BaseModel):
         return value
 
 
+class FaceFilters(BaseModel):
+    min_count: Optional[int] = Field(default=None, ge=0)
+    max_count: Optional[int] = Field(default=None, ge=0)
+    top_certainty_min: Optional[float] = None
+    top_certainty_max: Optional[float] = None
+    has_unknown_person: Optional[bool] = None
+
+    @field_validator("top_certainty_min", "top_certainty_max")
+    @classmethod
+    def validate_top_certainty_bounds(cls, value: Optional[float]) -> Optional[float]:
+        if value is None:
+            return None
+        if not math.isfinite(value):
+            raise ValueError("top certainty bounds must be finite")
+        if value < 0 or value > 1:
+            raise ValueError("top certainty bounds must be between 0 and 1")
+        return value
+
+    @model_validator(mode="after")
+    def validate_face_ranges(self) -> "FaceFilters":
+        if self.min_count is not None and self.max_count is not None and self.min_count > self.max_count:
+            raise ValueError("min_count must be <= max_count")
+        if (
+            self.top_certainty_min is not None
+            and self.top_certainty_max is not None
+            and self.top_certainty_min > self.top_certainty_max
+        ):
+            raise ValueError("top_certainty_min must be <= top_certainty_max")
+        return self
+
+
 class SearchFilters(BaseModel):
     date: Optional[DateFilter] = None
     camera_make: Optional[List[str]] = None
@@ -90,6 +121,7 @@ class SearchFilters(BaseModel):
     person_certainty_mode: Optional[Literal["human_only", "include_suggestions"]] = None
     suggestion_confidence_min: Optional[float] = None
     location_radius: Optional[LocationRadiusFilter] = None
+    faces: Optional[FaceFilters] = None
 
     @field_validator("suggestion_confidence_min")
     @classmethod
