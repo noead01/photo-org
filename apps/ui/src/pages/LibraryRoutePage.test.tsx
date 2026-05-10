@@ -315,6 +315,40 @@ describe("LibraryRoutePage", () => {
     expect(screen.queryByRole("link", { name: "View details" })).not.toBeInTheDocument();
   });
 
+  it("opens one filter panel at a time from filter chips", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+
+      if (input === "/api/v1/albums") {
+        return {
+          ok: true,
+          json: async () => []
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-a"])
+      } as Response;
+    });
+
+    renderLibraryAt("/library");
+    await screen.findByRole("heading", { name: "Library", level: 1 });
+
+    await user.click(screen.getByRole("button", { name: "Person filter type" }));
+    expect(screen.getByLabelText("Person filter")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Album filter type" }));
+    expect(screen.queryByLabelText("Person filter")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Done album filters" })).toBeInTheDocument();
+  });
+
   it("shows shared album assignment widgets when enabled", async () => {
     const user = userEvent.setup();
     fetchMock.mockImplementation(async (input: string) => {
