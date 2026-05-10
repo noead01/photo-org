@@ -1,12 +1,11 @@
-import { useState, type FormEventHandler } from "react";
+import { useEffect, useState, type FormEventHandler } from "react";
 import { ConfidenceSingleSlider } from "../shared/ConfidenceSlider";
 import type { FacetCountEntry } from "../search/facetFilters";
-import { FacetFilterPanel } from "../search/FacetFilterPanel";
 import { LocationRadiusPicker } from "../search/LocationRadiusPicker";
 import type { LocationRadiusValue } from "../search/types";
 import type { PersonCertaintyMode, PersonRecord } from "./libraryRouteTypes";
 
-type OpenFilterPanel = "date" | "person" | "location" | "album" | "facets" | null;
+type OpenFilterPanel = "date" | "person" | "location" | "album" | "pathHints" | null;
 
 interface LibrarySearchFormProps {
   queryInput: string;
@@ -98,12 +97,53 @@ export function LibrarySearchForm({
   onClearAllPathHints
 }: LibrarySearchFormProps) {
   const [openFilterPanel, setOpenFilterPanel] = useState<OpenFilterPanel>(null);
+  const [dateSnapshot, setDateSnapshot] = useState<{ fromDate: string; toDate: string } | null>(null);
+  const [isDateAutoCloseArmed, setIsDateAutoCloseArmed] = useState(false);
+  const [locationSnapshot, setLocationSnapshot] = useState<{
+    latitudeDraft: string;
+    longitudeDraft: string;
+    radiusDraft: string;
+  } | null>(null);
   const suggestionThresholdPercent = normalizeSuggestionThresholdPercent(suggestionConfidenceMinDraft);
   const hasDateFilter = Boolean(fromDate || toDate);
   const hasPersonFilter = hasSelectedPersonFilter(selectedPersonNames, personDraft);
   const hasLocationFilter = Boolean(locationRadius || latitudeDraft || longitudeDraft || radiusDraft);
   const hasAlbumFilter = selectedAlbumIds.length > 0;
-  const hasFacetFilter = hasFacesFilter !== null || pathHintFilters.length > 0;
+  const hasPathHintFilter = pathHintFilters.length > 0;
+
+  useEffect(() => {
+    if (openFilterPanel !== "date") {
+      return;
+    }
+    if (!isDateAutoCloseArmed || !fromDate || !toDate || dateRangeError) {
+      return;
+    }
+    setOpenFilterPanel(null);
+  }, [dateRangeError, fromDate, isDateAutoCloseArmed, openFilterPanel, toDate]);
+
+  function handleFilterPanelClick(panel: Exclude<OpenFilterPanel, null>) {
+    const isOpening = openFilterPanel !== panel;
+    if (isOpening && panel === "date") {
+      setDateSnapshot({ fromDate, toDate });
+      setIsDateAutoCloseArmed(false);
+    }
+    if (isOpening && panel === "location") {
+      setLocationSnapshot({ latitudeDraft, longitudeDraft, radiusDraft });
+    }
+    setOpenFilterPanel(isOpening ? panel : null);
+  }
+
+  function handleHasFacesChipClick() {
+    if (hasFacesFilter === null) {
+      onToggleHasFacesFilter(true);
+      return;
+    }
+    if (hasFacesFilter === true) {
+      onToggleHasFacesFilter(false);
+      return;
+    }
+    onClearHasFacesFilter();
+  }
 
   return (
     <form className="search-query-form" onSubmit={onSubmit}>
@@ -124,9 +164,7 @@ export function LibrarySearchForm({
               type="button"
               className={hasDateFilter ? "search-filter-chip search-filter-chip-active" : "search-filter-chip"}
               aria-label="Date filter type"
-              onClick={() =>
-                setOpenFilterPanel((current) => (current === "date" ? null : "date"))
-              }
+              onClick={() => handleFilterPanelClick("date")}
             >
               Date
             </button>
@@ -134,9 +172,7 @@ export function LibrarySearchForm({
               type="button"
               className={hasPersonFilter ? "search-filter-chip search-filter-chip-active" : "search-filter-chip"}
               aria-label="Person filter type"
-              onClick={() =>
-                setOpenFilterPanel((current) => (current === "person" ? null : "person"))
-              }
+              onClick={() => handleFilterPanelClick("person")}
             >
               Person
             </button>
@@ -144,9 +180,7 @@ export function LibrarySearchForm({
               type="button"
               className={hasLocationFilter ? "search-filter-chip search-filter-chip-active" : "search-filter-chip"}
               aria-label="Location filter type"
-              onClick={() =>
-                setOpenFilterPanel((current) => (current === "location" ? null : "location"))
-              }
+              onClick={() => handleFilterPanelClick("location")}
             >
               Location
             </button>
@@ -154,21 +188,26 @@ export function LibrarySearchForm({
               type="button"
               className={hasAlbumFilter ? "search-filter-chip search-filter-chip-active" : "search-filter-chip"}
               aria-label="Album filter type"
-              onClick={() =>
-                setOpenFilterPanel((current) => (current === "album" ? null : "album"))
-              }
+              onClick={() => handleFilterPanelClick("album")}
             >
               Album
             </button>
             <button
               type="button"
-              className={hasFacetFilter ? "search-filter-chip search-filter-chip-active" : "search-filter-chip"}
-              aria-label="Facet filter type"
-              onClick={() =>
-                setOpenFilterPanel((current) => (current === "facets" ? null : "facets"))
-              }
+              className={hasPathHintFilter ? "search-filter-chip search-filter-chip-active" : "search-filter-chip"}
+              aria-label="Path hints filter type"
+              onClick={() => handleFilterPanelClick("pathHints")}
             >
-              Facets
+              Path hints
+            </button>
+            <button
+              type="button"
+              className={hasFacesFilter !== null ? "search-filter-chip search-filter-chip-active" : "search-filter-chip"}
+              aria-label="Has faces filter type"
+              title={`With faces: ${facetHasFacesCounts.true}, Without faces: ${facetHasFacesCounts.false}`}
+              onClick={handleHasFacesChipClick}
+            >
+              Has faces
             </button>
           </span>
         </div>
@@ -181,7 +220,10 @@ export function LibrarySearchForm({
                 id="search-date-from"
                 type="date"
                 value={fromDate}
-                onChange={(event) => onFromDateChange(event.target.value)}
+                onChange={(event) => {
+                  setIsDateAutoCloseArmed(true);
+                  onFromDateChange(event.target.value);
+                }}
                 aria-describedby="search-date-validation"
               />
               <label htmlFor="search-date-to">To date</label>
@@ -189,9 +231,26 @@ export function LibrarySearchForm({
                 id="search-date-to"
                 type="date"
                 value={toDate}
-                onChange={(event) => onToDateChange(event.target.value)}
+                onChange={(event) => {
+                  setIsDateAutoCloseArmed(true);
+                  onToDateChange(event.target.value);
+                }}
                 aria-describedby="search-date-validation"
               />
+            </div>
+            <div className="search-person-input-row">
+              <button
+                type="button"
+                onClick={() => {
+                  if (dateSnapshot) {
+                    onFromDateChange(dateSnapshot.fromDate);
+                    onToDateChange(dateSnapshot.toDate);
+                  }
+                  setOpenFilterPanel(null);
+                }}
+              >
+                Cancel date filters
+              </button>
             </div>
           </div>
         ) : null}
@@ -238,6 +297,11 @@ export function LibrarySearchForm({
                 </div>
               ) : null}
             </div>
+            <div className="search-person-input-row">
+              <button type="button" onClick={() => setOpenFilterPanel(null)}>
+                Done person filters
+              </button>
+            </div>
           </div>
         ) : null}
 
@@ -276,25 +340,64 @@ export function LibrarySearchForm({
               </div>
               <LocationRadiusPicker value={locationRadius} onChange={onMapLocationChange} onMapError={onMapError} />
             </div>
+            <div className="search-person-input-row">
+              <button
+                type="button"
+                onClick={() => {
+                  if (!locationError) {
+                    setOpenFilterPanel(null);
+                  }
+                }}
+              >
+                Apply location filters
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (locationSnapshot) {
+                    onLatitudeDraftChange(locationSnapshot.latitudeDraft);
+                    onLongitudeDraftChange(locationSnapshot.longitudeDraft);
+                    onRadiusDraftChange(locationSnapshot.radiusDraft);
+                  }
+                  setOpenFilterPanel(null);
+                }}
+              >
+                Cancel location filters
+              </button>
+            </div>
           </div>
         ) : null}
 
         {openFilterPanel === "album" ? (
           <div className="search-filter-content">
-            <FacetFilterPanel
-              hasFacesFilter={hasFacesFilter}
-              selectedAlbumIds={selectedAlbumIds}
-              pathHintFilters={pathHintFilters}
-              albumOptions={albumFilterOptions}
-              hasFacesCounts={facetHasFacesCounts}
-              pathHintCounts={facetPathHintCounts}
-              onToggleHasFaces={onToggleHasFacesFilter}
-              onClearHasFaces={onClearHasFacesFilter}
-              onToggleAlbum={onToggleAlbumFilter}
-              onClearAllAlbums={onClearAllAlbumFilters}
-              onTogglePathHint={onTogglePathHintFilter}
-              onClearAllPathHints={onClearAllPathHints}
-            />
+            <div className="search-facet-panel" aria-label="Album filters">
+              <p className="search-filter-section-label">Albums</p>
+              <div className="search-facet-options">
+                {albumFilterOptions.length > 0 ? (
+                  albumFilterOptions.map((entry) => {
+                    const isActive = selectedAlbumIds.includes(entry.albumId);
+                    return (
+                      <button
+                        key={entry.albumId}
+                        type="button"
+                        className={`search-facet-option${isActive ? " search-facet-option-active" : ""}`}
+                        aria-pressed={isActive}
+                        onClick={() => onToggleAlbumFilter(entry.albumId)}
+                      >
+                        album: {entry.albumName}
+                      </button>
+                    );
+                  })
+                ) : (
+                  <p className="search-facet-empty">No editable albums yet.</p>
+                )}
+                {selectedAlbumIds.length > 0 ? (
+                  <button type="button" className="search-facet-clear" onClick={onClearAllAlbumFilters}>
+                    Clear albums
+                  </button>
+                ) : null}
+              </div>
+            </div>
             <div className="search-person-input-row">
               <button type="button" onClick={() => setOpenFilterPanel(null)}>
                 Done album filters
@@ -303,22 +406,41 @@ export function LibrarySearchForm({
           </div>
         ) : null}
 
-        {openFilterPanel === "facets" ? (
+        {openFilterPanel === "pathHints" ? (
           <div className="search-filter-content">
-            <FacetFilterPanel
-              hasFacesFilter={hasFacesFilter}
-              selectedAlbumIds={selectedAlbumIds}
-              pathHintFilters={pathHintFilters}
-              albumOptions={albumFilterOptions}
-              hasFacesCounts={facetHasFacesCounts}
-              pathHintCounts={facetPathHintCounts}
-              onToggleHasFaces={onToggleHasFacesFilter}
-              onClearHasFaces={onClearHasFacesFilter}
-              onToggleAlbum={onToggleAlbumFilter}
-              onClearAllAlbums={onClearAllAlbumFilters}
-              onTogglePathHint={onTogglePathHintFilter}
-              onClearAllPathHints={onClearAllPathHints}
-            />
+            <div className="search-facet-panel" aria-label="Path hint filters">
+              <p className="search-filter-section-label">Path hints</p>
+              <div className="search-facet-options">
+                {facetPathHintCounts.length > 0 ? (
+                  facetPathHintCounts.map((entry) => {
+                    const isActive = pathHintFilters.includes(entry.value);
+                    return (
+                      <button
+                        key={entry.value}
+                        type="button"
+                        className={`search-facet-option${isActive ? " search-facet-option-active" : ""}`}
+                        aria-pressed={isActive}
+                        onClick={() => onTogglePathHintFilter(entry.value)}
+                      >
+                        path: {entry.value} ({entry.count})
+                      </button>
+                    );
+                  })
+                ) : (
+                  <p className="search-facet-empty">Submit a search to load path-hint counts.</p>
+                )}
+                {pathHintFilters.length > 0 ? (
+                  <button type="button" className="search-facet-clear" onClick={onClearAllPathHints}>
+                    Clear path hints
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            <div className="search-person-input-row">
+              <button type="button" onClick={() => setOpenFilterPanel(null)}>
+                Done path hint filters
+              </button>
+            </div>
           </div>
         ) : null}
       </div>
