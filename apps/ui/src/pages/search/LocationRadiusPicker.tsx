@@ -110,6 +110,7 @@ export function LocationRadiusPicker({ value, onChange, onMapError }: LocationRa
 
     const radiusHandle = L.marker(handle, {
       draggable: true,
+      bubblingMouseEvents: false,
       icon: L.divIcon({
         className: "search-location-radius-handle",
         iconSize: [14, 14]

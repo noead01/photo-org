@@ -498,9 +498,9 @@ describe("LibraryRoutePage", () => {
       expect(searchCalls.length).toBeGreaterThan(1);
     });
 
-    const latestSearchCall = fetchMock.mock.calls
-      .filter(([requestInput]) => requestInput === "/api/v1/search")
-      .at(-1);
+    const searchCalls = fetchMock.mock.calls
+      .filter(([requestInput]) => requestInput === "/api/v1/search");
+    const latestSearchCall = searchCalls[searchCalls.length - 1];
     const latestSearchBody = JSON.parse(String(latestSearchCall?.[1]?.body ?? "{}")) as Record<string, unknown>;
     expect(latestSearchBody.include_face_info).toBe(true);
   });
