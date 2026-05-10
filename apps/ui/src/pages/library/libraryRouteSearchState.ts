@@ -9,6 +9,7 @@ import {
   parseNullableBooleanParam
 } from "./urlSerialization";
 import type {
+  LibraryFacesFilterState,
   LibraryLocationRadius,
   PersonCertaintyMode,
   SortDirection,
@@ -23,6 +24,15 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const DEFAULT_PERSON_CERTAINTY_MODE: PersonCertaintyMode = "human_only";
 const DEFAULT_SUGGESTION_CONFIDENCE_MIN = "0.8";
 const DEFAULT_SORT_DIRECTION: SortDirection = "desc";
+const MIN_FACES_BOUND = 0;
+const MAX_FACES_BOUND = 10;
+const DEFAULT_FACES_FILTER: LibraryFacesFilterState = {
+  minCount: 0,
+  maxCount: null,
+  certaintyMinPct: 0,
+  certaintyMaxPct: 100,
+  hasUnknownPerson: false
+};
 
 function isValidIsoDate(value: string): boolean {
   if (!DATE_PATTERN.test(value)) {
@@ -89,6 +99,105 @@ function parseSortDirection(raw: string | null): SortDirection {
   return DEFAULT_SORT_DIRECTION;
 }
 
+function parseIntegerInRange(
+  raw: string | null,
+  minValue: number,
+  maxValue: number
+): number | null {
+  if (raw === null) {
+    return null;
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed) || parsed < minValue || parsed > maxValue) {
+    return null;
+  }
+  return parsed;
+}
+
+function parseBooleanFlag(raw: string | null): boolean {
+  if (raw === null) {
+    return false;
+  }
+  const normalized = raw.trim().toLowerCase();
+  return normalized === "1" || normalized === "true";
+}
+
+function parseFacesFilterState(params: URLSearchParams): LibraryFacesFilterState {
+  const parsedMin = parseIntegerInRange(params.get("facesMin"), MIN_FACES_BOUND, MAX_FACES_BOUND);
+  const parsedMax = parseIntegerInRange(params.get("facesMax"), MIN_FACES_BOUND, MAX_FACES_BOUND);
+  const parsedCertaintyMin = parseIntegerInRange(params.get("facesCertMin"), 0, 100);
+  const parsedCertaintyMax = parseIntegerInRange(params.get("facesCertMax"), 0, 100);
+
+  const normalizedMinCount = parsedMin ?? DEFAULT_FACES_FILTER.minCount;
+  const normalizedMaxCount =
+    parsedMax === null || parsedMax >= MAX_FACES_BOUND ? null : parsedMax;
+  const minCount =
+    normalizedMaxCount !== null && normalizedMinCount > normalizedMaxCount
+      ? normalizedMaxCount
+      : normalizedMinCount;
+
+  const certaintyMinPct = parsedCertaintyMin ?? DEFAULT_FACES_FILTER.certaintyMinPct;
+  const certaintyMaxPct = parsedCertaintyMax ?? DEFAULT_FACES_FILTER.certaintyMaxPct;
+
+  return {
+    minCount,
+    maxCount: normalizedMaxCount,
+    certaintyMinPct: Math.min(certaintyMinPct, certaintyMaxPct),
+    certaintyMaxPct: Math.max(certaintyMinPct, certaintyMaxPct),
+    hasUnknownPerson: parseBooleanFlag(params.get("facesUnknown"))
+  };
+}
+
+function isZeroFacesOnly(facesFilter: LibraryFacesFilterState): boolean {
+  return facesFilter.minCount === 0 && facesFilter.maxCount === 0;
+}
+
+function normalizeFacesFilterForPayload(
+  facesFilter: LibraryFacesFilterState
+):
+  | {
+      min_count?: number;
+      max_count?: number;
+      top_certainty_min?: number;
+      top_certainty_max?: number;
+      has_unknown_person?: boolean;
+    }
+  | null {
+  const payload: {
+    min_count?: number;
+    max_count?: number;
+    top_certainty_min?: number;
+    top_certainty_max?: number;
+    has_unknown_person?: boolean;
+  } = {};
+
+  const includeZeroFacesRange = isZeroFacesOnly(facesFilter);
+  if (facesFilter.minCount > 0 || includeZeroFacesRange) {
+    payload.min_count = facesFilter.minCount;
+  }
+  if (facesFilter.maxCount !== null || includeZeroFacesRange) {
+    payload.max_count = facesFilter.maxCount ?? 0;
+  }
+
+  if (!includeZeroFacesRange) {
+    if (facesFilter.certaintyMinPct > 0) {
+      payload.top_certainty_min = facesFilter.certaintyMinPct / 100;
+    }
+    if (facesFilter.certaintyMaxPct < 100) {
+      payload.top_certainty_max = facesFilter.certaintyMaxPct / 100;
+    }
+    if (facesFilter.hasUnknownPerson) {
+      payload.has_unknown_person = true;
+    }
+  }
+
+  return Object.keys(payload).length > 0 ? payload : null;
+}
+
 function normalizeSuggestionConfidenceMin(
   raw: string,
   fallback = Number(DEFAULT_SUGGESTION_CONFIDENCE_MIN)
@@ -151,6 +260,9 @@ export function parseLibraryUrlState(search: string): SearchUrlState {
   const suggestionConfidenceMinDraft = parseSuggestionConfidenceMinDraft(params.get("suggestionMin"));
   const pathHintFilters = normalizePathHintFilters(params.getAll("pathHint"));
   const hasFacesFilter = parseNullableBooleanParam(params.get("hasFaces"));
+  const facesFilter = parseFacesFilterState(params);
+  const areFaceBoxesVisible = parseBooleanFlag(params.get("showFaces"));
+  const areAlbumAssignmentWidgetsVisible = parseBooleanFlag(params.get("showAlbumWidgets"));
 
   const latitudeCandidate = (params.get("lat") ?? "").trim();
   const longitudeCandidate = (params.get("lng") ?? "").trim();
@@ -188,7 +300,10 @@ export function parseLibraryUrlState(search: string): SearchUrlState {
     radiusDraft: locationDrafts.radiusDraft,
     locationRadius,
     hasFacesFilter,
-    pathHintFilters
+    pathHintFilters,
+    facesFilter,
+    areFaceBoxesVisible,
+    areAlbumAssignmentWidgetsVisible
   };
 }
 
@@ -203,11 +318,15 @@ export function buildLibraryUrlQuery(state: {
   locationRadius: LibraryLocationRadius | null;
   hasFacesFilter: boolean | null;
   pathHintFilters: string[];
+  facesFilter?: LibraryFacesFilterState;
+  areFaceBoxesVisible?: boolean;
+  areAlbumAssignmentWidgetsVisible?: boolean;
   sortDirection: SortDirection;
   page: number;
   pageSize: number;
 }): string {
   const params = new URLSearchParams();
+  const facesFilter = state.facesFilter ?? DEFAULT_FACES_FILTER;
 
   for (const chip of state.queryChips) {
     params.append("query", chip);
@@ -246,6 +365,29 @@ export function buildLibraryUrlQuery(state: {
   for (const pathHint of state.pathHintFilters) {
     params.append("pathHint", pathHint);
   }
+  if (facesFilter.minCount > 0) {
+    params.set("facesMin", String(facesFilter.minCount));
+  }
+  if (facesFilter.maxCount !== null) {
+    params.set("facesMax", String(facesFilter.maxCount));
+  }
+  if (!isZeroFacesOnly(facesFilter)) {
+    if (facesFilter.certaintyMinPct > 0) {
+      params.set("facesCertMin", String(facesFilter.certaintyMinPct));
+    }
+    if (facesFilter.certaintyMaxPct < 100) {
+      params.set("facesCertMax", String(facesFilter.certaintyMaxPct));
+    }
+    if (facesFilter.hasUnknownPerson) {
+      params.set("facesUnknown", "1");
+    }
+  }
+  if (state.areFaceBoxesVisible) {
+    params.set("showFaces", "1");
+  }
+  if (state.areAlbumAssignmentWidgetsVisible) {
+    params.set("showAlbumWidgets", "1");
+  }
   if (state.sortDirection !== DEFAULT_SORT_DIRECTION) {
     params.set("sort", state.sortDirection);
   }
@@ -276,7 +418,8 @@ export function buildSearchFilters(
   suggestionConfidenceMinDraft: string,
   locationRadius: LibraryLocationRadius | null,
   hasFaces: boolean | null,
-  pathHints: string[]
+  pathHints: string[],
+  facesFilter: LibraryFacesFilterState = DEFAULT_FACES_FILTER
 ): {
   date?: { from?: string; to?: string };
   person_names?: string[];
@@ -286,12 +429,20 @@ export function buildSearchFilters(
   location_radius?: LibraryLocationRadius;
   has_faces?: boolean;
   path_hints?: string[];
+  faces?: {
+    min_count?: number;
+    max_count?: number;
+    top_certainty_min?: number;
+    top_certainty_max?: number;
+    has_unknown_person?: boolean;
+  };
 } | null {
   const dateFilter = buildDateFilter(fromDate, toDate);
   const personNameFilter = selectedPersonNames.length > 0 ? selectedPersonNames : null;
   const albumIdFilter = selectedAlbumIds.length > 0 ? selectedAlbumIds : null;
   const locationFilter = locationRadius;
   const pathHintFilter = pathHints.length > 0 ? pathHints : null;
+  const facesPayload = normalizeFacesFilterForPayload(facesFilter);
 
   if (
     !dateFilter &&
@@ -299,7 +450,8 @@ export function buildSearchFilters(
     !albumIdFilter &&
     !locationFilter &&
     hasFaces === null &&
-    !pathHintFilter
+    !pathHintFilter &&
+    !facesPayload
   ) {
     return null;
   }
@@ -314,6 +466,7 @@ export function buildSearchFilters(
       : {}),
     ...(locationFilter ? { location_radius: locationFilter } : {}),
     ...(hasFaces === null ? {} : { has_faces: hasFaces }),
-    ...(pathHintFilter ? { path_hints: pathHintFilter } : {})
+    ...(pathHintFilter ? { path_hints: pathHintFilter } : {}),
+    ...(facesPayload ? { faces: facesPayload } : {})
   };
 }

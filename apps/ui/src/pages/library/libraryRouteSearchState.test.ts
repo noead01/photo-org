@@ -131,4 +131,106 @@ describe("libraryRouteSearchState", () => {
       album_ids: ["album-1"]
     });
   });
+
+  it("parses and serializes faces filter params", () => {
+    const state = parseLibraryUrlState(
+      "?facesMin=2&facesMax=7&facesCertMin=60&facesCertMax=95&facesUnknown=1"
+    );
+    expect(state.facesFilter).toEqual({
+      minCount: 2,
+      maxCount: 7,
+      certaintyMinPct: 60,
+      certaintyMaxPct: 95,
+      hasUnknownPerson: true
+    });
+
+    const query = buildLibraryUrlQuery({
+      queryChips: [],
+      fromDate: "",
+      toDate: "",
+      selectedPersonNames: [],
+      selectedAlbumIds: [],
+      personCertaintyMode: "human_only",
+      suggestionConfidenceMinDraft: "0.8",
+      locationRadius: null,
+      hasFacesFilter: null,
+      pathHintFilters: [],
+      facesFilter: state.facesFilter,
+      page: 1,
+      pageSize: 60,
+      sortDirection: "desc"
+    });
+
+    expect(query).toContain("facesMin=2");
+    expect(query).toContain("facesMax=7");
+    expect(query).toContain("facesCertMin=60");
+    expect(query).toContain("facesCertMax=95");
+    expect(query).toContain("facesUnknown=1");
+  });
+
+  it("omits faces count defaults 0..infinity in URL and payload", () => {
+    const query = buildLibraryUrlQuery({
+      queryChips: [],
+      fromDate: "",
+      toDate: "",
+      selectedPersonNames: [],
+      selectedAlbumIds: [],
+      personCertaintyMode: "human_only",
+      suggestionConfidenceMinDraft: "0.8",
+      locationRadius: null,
+      hasFacesFilter: null,
+      pathHintFilters: [],
+      facesFilter: {
+        minCount: 0,
+        maxCount: null,
+        certaintyMinPct: 0,
+        certaintyMaxPct: 100,
+        hasUnknownPerson: false
+      },
+      page: 1,
+      pageSize: 60,
+      sortDirection: "desc"
+    });
+    expect(query).not.toContain("facesMin=");
+    expect(query).not.toContain("facesMax=");
+  });
+
+  it("omits face-attribute clauses when range is 0..0", () => {
+    const filters = buildSearchFilters("", "", [], [], "human_only", "0.8", null, null, [], {
+      minCount: 0,
+      maxCount: 0,
+      certaintyMinPct: 65,
+      certaintyMaxPct: 95,
+      hasUnknownPerson: true
+    });
+    expect(filters?.faces).toEqual({ min_count: 0, max_count: 0 });
+  });
+
+  it("parses and serializes face boxes and album widgets toggles", () => {
+    const state = parseLibraryUrlState("?showFaces=1&showAlbumWidgets=1");
+    expect(state.areFaceBoxesVisible).toBe(true);
+    expect(state.areAlbumAssignmentWidgetsVisible).toBe(true);
+
+    const query = buildLibraryUrlQuery({
+      queryChips: [],
+      fromDate: "",
+      toDate: "",
+      selectedPersonNames: [],
+      selectedAlbumIds: [],
+      personCertaintyMode: "human_only",
+      suggestionConfidenceMinDraft: "0.8",
+      locationRadius: null,
+      hasFacesFilter: null,
+      pathHintFilters: [],
+      facesFilter: state.facesFilter,
+      areFaceBoxesVisible: true,
+      areAlbumAssignmentWidgetsVisible: true,
+      page: 1,
+      pageSize: 60,
+      sortDirection: "desc"
+    });
+
+    expect(query).toContain("showFaces=1");
+    expect(query).toContain("showAlbumWidgets=1");
+  });
 });

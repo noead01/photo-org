@@ -5,6 +5,10 @@ import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom
 import { LibraryRoutePage } from "./LibraryRoutePage";
 import { buildLibraryViewStateStorageKey } from "./library/libraryRouteMemory";
 
+vi.mock("./search/LocationRadiusPicker", () => ({
+  LocationRadiusPicker: () => <div data-testid="location-radius-picker" />
+}));
+
 type SearchResponsePayload = {
   hits: {
     total: number;
@@ -291,19 +295,32 @@ describe("LibraryRoutePage", () => {
 
     expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Search query" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Filter labels" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Date filter type" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Person filter type" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Location filter type" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Album filter type" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Path hints filter type" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Faces filter type" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Has faces filter type" })).toBeInTheDocument();
     expect(screen.queryByLabelText("From date")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Filter labels" }));
+    await user.click(screen.getByRole("button", { name: "Date filter type" }));
 
     expect(screen.getByLabelText("From date")).toBeInTheDocument();
     expect(screen.getByLabelText("To date")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Person filter" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Person filter type" }));
+
     expect(screen.getByRole("textbox", { name: "Person filter" })).toBeInTheDocument();
     expect(screen.getByLabelText("Person certainty mode")).toBeInTheDocument();
+    expect(screen.queryByLabelText("From date")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Location filter type" }));
+
     expect(screen.getByLabelText("Latitude")).toBeInTheDocument();
     expect(screen.getByLabelText("Longitude")).toBeInTheDocument();
     expect(screen.getByLabelText("Radius (km)")).toBeInTheDocument();
-    expect(screen.getByLabelText("Facet filters")).toBeInTheDocument();
     expect(await screen.findByRole("list", { name: "Photo gallery" })).toBeInTheDocument();
 
     expect(screen.queryByRole("button", { name: "Review faces" })).not.toBeInTheDocument();
@@ -313,6 +330,240 @@ describe("LibraryRoutePage", () => {
       screen.getByRole("checkbox", { name: "Enable album assignment widgets" })
     ).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "View details" })).not.toBeInTheDocument();
+  });
+
+  it("opens one filter panel at a time from filter chips", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+
+      if (input === "/api/v1/albums") {
+        return {
+          ok: true,
+          json: async () => []
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-a"])
+      } as Response;
+    });
+
+    renderLibraryAt("/library");
+    await screen.findByRole("heading", { name: "Library", level: 1 });
+
+    await user.click(screen.getByRole("button", { name: "Person filter type" }));
+    expect(screen.getByLabelText("Person filter")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Album filter type" }));
+    expect(screen.queryByLabelText("Person filter")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Done album filters" })).toBeInTheDocument();
+  });
+
+  it("restores face boxes and album assignment toggles from URL", async () => {
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-a"])
+      } as Response;
+    });
+
+    renderLibraryAt("/library?showFaces=1&showAlbumWidgets=1");
+    await screen.findByRole("heading", { name: "Library", level: 1 });
+
+    expect(screen.getByRole("checkbox", { name: "Show face boxes on all photos" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Enable album assignment widgets" })).toBeChecked();
+  });
+
+  it("reverts date edits on cancel", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-a"])
+      } as Response;
+    });
+
+    renderLibraryAt("/library?from=2024-01-01&to=2024-01-31");
+    await screen.findByRole("heading", { name: "Library", level: 1 });
+
+    await user.click(screen.getByRole("button", { name: "Date filter type" }));
+    await user.clear(screen.getByLabelText("From date"));
+    await user.type(screen.getByLabelText("From date"), "2024-02-01");
+    await user.click(screen.getByRole("button", { name: "Cancel date filters" }));
+
+    await user.click(screen.getByRole("button", { name: "Date filter type" }));
+    expect(screen.getByLabelText("From date")).toHaveValue("2024-01-01");
+  });
+
+  it("renders faces range sliders and unknown checkbox in faces panel", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-a"])
+      } as Response;
+    });
+
+    renderLibraryAt("/library");
+    await screen.findByRole("heading", { name: "Library", level: 1 });
+
+    await user.click(screen.getByRole("button", { name: "Faces filter type" }));
+    expect(screen.getByText("Face count range")).toBeInTheDocument();
+    expect(screen.getByText("Top certainty range")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Has face assigned to unknown person" })).toBeInTheDocument();
+  });
+
+  it("shows infinity label when max faces handle is unbounded", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-a"])
+      } as Response;
+    });
+
+    renderLibraryAt("/library");
+    await screen.findByRole("heading", { name: "Library", level: 1 });
+
+    await user.click(screen.getByRole("button", { name: "Faces filter type" }));
+    expect(screen.getByText("At most faces: ∞")).toBeInTheDocument();
+  });
+
+  it("auto-closes date panel when both dates are chosen", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-a"])
+      } as Response;
+    });
+
+    renderLibraryAt("/library");
+    await screen.findByRole("heading", { name: "Library", level: 1 });
+
+    await user.click(screen.getByRole("button", { name: "Date filter type" }));
+    await user.type(screen.getByLabelText("From date"), "2024-01-01");
+    await user.type(screen.getByLabelText("To date"), "2024-01-31");
+
+    expect(screen.queryByLabelText("From date")).not.toBeInTheDocument();
+  });
+
+  it("applies valid location and closes panel on apply", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-a"])
+      } as Response;
+    });
+
+    renderLibraryAt("/library");
+    await screen.findByRole("heading", { name: "Library", level: 1 });
+
+    await user.click(screen.getByRole("button", { name: "Location filter type" }));
+    await user.type(screen.getByLabelText("Latitude"), "40.7");
+    await user.type(screen.getByLabelText("Longitude"), "-74.0");
+    await user.type(screen.getByLabelText("Radius (km)"), "3");
+    await user.click(screen.getByRole("button", { name: "Apply location filters" }));
+
+    expect(screen.queryByLabelText("Latitude")).not.toBeInTheDocument();
+  });
+
+  it("reverts location edits on cancel", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-a"])
+      } as Response;
+    });
+
+    renderLibraryAt("/library?lat=40.7&lng=-74.0&radiusKm=2");
+    await screen.findByRole("heading", { name: "Library", level: 1 });
+
+    await user.click(screen.getByRole("button", { name: "Location filter type" }));
+    await user.clear(screen.getByLabelText("Latitude"));
+    await user.type(screen.getByLabelText("Latitude"), "12.3");
+    await user.click(screen.getByRole("button", { name: "Cancel location filters" }));
+
+    await user.click(screen.getByRole("button", { name: "Location filter type" }));
+    expect(screen.getByLabelText("Latitude")).toHaveValue("40.7");
+  });
+
+  it("cycles has-faces chip any with without any", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation(async (input: string) => {
+      if (input === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-a"])
+      } as Response;
+    });
+
+    renderLibraryAt("/library");
+    await screen.findByRole("heading", { name: "Library", level: 1 });
+
+    const chip = screen.getByRole("button", { name: "Has faces filter type" });
+    await user.click(chip);
+    expect(screen.getByRole("button", { name: "Remove has faces filter with faces" })).toBeInTheDocument();
+    await user.click(chip);
+    expect(screen.getByRole("button", { name: "Remove has faces filter without faces" })).toBeInTheDocument();
+    await user.click(chip);
+    expect(screen.queryByText(/has faces:/i)).not.toBeInTheDocument();
   });
 
   it("shows shared album assignment widgets when enabled", async () => {
@@ -498,9 +749,9 @@ describe("LibraryRoutePage", () => {
       expect(searchCalls.length).toBeGreaterThan(1);
     });
 
-    const latestSearchCall = fetchMock.mock.calls
-      .filter(([requestInput]) => requestInput === "/api/v1/search")
-      .at(-1);
+    const searchCalls = fetchMock.mock.calls
+      .filter(([requestInput]) => requestInput === "/api/v1/search");
+    const latestSearchCall = searchCalls[searchCalls.length - 1];
     const latestSearchBody = JSON.parse(String(latestSearchCall?.[1]?.body ?? "{}")) as Record<string, unknown>;
     expect(latestSearchBody.include_face_info).toBe(true);
   });
@@ -936,7 +1187,7 @@ describe("LibraryRoutePage", () => {
 
     expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Filter labels" }));
+    await user.click(screen.getByRole("button", { name: "Person filter type" }));
     await user.selectOptions(screen.getByLabelText("Person certainty mode"), "include_suggestions");
     const suggestionThresholdSlider = screen.getByRole("slider", { name: "Suggestion threshold" });
     suggestionThresholdSlider.focus();
@@ -973,6 +1224,114 @@ describe("LibraryRoutePage", () => {
           })
         })
       );
+    });
+  });
+
+  it("sends faces filter payload with count, certainty, and unknown fields", async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+      if (url === "/api/v1/people") {
+        return {
+          ok: true,
+          json: async () => []
+        } as Response;
+      }
+      if (url !== "/api/v1/search") {
+        throw new Error(`Unhandled fetch: ${url}`);
+      }
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-a"])
+      } as Response;
+    });
+
+    renderLibraryAt("/library?facesMin=2&facesMax=7&facesCertMin=60&facesCertMax=95&facesUnknown=1");
+    expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
+
+    await waitFor(() => {
+      const searchBodies = fetchMock.mock.calls
+        .filter(([requestInput]) => String(requestInput) === "/api/v1/search")
+        .map(([, requestInit]) =>
+          JSON.parse((requestInit?.body as string | undefined) ?? "{}") as {
+            filters?: {
+              faces?: {
+                min_count?: number;
+                max_count?: number;
+                top_certainty_min?: number;
+                top_certainty_max?: number;
+                has_unknown_person?: boolean;
+              };
+            };
+          }
+        );
+      const matchedRequest = searchBodies.find(
+        (body) =>
+          body.filters?.faces?.min_count === 2 &&
+          body.filters?.faces?.max_count === 7 &&
+          body.filters?.faces?.top_certainty_min === 0.6 &&
+          body.filters?.faces?.top_certainty_max === 0.95 &&
+          body.filters?.faces?.has_unknown_person === true
+      );
+      expect(matchedRequest).toBeDefined();
+    });
+  });
+
+  it("suppresses certainty and unknown fields when faces range is 0..0", async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/v1/operations/activity") {
+        return {
+          ok: true,
+          json: async () => ({ ingest_queue: { summary: { processing_count: 0 } } })
+        } as Response;
+      }
+      if (url === "/api/v1/people") {
+        return {
+          ok: true,
+          json: async () => []
+        } as Response;
+      }
+      if (url !== "/api/v1/search") {
+        throw new Error(`Unhandled fetch: ${url}`);
+      }
+      return {
+        ok: true,
+        json: async () => buildPayload(["photo-a"])
+      } as Response;
+    });
+
+    renderLibraryAt("/library?facesMin=0&facesMax=0&facesCertMin=65&facesCertMax=95&facesUnknown=1");
+    expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
+
+    await waitFor(() => {
+      const searchBodies = fetchMock.mock.calls
+        .filter(([requestInput]) => String(requestInput) === "/api/v1/search")
+        .map(([, requestInit]) =>
+          JSON.parse((requestInit?.body as string | undefined) ?? "{}") as {
+            filters?: {
+              faces?: {
+                min_count?: number;
+                max_count?: number;
+                top_certainty_min?: number;
+                top_certainty_max?: number;
+                has_unknown_person?: boolean;
+              };
+            };
+          }
+        );
+      const matchedRequest = searchBodies.find(
+        (body) => body.filters?.faces?.min_count === 0 && body.filters?.faces?.max_count === 0
+      );
+      expect(matchedRequest?.filters?.faces).toEqual({
+        min_count: 0,
+        max_count: 0
+      });
     });
   });
 
@@ -1028,7 +1387,7 @@ describe("LibraryRoutePage", () => {
     expect(await screen.findByText("album: Family Trip")).toBeInTheDocument();
     expect(screen.queryByText("album: album-1")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Filter labels" }));
+    await user.click(screen.getByRole("button", { name: "Album filter type" }));
     expect(screen.getByRole("button", { name: "album: Family Trip" })).toBeInTheDocument();
   });
 
@@ -1064,7 +1423,7 @@ describe("LibraryRoutePage", () => {
     renderLibraryAt("/library");
     expect(await screen.findByRole("heading", { name: "Library", level: 1 })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Filter labels" }));
+    await user.click(screen.getByRole("button", { name: "Person filter type" }));
     await user.type(screen.getByRole("textbox", { name: "Person filter" }), "inez");
     await user.click(screen.getByRole("button", { name: "Add person filter" }));
 
@@ -1504,10 +1863,12 @@ describe("LibraryRoutePage", () => {
 
     await user.click(screen.getByRole("link", { name: "Back to library" }));
 
-    expect(await screen.findByRole("button", { name: "Page 3" })).toHaveAttribute(
-      "aria-current",
-      "page"
-    );
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Page 3" })).toHaveAttribute(
+        "aria-current",
+        "page"
+      );
+    });
     expect(screen.getByRole("combobox", { name: "Photos per page" })).toHaveValue("24");
   });
 

@@ -23,6 +23,7 @@ from app.domain.facets import (
     FacetValue,
 )
 from app.core.pagination import iso_utc
+from app.services.people import UNKNOWN_PERSON_DISPLAY_NAME
 
 
 def _coerce_positive_int(value: object) -> int | None:
@@ -123,6 +124,111 @@ class PhotosRepository:
             .limit(1)
             .exists()
         )
+
+    def _faces_count_clause(self, faces_filter):
+        clauses = []
+        active_face_count = (
+            select(func.count())
+            .select_from(self.faces)
+            .where(
+                and_(
+                    self.faces.c.photo_id == self.photos.c.photo_id,
+                    self.faces.c.dismissed_ts.is_(None),
+                )
+            )
+            .scalar_subquery()
+        )
+        if faces_filter.min_count is not None:
+            clauses.append(active_face_count >= faces_filter.min_count)
+        if faces_filter.max_count is not None:
+            clauses.append(active_face_count <= faces_filter.max_count)
+        if not clauses:
+            return None
+        return and_(*clauses)
+
+    def _faces_top_certainty_clause(self, faces_filter):
+        min_certainty = faces_filter.top_certainty_min
+        max_certainty = faces_filter.top_certainty_max
+        if min_certainty is None and max_certainty is None:
+            return None
+
+        active_faces = self.faces.alias("active_faces")
+        top_face_suggestions = self._top_face_suggestions_subquery()
+        human_confirmed_assignment_exists = (
+            select(self.face_labels.c.face_id)
+            .where(
+                and_(
+                    self.face_labels.c.face_id == active_faces.c.face_id,
+                    self.face_labels.c.person_id == active_faces.c.person_id,
+                    self.face_labels.c.label_source == "human_confirmed",
+                )
+            )
+            .limit(1)
+            .exists()
+        )
+
+        effective_top_certainty = case(
+            (human_confirmed_assignment_exists, 1.0),
+            else_=top_face_suggestions.c.confidence,
+        )
+        certainty_clauses = []
+        if min_certainty is not None:
+            certainty_clauses.append(effective_top_certainty >= min_certainty)
+        if max_certainty is not None:
+            certainty_clauses.append(effective_top_certainty <= max_certainty)
+
+        matching_face_exists = (
+            select(active_faces.c.photo_id)
+            .select_from(
+                active_faces.outerjoin(
+                    top_face_suggestions,
+                    and_(
+                        top_face_suggestions.c.face_id == active_faces.c.face_id,
+                        top_face_suggestions.c.suggestion_order == 1,
+                    ),
+                )
+            )
+            .where(
+                and_(
+                    active_faces.c.photo_id == self.photos.c.photo_id,
+                    active_faces.c.dismissed_ts.is_(None),
+                    *certainty_clauses,
+                )
+            )
+            .limit(1)
+        )
+        return matching_face_exists.exists()
+
+    def _unknown_person_clause(self, faces_filter):
+        if faces_filter.has_unknown_person is not True:
+            return None
+
+        unknown_person_match_exists = (
+            select(self.faces.c.photo_id)
+            .select_from(
+                self.faces.join(
+                    self.people,
+                    self.faces.c.person_id == self.people.c.person_id,
+                ).join(
+                    self.face_labels,
+                    and_(
+                        self.face_labels.c.face_id == self.faces.c.face_id,
+                        self.face_labels.c.person_id == self.faces.c.person_id,
+                    ),
+                )
+            )
+            .where(
+                and_(
+                    self.faces.c.photo_id == self.photos.c.photo_id,
+                    self.faces.c.dismissed_ts.is_(None),
+                    self.people.c.display_name == UNKNOWN_PERSON_DISPLAY_NAME,
+                    self.face_labels.c.label_source == "human_confirmed",
+                )
+            )
+            .limit(1)
+            .exists()
+        )
+        return unknown_person_match_exists
 
     def _build_people_filter_clause(self, filters: SearchFilters):
         person_ids = filters.people or []
@@ -723,6 +829,19 @@ class PhotosRepository:
                 self.faces.c.photo_id == self.photos.c.photo_id
             ).limit(1)
             where_conditions.append(~faces_subquery.exists())
+
+        if filters.faces is not None:
+            faces_count_clause = self._faces_count_clause(filters.faces)
+            if faces_count_clause is not None:
+                where_conditions.append(faces_count_clause)
+
+            faces_top_certainty_clause = self._faces_top_certainty_clause(filters.faces)
+            if faces_top_certainty_clause is not None:
+                where_conditions.append(faces_top_certainty_clause)
+
+            unknown_person_clause = self._unknown_person_clause(filters.faces)
+            if unknown_person_clause is not None:
+                where_conditions.append(unknown_person_clause)
         
         people_clause = self._build_people_filter_clause(filters)
         if people_clause is not None:

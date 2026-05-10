@@ -119,6 +119,30 @@ def test_location_radius_validation_rejects_non_finite_values(location_radius):
         SearchFilters(location_radius=location_radius)
 
 
+def test_faces_filter_validation_rejects_negative_counts():
+    with pytest.raises(ValidationError) as exc_info:
+        SearchFilters(faces={"min_count": -1})
+
+    assert "greater than or equal to 0" in str(exc_info.value)
+
+
+def test_faces_filter_validation_rejects_invalid_certainty_bounds():
+    with pytest.raises(ValidationError) as exc_info:
+        SearchFilters(faces={"top_certainty_min": 1.2})
+
+    assert "top certainty bounds must be between 0 and 1" in str(exc_info.value)
+
+
+def test_faces_filter_validation_rejects_inverted_ranges():
+    with pytest.raises(ValidationError) as count_exc:
+        SearchFilters(faces={"min_count": 5, "max_count": 2})
+    assert "min_count must be <= max_count" in str(count_exc.value)
+
+    with pytest.raises(ValidationError) as certainty_exc:
+        SearchFilters(faces={"top_certainty_min": 0.9, "top_certainty_max": 0.1})
+    assert "top_certainty_min must be <= top_certainty_max" in str(certainty_exc.value)
+
+
 def test_page_spec_validation_supports_offset_and_rejects_cursor_offset_conflict():
     page = PageSpec(limit=50, offset=120)
     assert page.offset == 120
@@ -1887,6 +1911,540 @@ class TestPhotosRepositorySoftDeleteFiltering:
             )
 
         assert [item["photo_id"] for item in items] == ["birthday-no-faces"]
+        assert total == 1
+
+    def test_faces_filter_count_range_filters_results(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-faces-count-range.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        now = datetime(2026, 5, 10, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            connection.execute(
+                insert(photos),
+                [
+                    {
+                        "photo_id": "photo-zero",
+                        "path": "seed-corpus/family/photo-zero.jpg",
+                        "sha256": "0" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 0,
+                        "faces_detected_ts": None,
+                    },
+                    {
+                        "photo_id": "photo-one",
+                        "path": "seed-corpus/family/photo-one.jpg",
+                        "sha256": "1" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 1,
+                        "faces_detected_ts": now,
+                    },
+                    {
+                        "photo_id": "photo-two",
+                        "path": "seed-corpus/family/photo-two.jpg",
+                        "sha256": "2" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 2,
+                        "faces_detected_ts": now,
+                    },
+                    {
+                        "photo_id": "photo-dismissed",
+                        "path": "seed-corpus/family/photo-dismissed.jpg",
+                        "sha256": "3" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 1,
+                        "faces_detected_ts": now,
+                    },
+                ],
+            )
+            connection.execute(
+                insert(faces),
+                [
+                    {
+                        "face_id": "face-photo-one-1",
+                        "photo_id": "photo-one",
+                        "person_id": None,
+                        "bbox_x": 0,
+                        "bbox_y": 0,
+                        "bbox_w": 10,
+                        "bbox_h": 10,
+                        "bitmap": None,
+                        "embedding": None,
+                        "detector_name": "seed",
+                        "detector_version": "1",
+                        "provenance": None,
+                        "created_ts": now,
+                        "dismissed_ts": None,
+                    },
+                    {
+                        "face_id": "face-photo-two-1",
+                        "photo_id": "photo-two",
+                        "person_id": None,
+                        "bbox_x": 0,
+                        "bbox_y": 0,
+                        "bbox_w": 10,
+                        "bbox_h": 10,
+                        "bitmap": None,
+                        "embedding": None,
+                        "detector_name": "seed",
+                        "detector_version": "1",
+                        "provenance": None,
+                        "created_ts": now,
+                        "dismissed_ts": None,
+                    },
+                    {
+                        "face_id": "face-photo-two-2",
+                        "photo_id": "photo-two",
+                        "person_id": None,
+                        "bbox_x": 10,
+                        "bbox_y": 10,
+                        "bbox_w": 10,
+                        "bbox_h": 10,
+                        "bitmap": None,
+                        "embedding": None,
+                        "detector_name": "seed",
+                        "detector_version": "1",
+                        "provenance": None,
+                        "created_ts": now,
+                        "dismissed_ts": None,
+                    },
+                    {
+                        "face_id": "face-photo-dismissed-1",
+                        "photo_id": "photo-dismissed",
+                        "person_id": None,
+                        "bbox_x": 0,
+                        "bbox_y": 0,
+                        "bbox_w": 10,
+                        "bbox_h": 10,
+                        "bitmap": None,
+                        "embedding": None,
+                        "detector_name": "seed",
+                        "detector_version": "1",
+                        "provenance": None,
+                        "created_ts": now,
+                        "dismissed_ts": now,
+                    },
+                ],
+            )
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            min_only_items, _, _ = repo.search_photos(
+                filters=SearchFilters(faces={"min_count": 1}),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+            )
+
+        assert {item["photo_id"] for item in min_only_items} == {"photo-one", "photo-two"}
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            max_only_items, _, _ = repo.search_photos(
+                filters=SearchFilters(faces={"max_count": 1}),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+            )
+
+        assert {item["photo_id"] for item in max_only_items} == {
+            "photo-zero",
+            "photo-one",
+            "photo-dismissed",
+        }
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            exact_items, total, _ = repo.search_photos(
+                filters=SearchFilters(faces={"min_count": 1, "max_count": 1}),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+            )
+
+        assert [item["photo_id"] for item in exact_items] == ["photo-one"]
+        assert total == 1
+
+    def test_faces_filter_top_certainty_any_face_semantics(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-faces-top-certainty-any-face.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        now = datetime(2026, 5, 10, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            connection.execute(
+                insert(photos),
+                [
+                    {
+                        "photo_id": "photo-any-face-match",
+                        "path": "seed-corpus/family/photo-any-face-match.jpg",
+                        "sha256": "4" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 2,
+                        "faces_detected_ts": now,
+                    },
+                    {
+                        "photo_id": "photo-no-match",
+                        "path": "seed-corpus/family/photo-no-match.jpg",
+                        "sha256": "5" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 1,
+                        "faces_detected_ts": now,
+                    },
+                ],
+            )
+            connection.execute(
+                insert(people).values(
+                    person_id="person-inez",
+                    display_name="Inez Rivera",
+                    created_ts=now,
+                    updated_ts=now,
+                )
+            )
+            connection.execute(
+                insert(faces),
+                [
+                    {
+                        "face_id": "face-human-confirmed",
+                        "photo_id": "photo-any-face-match",
+                        "person_id": "person-inez",
+                        "bbox_x": 0,
+                        "bbox_y": 0,
+                        "bbox_w": 10,
+                        "bbox_h": 10,
+                        "bitmap": None,
+                        "embedding": None,
+                        "detector_name": "seed",
+                        "detector_version": "1",
+                        "provenance": None,
+                        "created_ts": now,
+                    },
+                    {
+                        "face_id": "face-low-suggestion-same-photo",
+                        "photo_id": "photo-any-face-match",
+                        "person_id": None,
+                        "bbox_x": 10,
+                        "bbox_y": 10,
+                        "bbox_w": 10,
+                        "bbox_h": 10,
+                        "bitmap": None,
+                        "embedding": None,
+                        "detector_name": "seed",
+                        "detector_version": "1",
+                        "provenance": None,
+                        "created_ts": now,
+                    },
+                    {
+                        "face_id": "face-medium-suggestion",
+                        "photo_id": "photo-no-match",
+                        "person_id": None,
+                        "bbox_x": 0,
+                        "bbox_y": 0,
+                        "bbox_w": 10,
+                        "bbox_h": 10,
+                        "bitmap": None,
+                        "embedding": None,
+                        "detector_name": "seed",
+                        "detector_version": "1",
+                        "provenance": None,
+                        "created_ts": now,
+                    },
+                ],
+            )
+            connection.execute(
+                insert(face_labels).values(
+                    face_label_id="face-label-human-confirmed",
+                    face_id="face-human-confirmed",
+                    person_id="person-inez",
+                    label_source="human_confirmed",
+                    confidence=1.0,
+                    model_version="manual",
+                    provenance=None,
+                    created_ts=now,
+                    updated_ts=now,
+                )
+            )
+            connection.execute(
+                insert(face_suggestions),
+                [
+                    {
+                        "face_suggestion_id": "face-suggestion-low",
+                        "face_id": "face-low-suggestion-same-photo",
+                        "person_id": "person-inez",
+                        "rank": 1,
+                        "confidence": 0.20,
+                        "centroid_distance": 0.8,
+                        "knn_distance": 0.8,
+                        "representation_version": 1,
+                        "scoring_version": "hybrid-v1",
+                        "model_version": "nearest-neighbor-cosine-v1",
+                        "provenance": None,
+                        "created_ts": now,
+                        "updated_ts": now,
+                    },
+                    {
+                        "face_suggestion_id": "face-suggestion-medium",
+                        "face_id": "face-medium-suggestion",
+                        "person_id": "person-inez",
+                        "rank": 1,
+                        "confidence": 0.45,
+                        "centroid_distance": 0.55,
+                        "knn_distance": 0.55,
+                        "representation_version": 1,
+                        "scoring_version": "hybrid-v1",
+                        "model_version": "nearest-neighbor-cosine-v1",
+                        "provenance": None,
+                        "created_ts": now,
+                        "updated_ts": now,
+                    },
+                ],
+            )
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            items, total, _ = repo.search_photos(
+                filters=SearchFilters(faces={"top_certainty_min": 0.9, "top_certainty_max": 1.0}),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+            )
+
+        assert [item["photo_id"] for item in items] == ["photo-any-face-match"]
+        assert total == 1
+
+    def test_faces_filter_unknown_person_matches_at_least_one_unknown_assigned_face(self, tmp_path):
+        database_url = f"sqlite:///{tmp_path / 'search-faces-unknown-person.db'}"
+        upgrade_database(database_url)
+        engine = create_engine(database_url, future=True)
+        now = datetime(2026, 5, 10, tzinfo=UTC)
+
+        with engine.begin() as connection:
+            connection.execute(
+                insert(photos),
+                [
+                    {
+                        "photo_id": "photo-unknown",
+                        "path": "seed-corpus/family/photo-unknown.jpg",
+                        "sha256": "6" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 1,
+                        "faces_detected_ts": now,
+                    },
+                    {
+                        "photo_id": "photo-known",
+                        "path": "seed-corpus/family/photo-known.jpg",
+                        "sha256": "7" * 64,
+                        "phash": None,
+                        "filesize": 100,
+                        "ext": "jpg",
+                        "created_ts": now,
+                        "modified_ts": now,
+                        "shot_ts": now,
+                        "shot_ts_source": None,
+                        "camera_make": None,
+                        "camera_model": None,
+                        "software": None,
+                        "orientation": None,
+                        "gps_latitude": None,
+                        "gps_longitude": None,
+                        "gps_altitude": None,
+                        "updated_ts": now,
+                        "deleted_ts": None,
+                        "faces_count": 1,
+                        "faces_detected_ts": now,
+                    },
+                ],
+            )
+            connection.execute(
+                insert(people),
+                [
+                    {
+                        "person_id": "person-unknown",
+                        "display_name": "Unknown person",
+                        "created_ts": now,
+                        "updated_ts": now,
+                    },
+                    {
+                        "person_id": "person-known",
+                        "display_name": "Known Person",
+                        "created_ts": now,
+                        "updated_ts": now,
+                    },
+                ],
+            )
+            connection.execute(
+                insert(faces),
+                [
+                    {
+                        "face_id": "face-unknown",
+                        "photo_id": "photo-unknown",
+                        "person_id": "person-unknown",
+                        "bbox_x": 0,
+                        "bbox_y": 0,
+                        "bbox_w": 10,
+                        "bbox_h": 10,
+                        "bitmap": None,
+                        "embedding": None,
+                        "detector_name": "seed",
+                        "detector_version": "1",
+                        "provenance": None,
+                        "created_ts": now,
+                    },
+                    {
+                        "face_id": "face-known",
+                        "photo_id": "photo-known",
+                        "person_id": "person-known",
+                        "bbox_x": 0,
+                        "bbox_y": 0,
+                        "bbox_w": 10,
+                        "bbox_h": 10,
+                        "bitmap": None,
+                        "embedding": None,
+                        "detector_name": "seed",
+                        "detector_version": "1",
+                        "provenance": None,
+                        "created_ts": now,
+                    },
+                ],
+            )
+            connection.execute(
+                insert(face_labels),
+                [
+                    {
+                        "face_label_id": "face-label-unknown",
+                        "face_id": "face-unknown",
+                        "person_id": "person-unknown",
+                        "label_source": "human_confirmed",
+                        "confidence": 1.0,
+                        "model_version": "manual",
+                        "provenance": None,
+                        "created_ts": now,
+                        "updated_ts": now,
+                    },
+                    {
+                        "face_label_id": "face-label-known",
+                        "face_id": "face-known",
+                        "person_id": "person-known",
+                        "label_source": "human_confirmed",
+                        "confidence": 1.0,
+                        "model_version": "manual",
+                        "provenance": None,
+                        "created_ts": now,
+                        "updated_ts": now,
+                    },
+                ],
+            )
+
+        with Session(engine) as session:
+            repo = PhotosRepository(session)
+            items, total, _ = repo.search_photos(
+                filters=SearchFilters(faces={"has_unknown_person": True}),
+                sort=SortSpec(by="shot_ts", dir="desc"),
+                page=PageSpec(limit=50),
+            )
+
+        assert [item["photo_id"] for item in items] == ["photo-unknown"]
         assert total == 1
 
     def test_search_repository_filters_by_person_names(self, tmp_path):

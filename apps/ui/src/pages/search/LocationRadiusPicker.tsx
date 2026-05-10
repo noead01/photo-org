@@ -110,6 +110,7 @@ export function LocationRadiusPicker({ value, onChange, onMapError }: LocationRa
 
     const radiusHandle = L.marker(handle, {
       draggable: true,
+      bubblingMouseEvents: false,
       icon: L.divIcon({
         className: "search-location-radius-handle",
         iconSize: [14, 14]
@@ -122,6 +123,12 @@ export function LocationRadiusPicker({ value, onChange, onMapError }: LocationRa
       const markerPosition = marker.getLatLng();
       const nextRadiusKm = Math.max(map.distance(center, markerPosition) / 1000, 0.1);
       radiusCircle.setRadius(nextRadiusKm * 1000);
+    });
+
+    radiusHandle.on("dragend", (event: L.LeafletEvent) => {
+      const marker = event.target as L.Marker;
+      const markerPosition = marker.getLatLng();
+      const nextRadiusKm = Math.max(map.distance(center, markerPosition) / 1000, 0.1);
       onChange({
         latitude: value.latitude,
         longitude: value.longitude,

@@ -12,18 +12,35 @@ interface ConfidenceRangeSliderProps {
   maxValue: number;
   onValueChange: (minValue: number, maxValue: number) => void;
   disabled?: boolean;
+  minBound?: number;
+  maxBound?: number;
+  minLabel?: string;
+  maxLabel?: string;
+  minValueFormatter?: (value: number) => string;
+  maxValueFormatter?: (value: number) => string;
+  minThumbAriaLabel?: string;
+  maxThumbAriaLabel?: string;
+}
+
+function clampToBounds(value: number, minBound: number, maxBound: number): number {
+  if (!Number.isFinite(value)) {
+    return minBound;
+  }
+  return Math.max(minBound, Math.min(maxBound, Math.round(value)));
 }
 
 function clampPercent(value: number): number {
-  if (!Number.isFinite(value)) {
-    return 0;
-  }
-  return Math.max(0, Math.min(100, Math.round(value)));
+  return clampToBounds(value, 0, 100);
 }
 
-function normalizeRange(minValue: number, maxValue: number): [number, number] {
-  const normalizedMin = clampPercent(minValue);
-  const normalizedMax = clampPercent(maxValue);
+function normalizeRange(
+  minValue: number,
+  maxValue: number,
+  minBound: number,
+  maxBound: number
+): [number, number] {
+  const normalizedMin = clampToBounds(minValue, minBound, maxBound);
+  const normalizedMax = clampToBounds(maxValue, minBound, maxBound);
   if (normalizedMin <= normalizedMax) {
     return [normalizedMin, normalizedMax];
   }
@@ -104,8 +121,16 @@ export function ConfidenceRangeSlider({
   maxValue,
   onValueChange,
   disabled = false,
+  minBound = 0,
+  maxBound = 100,
+  minLabel = "Minimum certainty",
+  maxLabel = "Maximum certainty",
+  minValueFormatter = (value) => `${value}%`,
+  maxValueFormatter = (value) => `${value}%`,
+  minThumbAriaLabel = "Minimum suggestion certainty",
+  maxThumbAriaLabel = "Maximum suggestion certainty",
 }: ConfidenceRangeSliderProps) {
-  const [normalizedMin, normalizedMax] = normalizeRange(minValue, maxValue);
+  const [normalizedMin, normalizedMax] = normalizeRange(minValue, maxValue, minBound, maxBound);
   const [draftRange, setDraftRange] = useState<[number, number]>([normalizedMin, normalizedMax]);
   const [draftMin, draftMax] = draftRange;
 
@@ -115,22 +140,22 @@ export function ConfidenceRangeSlider({
 
   return (
     <div className="confidence-slider-wrapper">
-      <p>{`Minimum certainty: ${draftMin}%`}</p>
-      <p>{`Maximum certainty: ${draftMax}%`}</p>
+      <p>{`${minLabel}: ${minValueFormatter(draftMin)}`}</p>
+      <p>{`${maxLabel}: ${maxValueFormatter(draftMax)}`}</p>
       <Range
-        min={0}
-        max={100}
+        min={minBound}
+        max={maxBound}
         step={1}
         values={draftRange}
         disabled={disabled}
         onChange={(next) => {
           const [nextMin = draftMin, nextMax = draftMax] = next;
-          const [safeMin, safeMax] = normalizeRange(nextMin, nextMax);
+          const [safeMin, safeMax] = normalizeRange(nextMin, nextMax, minBound, maxBound);
           setDraftRange([safeMin, safeMax]);
         }}
         onFinalChange={(next) => {
           const [nextMin = draftMin, nextMax = draftMax] = next;
-          const [safeMin, safeMax] = normalizeRange(nextMin, nextMax);
+          const [safeMin, safeMax] = normalizeRange(nextMin, nextMax, minBound, maxBound);
           onValueChange(safeMin, safeMax);
         }}
         renderTrack={({ props, children }) => (
@@ -148,8 +173,8 @@ export function ConfidenceRangeSlider({
                 background: getTrackBackground({
                   values: draftRange,
                   colors: ["#dbeafe", "#3b82f6", "#dbeafe"],
-                  min: 0,
-                  max: 100,
+                  min: minBound,
+                  max: maxBound,
                 }),
               }}
             >
@@ -164,7 +189,7 @@ export function ConfidenceRangeSlider({
               key={key}
               {...thumbProps}
               className="confidence-slider-thumb"
-              aria-label={index === 0 ? "Minimum suggestion certainty" : "Maximum suggestion certainty"}
+              aria-label={index === 0 ? minThumbAriaLabel : maxThumbAriaLabel}
             />
           );
         }}

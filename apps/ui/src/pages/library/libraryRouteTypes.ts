@@ -70,6 +70,14 @@ export type LibraryLocationRadius = {
   radius_km: number;
 };
 
+export type LibraryFacesFilterState = {
+  minCount: number;
+  maxCount: number | null;
+  certaintyMinPct: number;
+  certaintyMaxPct: number;
+  hasUnknownPerson: boolean;
+};
+
 export type SearchUrlState = {
   queryChips: string[];
   fromDate: string;
@@ -86,4 +94,7 @@ export type SearchUrlState = {
   locationRadius: LibraryLocationRadius | null;
   hasFacesFilter: boolean | null;
   pathHintFilters: string[];
+  facesFilter: LibraryFacesFilterState;
+  areFaceBoxesVisible: boolean;
+  areAlbumAssignmentWidgetsVisible: boolean;
 };

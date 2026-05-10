@@ -64,6 +64,8 @@ export function buildLibraryQueryForAlbum(album: AlbumRecord): string {
     locationRadius: null,
     hasFacesFilter: null,
     pathHintFilters: [] as string[],
+    areFaceBoxesVisible: false,
+    areAlbumAssignmentWidgetsVisible: false,
     sortDirection: "desc" as const,
     page: 1,
     pageSize: DEFAULT_SEARCH_PAGE_LIMIT
