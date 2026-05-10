@@ -245,8 +245,8 @@ describe("SuggestionsRoutePage", () => {
     const overlay = screen.getByRole("list", {
       name: "Detected face regions"
     });
-    expect(within(overlay).getByText("1")).toBeInTheDocument();
-    expect(within(overlay).getByText("2")).toBeInTheDocument();
+    expect(within(overlay).getByText("Alex")).toBeInTheDocument();
+    expect(within(overlay).getByText("Blair")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Previous page" })).toHaveAttribute(
       "aria-disabled",
       "true"

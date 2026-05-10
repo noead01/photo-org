@@ -23,6 +23,7 @@ describe("photoInspectorState", () => {
     expect(retargeted.activeFaceAssignment).toEqual({
       photoId: "photo-1",
       faceId: "face-1",
+      faceIndex: null,
       sourceSurfaceId: "surface-photo-1",
     });
   });
