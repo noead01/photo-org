@@ -157,6 +157,63 @@ export function AlbumsRoutePage() {
     return activeFaceSummary.faces.find((face) => face.faceId === activeFaceAssignment.faceId) ?? null;
   }, [activeFaceSummary, photoInspectorState.activeFaceAssignment]);
 
+  useEffect(() => {
+    if (!photoInspectorState.areFaceBoxesVisible || !detail || detail.items.length === 0) {
+      return;
+    }
+
+    let canceled = false;
+    const missingPhotoIds = detail.items
+      .map((item) => item.photo_id)
+      .filter((photoId) => !photoDetailById[photoId]);
+
+    if (missingPhotoIds.length === 0) {
+      return;
+    }
+
+    void Promise.all(
+      missingPhotoIds.map(async (photoId) => {
+        try {
+          const payload = await fetchPhotoDetail(photoId);
+          if (canceled) {
+            return;
+          }
+          setPhotoDetailById((current) => (
+            current[photoId]
+              ? current
+              : {
+                  ...current,
+                  [photoId]: payload
+                }
+          ));
+        } catch {
+          // Ignore prefetch failures; face overlays can still load when a card is inspected.
+        }
+      })
+    );
+
+    return () => {
+      canceled = true;
+    };
+  }, [detail, photoDetailById, photoInspectorState.areFaceBoxesVisible]);
+
+  const detailPhotoSummaryById = useMemo(() => {
+    const summaries = new Map<string, ReturnType<typeof adaptPhotoDetail>>();
+    if (!detail) {
+      return summaries;
+    }
+
+    for (const item of detail.items) {
+      const detailPayload = photoDetailById[item.photo_id];
+      if (!detailPayload) {
+        continue;
+      }
+      summaries.set(item.photo_id, adaptPhotoDetail(detailPayload));
+    }
+
+    return summaries;
+  }, [detail, photoDetailById]);
+
   function handleOpenAlbum(album: AlbumRecord) {
     const query = buildLibraryQueryForAlbum(album);
     navigate(`/library${query ? `?${query}` : ""}`);
@@ -188,6 +245,7 @@ export function AlbumsRoutePage() {
         albums={sortedAlbums}
         selectedAlbumId={selectedAlbumId}
         detail={detail}
+        detailPhotoSummaryById={detailPhotoSummaryById}
         selectedPhotoIds={selectionState.selectedPhotoIds}
         faceBoxesVisible={photoInspectorState.areFaceBoxesVisible}
         activeMetadataPhotoId={photoInspectorState.activeMetadataPhotoId}

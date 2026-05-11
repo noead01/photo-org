@@ -101,6 +101,156 @@ describe("AlbumsRoutePage", () => {
     ).toBeInTheDocument();
   });
 
+  it("toggles album face boxes and preloads detail faces for visible photos", async () => {
+    const user = userEvent.setup();
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/v1/people") {
+        return {
+          ok: true,
+          json: async () => []
+        } as Response;
+      }
+
+      if (url === "/api/v1/albums") {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              album_id: "album-1",
+              name: "Weekend",
+              owner_user_id: "demo-user",
+              kind: "editable",
+              created_ts: "2026-05-08T12:00:00Z",
+              updated_ts: "2026-05-08T12:00:00Z",
+              item_count: 1,
+              saved_filter: null
+            }
+          ]
+        } as Response;
+      }
+
+      if (url === "/api/v1/albums/album-1?page=1&page_size=24") {
+        return {
+          ok: true,
+          json: async () => ({
+            album_id: "album-1",
+            name: "Weekend",
+            owner_user_id: "demo-user",
+            kind: "editable",
+            created_ts: "2026-05-08T12:00:00Z",
+            updated_ts: "2026-05-08T12:00:00Z",
+            item_count: 1,
+            items_total: 1,
+            items: [
+              {
+                photo_id: "photo-1",
+                path: "/library/photo-1.jpg",
+                ext: "jpg",
+                shot_ts: null,
+                filesize: 1024,
+                thumbnail: {
+                  mime_type: "image/jpeg",
+                  width: 120,
+                  height: 80,
+                  data_base64: "dGh1bWI="
+                }
+              }
+            ],
+            page: 1,
+            page_size: 24,
+            total_pages: 1,
+            saved_filter: null
+          })
+        } as Response;
+      }
+
+      if (url === "/api/v1/photos/photo-1") {
+        return {
+          ok: true,
+          json: async () => ({
+            photo_id: "photo-1",
+            path: "/library/photo-1.jpg",
+            ext: "jpg",
+            camera_make: null,
+            orientation: null,
+            shot_ts: null,
+            filesize: 1024,
+            tags: [],
+            people: [],
+            faces: [
+              {
+                face_id: "face-1",
+                person_id: null,
+                bbox_x: 10,
+                bbox_y: 12,
+                bbox_w: 18,
+                bbox_h: 20,
+                bbox_space_width: 120,
+                bbox_space_height: 80,
+                label_source: null,
+                confidence: null,
+                model_version: null,
+                provenance: null,
+                label_recorded_ts: null
+              }
+            ],
+            thumbnail: {
+              mime_type: "image/jpeg",
+              width: 120,
+              height: 80,
+              data_base64: "dGh1bWI="
+            },
+            original: {
+              is_available: true,
+              availability_state: "available",
+              last_failure_reason: null
+            },
+            metadata: {
+              sha256: "sha",
+              phash: null,
+              shot_ts_source: null,
+              camera_model: null,
+              software: null,
+              gps_latitude: null,
+              gps_longitude: null,
+              gps_altitude: null,
+              exif_attributes: null,
+              created_ts: "2026-05-08T12:00:00Z",
+              updated_ts: "2026-05-08T12:00:00Z",
+              modified_ts: null,
+              deleted_ts: null,
+              faces_count: 1,
+              faces_detected_ts: null
+            }
+          })
+        } as Response;
+      }
+
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    renderAlbumsRoute();
+
+    expect(await screen.findByRole("heading", { name: "Albums", level: 1 })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show content Weekend" }));
+
+    const faceBoxesToggle = screen.getByLabelText("Show face boxes on all photos");
+    expect(faceBoxesToggle).not.toBeChecked();
+    expect(faceBoxesToggle.closest("label")).toHaveClass("albums-detail-face-boxes-toggle");
+    expect(screen.queryByRole("button", { name: "Open face 1 actions" })).not.toBeInTheDocument();
+
+    await user.click(faceBoxesToggle);
+
+    expect(await screen.findByRole("button", { name: "Open face 1 actions" })).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Show face boxes on all photos"));
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Open face 1 actions" })).not.toBeInTheDocument();
+    });
+  });
+
   it("creates new albums and removes photo membership for editable albums", async () => {
     const user = userEvent.setup();
 
