@@ -22,6 +22,7 @@ import { LibraryPhotoGrid } from "./library/LibraryPhotoGrid";
 import { LibraryRouteHeader } from "./library/LibraryRouteHeader";
 import { LibrarySearchForm } from "./library/LibrarySearchForm";
 import { LibrarySelectionPanel } from "./library/LibrarySelectionPanel";
+import { BrowsePagination } from "./shared/BrowsePagination";
 import { resolveLibraryActionState } from "./library/libraryActionBarState";
 import {
   consumePendingLibraryFocusPhotoId,
@@ -1302,6 +1303,18 @@ export function LibraryRoutePage() {
           />
         ) : null}
       </FeedbackSurface>
+
+      <BrowsePagination
+        currentPage={requestedPage}
+        pageCount={totalPages}
+        canGoPrevious={canGoPrevious}
+        canGoNext={canGoNext}
+        ariaLabel="Library pagination bottom"
+        previousAriaLabel="Previous page (bottom)"
+        nextAriaLabel="Next page (bottom)"
+        pageAriaLabelBuilder={(pageNumber) => `Bottom page ${pageNumber}`}
+        onPageChange={handleSelectPage}
+      />
 
       <PhotoMetadataFlyout
         isOpen={photoInspectorState.activeMetadataPhotoId !== null}

@@ -1510,7 +1510,12 @@ describe("LibraryRoutePage", () => {
       "aria-disabled",
       "true"
     );
+    expect(screen.getByRole("button", { name: "Previous page (bottom)" })).toHaveAttribute(
+      "aria-disabled",
+      "true"
+    );
     expect(screen.getByRole("button", { name: "Page 1" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "Bottom page 1" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("button", { name: "Page 4" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Next page" }));

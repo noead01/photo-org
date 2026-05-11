@@ -6,6 +6,9 @@ export interface BrowsePaginationProps {
   canGoPrevious: boolean;
   canGoNext: boolean;
   ariaLabel: string;
+  previousAriaLabel?: string;
+  nextAriaLabel?: string;
+  pageAriaLabelBuilder?: (page: number, isSelected: boolean) => string;
   onPageChange: (page: number) => void;
 }
 
@@ -15,6 +18,9 @@ export function BrowsePagination({
   canGoPrevious,
   canGoNext,
   ariaLabel,
+  previousAriaLabel = "Previous page",
+  nextAriaLabel = "Next page",
+  pageAriaLabelBuilder,
   onPageChange,
 }: BrowsePaginationProps) {
   const normalizedPageCount = Number.isInteger(pageCount) && pageCount > 0 ? pageCount : 1;
@@ -48,7 +54,11 @@ export function BrowsePagination({
         }}
         onPageChange={({ selected }) => onPageChange(selected + 1)}
         pageLabelBuilder={(page) => `[${page}]`}
-        ariaLabelBuilder={(page) => `Page ${page}`}
+        ariaLabelBuilder={(page, isSelected) => (
+          pageAriaLabelBuilder ? pageAriaLabelBuilder(page, isSelected) : `Page ${page}`
+        )}
+        previousAriaLabel={previousAriaLabel}
+        nextAriaLabel={nextAriaLabel}
         containerClassName="browse-pagination-pages"
         pageClassName="browse-pagination-page-item"
         pageLinkClassName="browse-pagination-page-link"

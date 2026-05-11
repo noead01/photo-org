@@ -509,6 +509,18 @@ export function SuggestionsRoutePage() {
       ) : null}
       {message ? <p className="suggestions-message">{message}</p> : null}
 
+      <BrowsePagination
+        currentPage={page}
+        pageCount={totalPages}
+        canGoPrevious={canGoPrevious}
+        canGoNext={canGoNext}
+        ariaLabel="Suggestion pagination top"
+        previousAriaLabel="Previous page (top)"
+        nextAriaLabel="Next page (top)"
+        pageAriaLabelBuilder={(pageNumber) => `Top page ${pageNumber}`}
+        onPageChange={setPage}
+      />
+
       {isAlbumInteractionEnabled ? (
         <AlbumActionSurface
           albums={albumTargets}
@@ -608,7 +620,7 @@ export function SuggestionsRoutePage() {
         pageCount={totalPages}
         canGoPrevious={canGoPrevious}
         canGoNext={canGoNext}
-        ariaLabel="Suggestion pagination"
+        ariaLabel="Suggestion pagination bottom"
         onPageChange={setPage}
       />
 

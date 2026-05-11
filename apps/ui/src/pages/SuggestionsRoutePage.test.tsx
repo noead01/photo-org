@@ -251,6 +251,11 @@ describe("SuggestionsRoutePage", () => {
       "aria-disabled",
       "true"
     );
+    expect(screen.getByRole("button", { name: "Previous page (top)" })).toHaveAttribute(
+      "aria-disabled",
+      "true"
+    );
+    expect(screen.getByRole("button", { name: "Top page 1" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("button", { name: "Page 1" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("button", { name: "Page 2" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next page" })).toHaveAttribute("aria-disabled", "false");
@@ -920,7 +925,7 @@ describe("SuggestionsRoutePage", () => {
     renderPage();
 
     expect(await screen.findByText("/photos/photo-1.jpg")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Page 2" }));
+    await user.click(screen.getByRole("button", { name: "Top page 2" }));
 
     expect(await screen.findByText("/photos/photo-2.jpg")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/suggestions/faces?page=2&page_size=24");
