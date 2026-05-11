@@ -300,7 +300,8 @@ describe("SuggestionsRoutePage", () => {
     expect(screen.getByLabelText("Enable album interactions")).toBeChecked();
     expect(screen.getByRole("region", { name: "Album actions" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Open face 1 actions" }));
+    const openFaceActionsButton = await screen.findByRole("button", { name: "Open face 1 actions" });
+    await user.click(openFaceActionsButton);
     expect(await screen.findByRole("dialog", { name: "Face assignment" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Close face assignment modal" }));
