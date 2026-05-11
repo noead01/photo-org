@@ -235,6 +235,7 @@ def dismiss_false_positive_face(
         )
         .values(
             dismissed_ts=dismissed_ts,
+            embedding=None,
             dismissal_provenance={
                 "workflow": "face-labeling",
                 "surface": "api",

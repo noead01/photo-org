@@ -99,6 +99,7 @@ def test_face_assignment_api_assigns_unlabeled_face_to_existing_person(tmp_path,
                 face_id="face-1",
                 photo_id="photo-1",
                 person_id=None,
+                embedding=[0.4, 0.9],
             )
         )
 
@@ -249,6 +250,7 @@ def test_face_dismissal_api_marks_unassigned_face_as_dismissed_and_clears_sugges
             select(
                 faces.c.dismissed_ts,
                 faces.c.dismissal_provenance,
+                faces.c.embedding,
             ).where(faces.c.face_id == "face-1")
         ).mappings().one()
         persisted_suggestions = connection.execute(
@@ -261,6 +263,7 @@ def test_face_dismissal_api_marks_unassigned_face_as_dismissed_and_clears_sugges
         "surface": "api",
         "action": "dismiss_false_positive",
     }
+    assert face_row["embedding"] is None
     assert persisted_suggestions == []
 
 
