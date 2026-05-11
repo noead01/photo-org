@@ -1,5 +1,6 @@
 import { Fragment } from "react";
 import type { AlbumDetail, AlbumRecord } from "../library/libraryRouteApi";
+import type { PhotoSummary } from "../photo-interactions/photoInteractionTypes";
 import { serializeSavedFilter } from "./albumLibraryQuery";
 import type { AlbumRowDraft } from "./useAlbumsRouteState";
 import { AlbumDetailInline } from "./AlbumDetailInline";
@@ -9,6 +10,7 @@ interface AlbumsGridProps {
   albums: AlbumRecord[];
   selectedAlbumId: string | null;
   detail: AlbumDetail | null;
+  detailPhotoSummaryById: Map<string, PhotoSummary>;
   selectedPhotoIds: Set<string>;
   faceBoxesVisible: boolean;
   activeMetadataPhotoId: string | null;
@@ -41,6 +43,7 @@ export function AlbumsGrid({
   albums,
   selectedAlbumId,
   detail,
+  detailPhotoSummaryById,
   selectedPhotoIds,
   faceBoxesVisible,
   activeMetadataPhotoId,
@@ -157,6 +160,7 @@ export function AlbumsGrid({
                     <td colSpan={4}>
                       <AlbumDetailInline
                         detail={detail}
+                        photoSummaryById={detailPhotoSummaryById}
                         selectedPhotoIds={selectedPhotoIds}
                         faceBoxesVisible={faceBoxesVisible}
                         activeMetadataPhotoId={activeMetadataPhotoId}
