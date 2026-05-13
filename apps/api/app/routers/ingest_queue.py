@@ -65,6 +65,10 @@ class TriggerStorageSourcePollingRequest(BaseModel):
         le=1000,
         description="Maximum queue items to process per internal drain pass.",
     )
+    drain_queue: bool = Field(
+        default=True,
+        description="When false, only scan and enqueue candidates without draining queued ingest work.",
+    )
 
 
 class TriggerStorageSourcePollingResponse(BaseModel):
@@ -272,7 +276,10 @@ def poll_storage_sources_endpoint(
     ),
     _: None = Depends(require_worker_role),
 ) -> TriggerStorageSourcePollingResponse:
-    result = trigger_storage_source_polling(queue_process_limit=body.queue_process_limit)
+    result = trigger_storage_source_polling(
+        queue_process_limit=body.queue_process_limit,
+        drain_queue=body.drain_queue,
+    )
     return TriggerStorageSourcePollingResponse(
         scanned=result.scanned,
         enqueued=result.enqueued,

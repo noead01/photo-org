@@ -240,12 +240,16 @@ def test_photo_export_returns_zip_with_selected_files(tmp_path, monkeypatch):
     source_root.mkdir(parents=True, exist_ok=True)
     folder_a = source_root / "a"
     folder_b = source_root / "b"
+    folder_c = source_root / "c"
     folder_a.mkdir(parents=True, exist_ok=True)
     folder_b.mkdir(parents=True, exist_ok=True)
+    folder_c.mkdir(parents=True, exist_ok=True)
     file_a = folder_a / "trip-a.jpg"
     file_b = folder_b / "trip-b.jpg"
+    file_c = folder_c / "portrait.heic"
     file_a.write_bytes(b"trip-a-bytes")
     file_b.write_bytes(b"trip-b-bytes")
+    file_c.write_bytes(b"heic-original-binary-payload")
 
     client = _client(tmp_path, monkeypatch, "exports-api.db")
 
@@ -253,22 +257,24 @@ def test_photo_export_returns_zip_with_selected_files(tmp_path, monkeypatch):
     with engine.begin() as connection:
         _seed_photo(connection, photo_id="photo-a", relative_path="trip-a.jpg", scan_path=str(folder_a))
         _seed_photo(connection, photo_id="photo-b", relative_path="trip-b.jpg", scan_path=str(folder_b))
+        _seed_photo(connection, photo_id="photo-c", relative_path="portrait.heic", scan_path=str(folder_c))
 
     response = client.post(
         "/api/v1/exports/photos",
-        json={"photo_ids": ["photo-a", "photo-missing", "photo-b"]},
+        json={"photo_ids": ["photo-a", "photo-missing", "photo-c", "photo-b"]},
     )
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/zip"
-    assert response.headers["x-photo-org-exported-count"] == "2"
+    assert response.headers["x-photo-org-exported-count"] == "3"
     assert response.headers["x-photo-org-skipped-count"] == "1"
 
     archive = ZipFile(BytesIO(response.content))
     names = sorted(archive.namelist())
-    assert names == ["photo-a_trip-a.jpg", "photo-b_trip-b.jpg"]
-    assert archive.read("photo-a_trip-a.jpg") == b"trip-a-bytes"
-    assert archive.read("photo-b_trip-b.jpg") == b"trip-b-bytes"
+    assert names == ["photo-a-trip-a.jpg", "photo-b-trip-b.jpg", "photo-c-portrait.heic"]
+    assert archive.read("photo-a-trip-a.jpg") == b"trip-a-bytes"
+    assert archive.read("photo-b-trip-b.jpg") == b"trip-b-bytes"
+    assert archive.read("photo-c-portrait.heic") == b"heic-original-binary-payload"
 
 
 def test_photo_export_rejects_empty_photo_ids(tmp_path, monkeypatch):

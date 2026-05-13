@@ -94,6 +94,7 @@ def _transcode_image_to_jpeg(path: Path) -> bytes:
 def get_photo_original(
     photo_id: str,
     request: Request,
+    download: bool = False,
     db: Session = Depends(get_db),
 ) -> Response:
     repo = PhotosRepository(db)
@@ -103,6 +104,14 @@ def get_photo_original(
 
     mime_type, _ = mimetypes.guess_type(str(resolved))
     content_type = mime_type or "application/octet-stream"
+    if download:
+        return FileResponse(
+            path=resolved,
+            media_type=content_type,
+            filename=resolved.name,
+            content_disposition_type="attachment",
+        )
+
     if _needs_browser_transcode(resolved, mime_type):
         try:
             jpeg_bytes = _transcode_image_to_jpeg(resolved)

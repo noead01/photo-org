@@ -40,6 +40,7 @@ def trigger_storage_source_polling(
     *,
     database_url: str | Path | None = None,
     queue_process_limit: int = 100,
+    drain_queue: bool = True,
 ) -> TriggerStorageSourcePollingResult:
     initial_photo_count = _count_photos(database_url)
     poll_result = poll_registered_storage_sources(database_url=database_url)
@@ -47,16 +48,17 @@ def trigger_storage_source_polling(
     queue_processed = 0
     queue_failed = 0
     queue_retryable_errors = 0
-    while True:
-        queue_result = process_pending_ingest_queue(
-            database_url=database_url,
-            limit=queue_process_limit,
-        )
-        queue_processed += queue_result.processed
-        queue_failed += queue_result.failed
-        queue_retryable_errors += queue_result.retryable_errors
-        if queue_result.processed == 0:
-            break
+    if drain_queue:
+        while True:
+            queue_result = process_pending_ingest_queue(
+                database_url=database_url,
+                limit=queue_process_limit,
+            )
+            queue_processed += queue_result.processed
+            queue_failed += queue_result.failed
+            queue_retryable_errors += queue_result.retryable_errors
+            if queue_result.processed == 0:
+                break
 
     inserted = max(0, _count_photos(database_url) - initial_photo_count)
     return TriggerStorageSourcePollingResult(

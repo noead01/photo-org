@@ -46,12 +46,16 @@ export function AlbumsRoutePage() {
     rowDrafts,
     savingAlbumId,
     deletingAlbumId,
+    exportingAlbumId,
+    exportProgress,
+    canExport,
     handleCreateAlbum,
     handleSaveRow,
     handleDeleteRow,
     handleSelectRow,
     handleHideRow,
     handleRemovePhoto,
+    handleExportAlbum,
     handleUpdateCreateName,
     handleUpdateCreateType,
     handleUpdateCreateSavedFilterJsonDraft,
@@ -256,6 +260,9 @@ export function AlbumsRoutePage() {
         rowDrafts={rowDrafts}
         savingAlbumId={savingAlbumId}
         deletingAlbumId={deletingAlbumId}
+        exportingAlbumId={exportingAlbumId}
+        exportProgress={exportProgress}
+        canExport={canExport}
         onCreateNameChange={handleUpdateCreateName}
         onCreateTypeChange={handleUpdateCreateType}
         onCreateSavedFilterJsonDraftChange={handleUpdateCreateSavedFilterJsonDraft}
@@ -264,6 +271,7 @@ export function AlbumsRoutePage() {
         onToggleDetail={handleToggleDetail}
         onSave={(album) => void handleSaveRow(album)}
         onDelete={(album) => void handleDeleteRow(album)}
+        onExport={(album) => void handleExportAlbum(album)}
         onRemovePhoto={(photoId) => void handleRemovePhoto(photoId)}
         onSelectPage={(albumId, page) => void handleSelectRow(albumId, page)}
         onRowNameChange={handleUpdateRowName}
