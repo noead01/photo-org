@@ -312,7 +312,7 @@ def test_poll_storage_sources_endpoint_forwards_queue_process_limit(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    captured: dict[str, int] = {}
+    captured: dict[str, object] = {}
 
     class Result:
         scanned = 10
@@ -325,8 +325,13 @@ def test_poll_storage_sources_endpoint_forwards_queue_process_limit(
         poll_errors = ("marker mismatch",)
         error_count = 4
 
-    def fake_trigger_storage_source_polling(*, queue_process_limit: int = 100):
+    def fake_trigger_storage_source_polling(
+        *,
+        queue_process_limit: int = 100,
+        drain_queue: bool = True,
+    ):
         captured["queue_process_limit"] = queue_process_limit
+        captured["drain_queue"] = drain_queue
         return Result()
 
     monkeypatch.setattr(
@@ -337,11 +342,11 @@ def test_poll_storage_sources_endpoint_forwards_queue_process_limit(
     response = client.post(
         "/api/v1/internal/storage-sources/poll",
         headers={"X-Worker-Role": "ingest-processor"},
-        json={"queue_process_limit": 333},
+        json={"queue_process_limit": 333, "drain_queue": False},
     )
 
     assert response.status_code == 200
-    assert captured == {"queue_process_limit": 333}
+    assert captured == {"queue_process_limit": 333, "drain_queue": False}
     assert response.json() == {
         "scanned": 10,
         "enqueued": 7,

@@ -37,7 +37,7 @@ def _safe_archive_name(photo_id: str, resolved_path: Path) -> str:
     name = resolved_path.name.strip()
     if not name:
         name = f"{photo_id}.bin"
-    return f"{photo_id}_{name}"
+    return f"{photo_id}-{name}"
 
 
 @router.post(

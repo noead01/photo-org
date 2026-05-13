@@ -82,7 +82,7 @@ export function AlbumDetailInline({
                 />
                 Show face boxes on all photos
               </label>
-              <ul className="albums-detail-grid" aria-label="Album photo thumbnails">
+              <ul className="browse-grid albums-detail-grid" aria-label="Album photo thumbnails">
                 {detail.items.map((item) => {
                   const hydratedSummary = photoSummaryById.get(item.photo_id);
                   const cardSummary = hydratedSummary

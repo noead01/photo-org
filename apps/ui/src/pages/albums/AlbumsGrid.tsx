@@ -2,7 +2,7 @@ import { Fragment } from "react";
 import type { AlbumDetail, AlbumRecord } from "../library/libraryRouteApi";
 import type { PhotoSummary } from "../photo-interactions/photoInteractionTypes";
 import { serializeSavedFilter } from "./albumLibraryQuery";
-import type { AlbumRowDraft } from "./useAlbumsRouteState";
+import type { AlbumExportProgress, AlbumRowDraft } from "./useAlbumsRouteState";
 import { AlbumDetailInline } from "./AlbumDetailInline";
 import { AlbumsCreateRow } from "./AlbumsCreateRow";
 
@@ -21,6 +21,9 @@ interface AlbumsGridProps {
   rowDrafts: Record<string, AlbumRowDraft>;
   savingAlbumId: string | null;
   deletingAlbumId: string | null;
+  exportingAlbumId: string | null;
+  exportProgress: AlbumExportProgress | null;
+  canExport: boolean;
   onCreateNameChange: (value: string) => void;
   onCreateTypeChange: (value: "editable" | "saved_filter") => void;
   onCreateSavedFilterJsonDraftChange: (value: string) => void;
@@ -29,6 +32,7 @@ interface AlbumsGridProps {
   onToggleDetail: (album: AlbumRecord) => void;
   onSave: (album: AlbumRecord) => void;
   onDelete: (album: AlbumRecord) => void;
+  onExport: (album: AlbumRecord) => void;
   onRemovePhoto: (photoId: string) => void;
   onSelectPage: (albumId: string, page: number) => void;
   onRowNameChange: (albumId: string, value: string) => void;
@@ -54,6 +58,9 @@ export function AlbumsGrid({
   rowDrafts,
   savingAlbumId,
   deletingAlbumId,
+  exportingAlbumId,
+  exportProgress,
+  canExport,
   onCreateNameChange,
   onCreateTypeChange,
   onCreateSavedFilterJsonDraftChange,
@@ -62,6 +69,7 @@ export function AlbumsGrid({
   onToggleDetail,
   onSave,
   onDelete,
+  onExport,
   onRemovePhoto,
   onSelectPage,
   onRowNameChange,
@@ -101,6 +109,11 @@ export function AlbumsGrid({
             };
             const isSaving = savingAlbumId === album.album_id;
             const isDeleting = deletingAlbumId === album.album_id;
+            const isExporting = exportingAlbumId === album.album_id;
+            const rowExportProgress =
+              exportProgress && exportProgress.albumId === album.album_id
+                ? exportProgress
+                : null;
 
             return (
               <Fragment key={album.album_id}>
@@ -152,7 +165,28 @@ export function AlbumsGrid({
                       <button type="button" onClick={() => onDelete(album)} disabled={isSaving || isDeleting}>
                         {isDeleting ? "Deleting…" : "Delete"}
                       </button>
+                      {canExport ? (
+                        <button
+                          type="button"
+                          onClick={() => onExport(album)}
+                          disabled={isSaving || isDeleting || isExporting}
+                        >
+                          {isExporting ? "Exporting…" : `Export album ${album.name}`}
+                        </button>
+                      ) : null}
                     </div>
+                    {rowExportProgress ? (
+                      <div className="albums-export-progress" role="status" aria-live="polite">
+                        <progress
+                          aria-label={`Export progress for ${rowExportProgress.albumName}`}
+                          max={rowExportProgress.totalCount}
+                          value={rowExportProgress.completedCount}
+                        />
+                        <p>
+                          Exporting {rowExportProgress.completedCount} of {rowExportProgress.totalCount} photos to "{rowExportProgress.folderLabel}".
+                        </p>
+                      </div>
+                    ) : null}
                   </td>
                 </tr>
                 {selectedAlbumId === album.album_id ? (

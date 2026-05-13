@@ -99,6 +99,7 @@ describe("AlbumsRoutePage", () => {
     expect(
       await screen.findByRole("img", { name: /preview of \/library\/photo-1.jpg/i })
     ).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Album photo thumbnails" })).toHaveClass("browse-grid");
   });
 
   it("toggles album face boxes and preloads detail faces for visible photos", async () => {
@@ -531,5 +532,244 @@ describe("AlbumsRoutePage", () => {
 
     expect(screen.getByRole("checkbox", { name: /select photo/i })).toBeChecked();
     expect(screen.getByRole("complementary", { name: /metadata/i })).toBeInTheDocument();
+  });
+
+  it("exports album photos into a selected folder one file at a time", async () => {
+    const user = userEvent.setup();
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+    let releaseFirstWrite: (() => void) | null = null;
+    const firstWritePending = new Promise<void>((resolve) => {
+      releaseFirstWrite = resolve;
+    });
+    const writeSpy = vi.fn(async () => {});
+    const closeSpy = vi.fn(async () => {});
+    writeSpy.mockImplementationOnce(async () => {
+      await firstWritePending;
+    });
+    const createWritableSpy = vi.fn(async () => ({
+      write: writeSpy,
+      close: closeSpy
+    }));
+    const getFileHandleSpy = vi.fn(async () => ({
+      createWritable: createWritableSpy
+    }));
+    const showDirectoryPickerSpy = vi.fn(async () => ({
+      name: "AlbumExports",
+      getFileHandle: getFileHandleSpy
+    }));
+    Object.defineProperty(window, "showDirectoryPicker", {
+      writable: true,
+      value: showDirectoryPickerSpy
+    });
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/v1/albums") {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              album_id: "album-1",
+              name: "Weekend",
+              owner_user_id: "demo-user",
+              kind: "editable",
+              created_ts: "2026-05-08T12:00:00Z",
+              updated_ts: "2026-05-08T12:00:00Z",
+              item_count: 2,
+              saved_filter: null
+            }
+          ]
+        } as Response;
+      }
+      if (url === "/api/v1/albums/album-1?page=1&page_size=24") {
+        return {
+          ok: true,
+          json: async () => ({
+            album_id: "album-1",
+            name: "Weekend",
+            owner_user_id: "demo-user",
+            kind: "editable",
+            created_ts: "2026-05-08T12:00:00Z",
+            updated_ts: "2026-05-08T12:00:00Z",
+            item_count: 2,
+            items_total: 2,
+            items: [
+              {
+                photo_id: "photo-1",
+                path: "/library/photo-1.jpg",
+                ext: "jpg",
+                shot_ts: null,
+                filesize: 1024,
+                thumbnail: null
+              },
+              {
+                photo_id: "photo-2",
+                path: "/library/photo-2.jpg",
+                ext: "jpg",
+                shot_ts: null,
+                filesize: 2048,
+                thumbnail: null
+              }
+            ],
+            page: 1,
+            page_size: 24,
+            total_pages: 1,
+            saved_filter: null
+          })
+        } as Response;
+      }
+      if (url === "/api/v1/photos/photo-1/original?download=true") {
+        return new Response(new Blob([new Uint8Array([1, 2, 3])], { type: "image/jpeg" }), {
+          status: 200,
+          headers: {
+            "Content-Type": "image/jpeg",
+            "Content-Disposition": 'attachment; filename="photo-1-trip-a.jpg"'
+          }
+        });
+      }
+      if (url === "/api/v1/photos/photo-2/original?download=true") {
+        return new Response(new Blob([new Uint8Array([4, 5, 6])], { type: "image/heic" }), {
+          status: 200,
+          headers: {
+            "Content-Type": "image/heic",
+            "Content-Disposition": 'attachment; filename="photo-2-portrait.heic"'
+          }
+        });
+      }
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    renderAlbumsRoute();
+    expect(await screen.findByRole("heading", { name: "Albums", level: 1 })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Export album Weekend" }));
+
+    expect(
+      screen.getByRole("progressbar", { name: "Export progress for Weekend" })
+    ).toBeInTheDocument();
+    expect(screen.getByText('Exporting 0 of 2 photos to "AlbumExports".')).toBeInTheDocument();
+
+    releaseFirstWrite?.();
+
+    await waitFor(() => {
+      expect(showDirectoryPickerSpy).toHaveBeenCalledTimes(1);
+      expect(getFileHandleSpy).toHaveBeenCalledWith("photo-1-trip-a.jpg", { create: true });
+      expect(getFileHandleSpy).toHaveBeenCalledWith("photo-2-portrait.heic", { create: true });
+    });
+    expect(writeSpy).toHaveBeenCalledTimes(2);
+    expect(closeSpy).toHaveBeenCalledTimes(2);
+    expect(alertSpy).toHaveBeenCalledWith(
+      'Export complete: 2 photos saved to "AlbumExports". Open that folder in your file manager to access the photos.'
+    );
+  });
+
+  it("falls back to zip export when folder picker is unavailable", async () => {
+    const user = userEvent.setup();
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+    Object.defineProperty(window, "showDirectoryPicker", {
+      writable: true,
+      value: undefined
+    });
+    if (!("createObjectURL" in URL)) {
+      Object.defineProperty(URL, "createObjectURL", {
+        writable: true,
+        value: vi.fn()
+      });
+      Object.defineProperty(URL, "revokeObjectURL", {
+        writable: true,
+        value: vi.fn()
+      });
+    }
+    const createObjectUrlSpy = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:album-export-fallback");
+    const revokeObjectUrlSpy = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/v1/albums") {
+        return {
+          ok: true,
+          json: async () => [
+            {
+              album_id: "album-1",
+              name: "Weekend",
+              owner_user_id: "demo-user",
+              kind: "editable",
+              created_ts: "2026-05-08T12:00:00Z",
+              updated_ts: "2026-05-08T12:00:00Z",
+              item_count: 2,
+              saved_filter: null
+            }
+          ]
+        } as Response;
+      }
+      if (url === "/api/v1/albums/album-1?page=1&page_size=24") {
+        return {
+          ok: true,
+          json: async () => ({
+            album_id: "album-1",
+            name: "Weekend",
+            owner_user_id: "demo-user",
+            kind: "editable",
+            created_ts: "2026-05-08T12:00:00Z",
+            updated_ts: "2026-05-08T12:00:00Z",
+            item_count: 2,
+            items_total: 2,
+            items: [
+              {
+                photo_id: "photo-1",
+                path: "/library/photo-1.jpg",
+                ext: "jpg",
+                shot_ts: null,
+                filesize: 1024,
+                thumbnail: null
+              },
+              {
+                photo_id: "photo-2",
+                path: "/library/photo-2.jpg",
+                ext: "jpg",
+                shot_ts: null,
+                filesize: 2048,
+                thumbnail: null
+              }
+            ],
+            page: 1,
+            page_size: 24,
+            total_pages: 1,
+            saved_filter: null
+          })
+        } as Response;
+      }
+      if (url === "/api/v1/exports/photos") {
+        const parsedBody = JSON.parse((init?.body as string | undefined) ?? "{}") as {
+          photo_ids?: string[];
+        };
+        expect(parsedBody.photo_ids).toEqual(["photo-1", "photo-2"]);
+        return new Response(new Blob([new Uint8Array([7, 8, 9])], { type: "application/zip" }), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/zip",
+            "Content-Disposition": 'attachment; filename="album-export.zip"',
+            "X-Photo-Org-Exported-Count": "2",
+            "X-Photo-Org-Skipped-Count": "0"
+          }
+        });
+      }
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    renderAlbumsRoute();
+    expect(await screen.findByRole("heading", { name: "Albums", level: 1 })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Export album Weekend" }));
+
+    await waitFor(() => {
+      expect(createObjectUrlSpy).toHaveBeenCalled();
+    });
+    expect(clickSpy).toHaveBeenCalled();
+    expect(revokeObjectUrlSpy).toHaveBeenCalledWith("blob:album-export-fallback");
+    expect(alertSpy).toHaveBeenCalledWith(
+      'Folder picker is unavailable in this browser. Downloaded "album-export.zip" as a ZIP file. Open your Downloads folder to access it.'
+    );
   });
 });

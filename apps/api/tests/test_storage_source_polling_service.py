@@ -51,3 +51,55 @@ def test_trigger_storage_source_polling_runs_poll_then_drains_queue(monkeypatch)
     assert result.queue_retryable_errors == 1
     assert result.poll_errors == ("marker mismatch",)
     assert result.error_count == 3
+
+
+def test_trigger_storage_source_polling_can_skip_queue_draining(monkeypatch):
+    queue_calls = 0
+    photo_counts = iter([11, 11])
+
+    monkeypatch.setattr(
+        polling_service,
+        "poll_registered_storage_sources",
+        lambda **_: type(
+            "PollResult",
+            (),
+            {
+                "scanned": 4,
+                "enqueued": 4,
+                "updated": 0,
+                "errors": [],
+            },
+        )(),
+    )
+
+    def fake_process_pending_ingest_queue(**_kwargs):
+        nonlocal queue_calls
+        queue_calls += 1
+        return type("QueueResult", (), {"processed": 0, "failed": 0, "retryable_errors": 0})()
+
+    monkeypatch.setattr(
+        polling_service,
+        "process_pending_ingest_queue",
+        fake_process_pending_ingest_queue,
+    )
+    monkeypatch.setattr(
+        polling_service,
+        "_count_photos",
+        lambda database_url=None: next(photo_counts),
+    )
+
+    result = polling_service.trigger_storage_source_polling(
+        queue_process_limit=77,
+        drain_queue=False,
+    )
+
+    assert queue_calls == 0
+    assert result.scanned == 4
+    assert result.enqueued == 4
+    assert result.inserted == 0
+    assert result.updated == 0
+    assert result.queue_processed == 0
+    assert result.queue_failed == 0
+    assert result.queue_retryable_errors == 0
+    assert result.poll_errors == ()
+    assert result.error_count == 0

@@ -8,6 +8,8 @@ from sqlalchemy.engine import Connection
 
 from app.storage import photo_files, photos, storage_sources, watched_folders
 
+LAST_SEEN_REFRESH_INTERVAL = timedelta(minutes=5)
+
 
 def _watched_folder_id_for_scan_path(scan_path: str) -> str:
     return str(uuid5(NAMESPACE_URL, f"watched-folder:{scan_path}"))
@@ -151,10 +153,25 @@ def activate_observed_file(
 ) -> str:
     photo_file_id = str(uuid5(NAMESPACE_URL, f"photo-file:{watched_folder_id}:{relative_path}"))
     row = connection.execute(
-        select(photo_files.c.photo_file_id).where(
+        select(
+            photo_files.c.photo_file_id,
+            photo_files.c.photo_id,
+            photo_files.c.watched_folder_id,
+            photo_files.c.relative_path,
+            photo_files.c.filename,
+            photo_files.c.extension,
+            photo_files.c.filesize,
+            photo_files.c.created_ts,
+            photo_files.c.modified_ts,
+            photo_files.c.last_seen_ts,
+            photo_files.c.missing_ts,
+            photo_files.c.deleted_ts,
+            photo_files.c.lifecycle_state,
+            photo_files.c.absence_reason,
+        ).where(
             photo_files.c.photo_file_id == photo_file_id
         )
-    ).first()
+    ).mappings().one_or_none()
     values = {
         "photo_id": photo_id,
         "watched_folder_id": watched_folder_id,
@@ -179,12 +196,47 @@ def activate_observed_file(
             )
         )
     else:
-        connection.execute(
-            update(photo_files)
-            .where(photo_files.c.photo_file_id == photo_file_id)
-            .values(**values)
+        should_refresh_last_seen = _should_refresh_last_seen(
+            row["last_seen_ts"],
+            now=now,
         )
+        needs_update = (
+            row["photo_id"] != photo_id
+            or row["watched_folder_id"] != watched_folder_id
+            or row["relative_path"] != relative_path
+            or row["filename"] != filename
+            or row["extension"] != extension
+            or row["filesize"] != filesize
+            or not _timestamps_equal(row["created_ts"], created_ts)
+            or not _timestamps_equal(row["modified_ts"], modified_ts)
+            or row["missing_ts"] is not None
+            or row["deleted_ts"] is not None
+            or row["lifecycle_state"] != "active"
+            or row["absence_reason"] is not None
+            or should_refresh_last_seen
+        )
+        if needs_update:
+            update_values = dict(values)
+            if not should_refresh_last_seen:
+                update_values.pop("last_seen_ts")
+            connection.execute(
+                update(photo_files)
+                .where(photo_files.c.photo_file_id == photo_file_id)
+                .values(**update_values)
+            )
     return photo_id
+
+
+def _should_refresh_last_seen(last_seen_ts: datetime | None, *, now: datetime) -> bool:
+    if last_seen_ts is None:
+        return True
+    return normalize_timestamp(last_seen_ts) + LAST_SEEN_REFRESH_INTERVAL <= now
+
+
+def _timestamps_equal(left: datetime | None, right: datetime | None) -> bool:
+    if left is None or right is None:
+        return left is right
+    return normalize_timestamp(left) == normalize_timestamp(right)
 
 
 def reconcile_watched_folder(

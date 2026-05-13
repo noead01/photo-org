@@ -1713,6 +1713,86 @@ def test_reappearing_file_clears_parent_photo_deleted_timestamp(tmp_path):
     assert load_photo_deleted_ts(database_url, "photo-1") is None
 
 
+def test_activate_observed_file_throttles_last_seen_refresh_for_unchanged_rows(tmp_path):
+    database_url = f"sqlite:///{tmp_path / 'photo-last-seen-throttle.db'}"
+    upgrade_database(database_url)
+    initial_now = datetime(2026, 3, 24, tzinfo=UTC)
+    within_refresh_window = initial_now + timedelta(minutes=1)
+    beyond_refresh_window = initial_now + timedelta(minutes=6)
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        connection.execute(
+            insert(photos).values(
+                photo_id="photo-1",
+                path="/test-root/family-events/birthday-park/birthday_park_001.jpg",
+                sha256="a" * 64,
+                phash=None,
+                filesize=100,
+                ext="jpg",
+                created_ts=initial_now,
+                modified_ts=initial_now,
+                shot_ts=None,
+                shot_ts_source=None,
+                camera_make=None,
+                camera_model=None,
+                software=None,
+                orientation=None,
+                gps_latitude=None,
+                gps_longitude=None,
+                gps_altitude=None,
+                updated_ts=initial_now,
+                deleted_ts=None,
+                faces_count=0,
+                faces_detected_ts=None,
+            )
+        )
+        activate_observed_file(
+            connection,
+            watched_folder_id="watched-folder-1",
+            photo_id="photo-1",
+            relative_path="family-events/birthday-park/birthday_park_001.jpg",
+            filename="birthday_park_001.jpg",
+            extension="jpg",
+            filesize=100,
+            created_ts=initial_now,
+            modified_ts=initial_now,
+            now=initial_now,
+        )
+        activate_observed_file(
+            connection,
+            watched_folder_id="watched-folder-1",
+            photo_id="photo-1",
+            relative_path="family-events/birthday-park/birthday_park_001.jpg",
+            filename="birthday_park_001.jpg",
+            extension="jpg",
+            filesize=100,
+            created_ts=initial_now,
+            modified_ts=initial_now,
+            now=within_refresh_window,
+        )
+
+    unchanged_row = load_photo_file_rows(database_url, "photo-1")[0]
+    assert unchanged_row["last_seen_ts"] == initial_now
+
+    with engine.begin() as connection:
+        activate_observed_file(
+            connection,
+            watched_folder_id="watched-folder-1",
+            photo_id="photo-1",
+            relative_path="family-events/birthday-park/birthday_park_001.jpg",
+            filename="birthday_park_001.jpg",
+            extension="jpg",
+            filesize=100,
+            created_ts=initial_now,
+            modified_ts=initial_now,
+            now=beyond_refresh_window,
+        )
+
+    refreshed_row = load_photo_file_rows(database_url, "photo-1")[0]
+    assert refreshed_row["last_seen_ts"] == beyond_refresh_window
+
+
 def load_photo_count(database_url: str) -> int:
     engine = create_engine(database_url, future=True)
     with engine.connect() as connection:
