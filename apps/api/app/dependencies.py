@@ -29,6 +29,11 @@ FACE_VALIDATION_ROLES = frozenset(
     }
 )
 USER_ID_HEADER = "X-Photo-Org-User-Id"
+ROLE_RANK = {
+    "viewer": 1,
+    "contributor": 2,
+    "admin": 3,
+}
 
 
 @lru_cache(maxsize=None)
@@ -61,9 +66,40 @@ def require_worker_role(
         )
 
 
+def require_role(required_role: str):
+    def dependency(user: AppUser = Depends(require_authenticated_user)) -> AppUser:
+        user_rank = max((ROLE_RANK.get(role, 0) for role in user.roles), default=0)
+        required_rank = ROLE_RANK[required_role]
+        if user_rank < required_rank:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Face validation role required"
+                if required_role == "contributor"
+                else "Admin role required",
+            )
+        return user
+
+    return dependency
+
+
 def require_face_validation_role(
     face_validation_role: str | None = Header(default=None, alias=FACE_VALIDATION_ROLE_HEADER),
+    db: Session = Depends(get_db),
+    cloudflare_access_email: str | None = Header(
+        default=None, alias=CF_ACCESS_AUTHENTICATED_USER_EMAIL_HEADER
+    ),
 ) -> str:
+    if get_auth_mode() == AUTH_MODE_CLOUDFLARE_ACCESS:
+        resolved_identity = resolve_cloudflare_access_identity(cloudflare_access_email)
+        user = get_or_create_cloudflare_user(db, email=resolved_identity.email)
+        user_rank = max((ROLE_RANK.get(role, 0) for role in user.roles), default=0)
+        if user_rank < ROLE_RANK["contributor"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Face validation role required",
+            )
+        return FACE_VALIDATION_ROLE_CONTRIBUTOR
+
     if face_validation_role not in FACE_VALIDATION_ROLES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

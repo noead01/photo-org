@@ -12,7 +12,16 @@ from app.main import app
 from app.migrations import upgrade_database
 from app.routers import face_assignments as face_assignments_router
 from app.services import face_assignment as face_assignment_service
-from app.storage import face_labels, face_suggestions, faces, ingest_queue, people, photos
+from app.storage import (
+    face_labels,
+    face_suggestions,
+    faces,
+    ingest_queue,
+    people,
+    photos,
+    user_role_assignments,
+    users,
+)
 
 
 def _client(tmp_path, monkeypatch, filename: str) -> TestClient:
@@ -200,6 +209,56 @@ def test_face_assignment_api_rejects_missing_face_validation_role(tmp_path, monk
             select(faces.c.person_id).where(faces.c.face_id == "face-1")
         ).scalar_one_or_none()
     assert persisted_person_id is None
+
+
+def test_face_assignment_api_accepts_cloudflare_access_contributor_role(tmp_path, monkeypatch):
+    database_url = _database_url(tmp_path, "face-assign-cloudflare.db")
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    monkeypatch.setenv("PHOTO_ORG_AUTH_MODE", "cloudflare_access")
+    _get_session_factory.cache_clear()
+
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as connection:
+        now = datetime(2026, 4, 25, 12, 0, tzinfo=UTC)
+        connection.execute(
+            insert(users).values(
+                user_id="user-1",
+                auth_provider="cloudflare_access",
+                auth_subject="contributor@example.com",
+                email="contributor@example.com",
+                display_name=None,
+                created_ts=now,
+                updated_ts=now,
+            )
+        )
+        connection.execute(
+            insert(user_role_assignments).values(
+                user_id="user-1",
+                role="contributor",
+                created_ts=now,
+                updated_ts=now,
+            )
+        )
+        _insert_photo(connection, photo_id="photo-1")
+        _insert_person(connection, person_id="person-1", display_name="Jane Doe")
+        connection.execute(
+            insert(faces).values(
+                face_id="face-1",
+                photo_id="photo-1",
+                person_id=None,
+            )
+        )
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/faces/face-1/assignments",
+        json={"person_id": "person-1"},
+        headers={"Cf-Access-Authenticated-User-Email": "contributor@example.com"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["person_id"] == "person-1"
 
 
 def test_face_dismissal_api_marks_unassigned_face_as_dismissed_and_clears_suggestions(
