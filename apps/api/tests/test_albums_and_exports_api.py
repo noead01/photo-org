@@ -297,7 +297,19 @@ def test_migration_creates_album_tables(tmp_path):
         album_columns = {column["name"] for column in inspector.get_columns(albums.name)}
         item_columns = {column["name"] for column in inspector.get_columns(editable_album_items.name)}
         rule_columns = {column["name"] for column in inspector.get_columns(saved_filter_album_rules.name)}
+        user_columns = {column["name"] for column in inspector.get_columns("users")}
+        role_columns = {column["name"] for column in inspector.get_columns("user_role_assignments")}
 
     assert {"album_id", "name", "owner_user_id", "kind", "created_ts", "updated_ts"} <= album_columns
     assert {"album_id", "photo_id", "added_by_user_id", "added_ts"} <= item_columns
     assert {"album_id", "filter_json", "updated_ts"} <= rule_columns
+    assert {
+        "user_id",
+        "auth_provider",
+        "auth_subject",
+        "email",
+        "display_name",
+        "created_ts",
+        "updated_ts",
+    } <= user_columns
+    assert {"user_id", "role", "created_ts", "updated_ts"} <= role_columns
