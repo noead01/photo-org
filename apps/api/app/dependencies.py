@@ -110,6 +110,7 @@ def require_face_validation_role(
 
 def require_authenticated_user(
     db: Session = Depends(get_db),
+    user_id: str | None = Header(default=None, alias=USER_ID_HEADER),
     cloudflare_access_email: str | None = Header(
         default=None, alias=CF_ACCESS_AUTHENTICATED_USER_EMAIL_HEADER
     ),
@@ -117,9 +118,13 @@ def require_authenticated_user(
     if get_auth_mode() == AUTH_MODE_CLOUDFLARE_ACCESS:
         resolved_identity = resolve_cloudflare_access_identity(cloudflare_access_email)
         return get_or_create_cloudflare_user(db, email=resolved_identity.email)
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Legacy auth mode not supported in this plan.",
+
+    candidate = (user_id or "").strip() or "demo-user"
+    return AppUser(
+        user_id=candidate,
+        email="",
+        display_name=None,
+        roles=frozenset(),
     )
 
 
