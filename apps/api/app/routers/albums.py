@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import and_, func, insert, select, update, delete
 from sqlalchemy.orm import Session
@@ -75,11 +75,6 @@ class AddAlbumItemsResponse(BaseModel):
     missing_photo_ids: list[str]
 
 
-def _resolve_user_id(header_value: str | None) -> str:
-    candidate = (header_value or "").strip()
-    return candidate if candidate else "demo-user"
-
-
 def _normalize_photo_ids(photo_ids: list[str]) -> list[str]:
     deduped: list[str] = []
     seen: set[str] = set()
@@ -104,10 +99,16 @@ def _album_name_exists(db: Session, *, owner_user_id: str, name: str, exclude_al
     return db.execute(stmt).scalar_one_or_none() is not None
 
 
-def _get_album_row(db: Session, *, album_id: str) -> dict[str, Any]:
-    row = db.execute(
-        select(albums).where(albums.c.album_id == album_id)
-    ).mappings().one_or_none()
+def _get_album_row(
+    db: Session,
+    *,
+    album_id: str,
+    owner_user_id: str | None = None,
+) -> dict[str, Any]:
+    stmt = select(albums).where(albums.c.album_id == album_id)
+    if owner_user_id is not None:
+        stmt = stmt.where(albums.c.owner_user_id == owner_user_id)
+    row = db.execute(stmt).mappings().one_or_none()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
     return dict(row)
@@ -173,10 +174,9 @@ def _build_album_response(db: Session, album_row: dict[str, Any]) -> AlbumRespon
 def create_album_endpoint(
     body: CreateAlbumRequest,
     db: Session = Depends(get_db),
-    user_id_header: str | None = Header(default=None, alias="X-Photo-Org-User-Id"),
+    user: AppUser = Depends(require_authenticated_user),
 ) -> AlbumResponse:
-    user_id = _resolve_user_id(user_id_header)
-    if _album_name_exists(db, owner_user_id=user_id, name=body.name):
+    if _album_name_exists(db, owner_user_id=user.user_id, name=body.name):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Album name already exists. Choose a different name.",
@@ -188,7 +188,7 @@ def create_album_endpoint(
         insert(albums).values(
             album_id=album_id,
             name=body.name,
-            owner_user_id=user_id,
+            owner_user_id=user.user_id,
             kind=body.kind,
             created_ts=now,
             updated_ts=now,
@@ -206,7 +206,7 @@ def create_album_endpoint(
         )
 
     db.commit()
-    created = _get_album_row(db, album_id=album_id)
+    created = _get_album_row(db, album_id=album_id, owner_user_id=user.user_id)
     return _build_album_response(db, created)
 
 
@@ -218,11 +218,12 @@ def create_album_endpoint(
 )
 def list_albums_endpoint(
     db: Session = Depends(get_db),
-    _: AppUser = Depends(require_authenticated_user),
+    user: AppUser = Depends(require_authenticated_user),
 ) -> list[AlbumResponse]:
     rows = (
         db.execute(
             select(albums)
+            .where(albums.c.owner_user_id == user.user_id)
             .order_by(albums.c.updated_ts.desc(), albums.c.album_id.asc())
         )
         .mappings()
@@ -242,8 +243,9 @@ def get_album_detail_endpoint(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=24, ge=1, le=120),
     db: Session = Depends(get_db),
+    user: AppUser = Depends(require_authenticated_user),
 ) -> AlbumDetailResponse:
-    album_row = _get_album_row(db, album_id=album_id)
+    album_row = _get_album_row(db, album_id=album_id, owner_user_id=user.user_id)
     album_payload = _build_album_response(db, album_row)
     offset = (page - 1) * page_size
 
@@ -361,16 +363,15 @@ def update_album_endpoint(
     album_id: str,
     body: UpdateAlbumRequest,
     db: Session = Depends(get_db),
-    user_id_header: str | None = Header(default=None, alias="X-Photo-Org-User-Id"),
+    user: AppUser = Depends(require_authenticated_user),
 ) -> AlbumResponse:
-    album_row = _get_album_row(db, album_id=album_id)
+    album_row = _get_album_row(db, album_id=album_id, owner_user_id=user.user_id)
     now = datetime.now(tz=UTC)
     next_name = body.name if body.name is not None else album_row["name"]
-    owner_user_id = _resolve_user_id(user_id_header)
 
     if _album_name_exists(
         db,
-        owner_user_id=owner_user_id,
+        owner_user_id=user.user_id,
         name=next_name,
         exclude_album_id=album_id,
     ):
@@ -394,7 +395,7 @@ def update_album_endpoint(
         )
 
     db.commit()
-    updated = _get_album_row(db, album_id=album_id)
+    updated = _get_album_row(db, album_id=album_id, owner_user_id=user.user_id)
     return _build_album_response(db, updated)
 
 
@@ -404,9 +405,15 @@ def update_album_endpoint(
     description="Delete an album and all subtype records.",
     status_code=status.HTTP_204_NO_CONTENT,
 )
-def delete_album_endpoint(album_id: str, db: Session = Depends(get_db)) -> Response:
+def delete_album_endpoint(
+    album_id: str,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(require_authenticated_user),
+) -> Response:
     album_exists = db.execute(
-        select(albums.c.album_id).where(albums.c.album_id == album_id)
+        select(albums.c.album_id)
+        .where(albums.c.album_id == album_id)
+        .where(albums.c.owner_user_id == user.user_id)
     ).scalar_one_or_none()
     if album_exists is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
@@ -426,14 +433,13 @@ def add_album_items_endpoint(
     album_id: str,
     body: AddAlbumItemsRequest,
     db: Session = Depends(get_db),
-    user_id_header: str | None = Header(default=None, alias="X-Photo-Org-User-Id"),
+    user: AppUser = Depends(require_authenticated_user),
 ) -> AddAlbumItemsResponse:
-    user_id = _resolve_user_id(user_id_header)
     normalized_photo_ids = _normalize_photo_ids(body.photo_ids)
     if not normalized_photo_ids:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No valid photo IDs.")
 
-    album_row = _get_album_row(db, album_id=album_id)
+    album_row = _get_album_row(db, album_id=album_id, owner_user_id=user.user_id)
     if album_row["kind"] != "editable":
         _raise_saved_filter_membership_error()
 
@@ -474,7 +480,7 @@ def add_album_items_endpoint(
             insert(editable_album_items).values(
                 album_id=album_id,
                 photo_id=photo_id,
-                added_by_user_id=user_id,
+                added_by_user_id=user.user_id,
                 added_ts=now,
             )
         )
@@ -501,8 +507,13 @@ def add_album_items_endpoint(
     description="Remove a single photo reference from an editable album.",
     status_code=status.HTTP_204_NO_CONTENT,
 )
-def remove_album_item_endpoint(album_id: str, photo_id: str, db: Session = Depends(get_db)) -> Response:
-    album_row = _get_album_row(db, album_id=album_id)
+def remove_album_item_endpoint(
+    album_id: str,
+    photo_id: str,
+    db: Session = Depends(get_db),
+    user: AppUser = Depends(require_authenticated_user),
+) -> Response:
+    album_row = _get_album_row(db, album_id=album_id, owner_user_id=user.user_id)
     if album_row["kind"] != "editable":
         _raise_saved_filter_membership_error()
 

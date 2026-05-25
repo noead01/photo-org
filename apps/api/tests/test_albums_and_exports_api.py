@@ -5,7 +5,7 @@ from io import BytesIO
 from zipfile import ZipFile
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, insert, inspect
+from sqlalchemy import create_engine, insert, inspect, select
 
 from app.dependencies import _get_session_factory
 from app.main import app
@@ -16,6 +16,7 @@ from app.storage import (
     photo_files,
     photos,
     saved_filter_album_rules,
+    users,
     watched_folders,
 )
 
@@ -153,6 +154,52 @@ def test_albums_support_saved_filter_kind_and_reject_duplicate_names(tmp_path, m
         "person_names": ["Inez"],
         "person_certainty_mode": "human_only",
     }
+
+
+def test_albums_cloudflare_access_scope_by_authenticated_email(tmp_path, monkeypatch):
+    monkeypatch.setenv("PHOTO_ORG_AUTH_MODE", "cloudflare_access")
+    client = _client(tmp_path, monkeypatch, "albums-cloudflare.db")
+
+    create_response = client.post(
+        "/api/v1/albums",
+        json={"name": "Weekend Favorites"},
+        headers={
+            "Cf-Access-Authenticated-User-Email": "owner@example.com",
+            "X-Photo-Org-User-Id": "spoofed-user",
+        },
+    )
+    assert create_response.status_code == 201
+    album_id = create_response.json()["album_id"]
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'albums-cloudflare.db'}", future=True)
+    with engine.connect() as connection:
+        owner_row = connection.execute(
+            select(users.c.user_id, users.c.email).where(users.c.email == "owner@example.com")
+        ).mappings().one()
+        album_row = connection.execute(
+            select(albums.c.owner_user_id).where(albums.c.album_id == album_id)
+        ).mappings().one()
+    assert album_row["owner_user_id"] == owner_row["user_id"]
+
+    owner_list_response = client.get(
+        "/api/v1/albums",
+        headers={"Cf-Access-Authenticated-User-Email": "owner@example.com"},
+    )
+    assert owner_list_response.status_code == 200
+    assert [album["album_id"] for album in owner_list_response.json()] == [album_id]
+
+    other_user_list_response = client.get(
+        "/api/v1/albums",
+        headers={"Cf-Access-Authenticated-User-Email": "other@example.com"},
+    )
+    assert other_user_list_response.status_code == 200
+    assert other_user_list_response.json() == []
+
+    other_user_detail_response = client.get(
+        f"/api/v1/albums/{album_id}",
+        headers={"Cf-Access-Authenticated-User-Email": "other@example.com"},
+    )
+    assert other_user_detail_response.status_code == 404
 
 
 def test_albums_detail_patch_delete_and_membership_guards(tmp_path, monkeypatch):
