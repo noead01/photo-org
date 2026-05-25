@@ -19,6 +19,8 @@ from photoorg_db_schema import (
     photo_tags,
     photos,
     saved_filter_album_rules,
+    user_role_assignments,
+    users,
     storage_source_aliases,
     storage_sources,
     watched_folders,

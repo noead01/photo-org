@@ -11,7 +11,8 @@ from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import and_, func, insert, select, update, delete
 from sqlalchemy.orm import Session
 
-from app.dependencies import get_db
+from app.auth import AppUser
+from app.dependencies import get_db, require_authenticated_user
 from app.repositories.photos_repo import PhotosRepository
 from app.schemas.search_response import ThumbnailHit
 from app.schemas.search_request import SearchFilters, SortSpec, PageSpec
@@ -215,7 +216,10 @@ def create_album_endpoint(
     description="Return albums ordered by last update timestamp.",
     response_model=list[AlbumResponse],
 )
-def list_albums_endpoint(db: Session = Depends(get_db)) -> list[AlbumResponse]:
+def list_albums_endpoint(
+    db: Session = Depends(get_db),
+    _: AppUser = Depends(require_authenticated_user),
+) -> list[AlbumResponse]:
     rows = (
         db.execute(
             select(albums)
