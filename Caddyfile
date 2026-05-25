@@ -1,6 +1,8 @@
-localhost, 127.0.0.1 {
-  tls internal
+{
+  auto_https off
+}
 
+:80 {
   @api path /api/*
   reverse_proxy @api db-service:8000
   reverse_proxy ui:5173

@@ -23,6 +23,8 @@ from .schema import (
     saved_filter_album_rules,
     storage_source_aliases,
     storage_sources,
+    user_role_assignments,
+    users,
     watched_folders,
     configure_embedding_column,
 )
@@ -53,5 +55,7 @@ __all__ = [
     "saved_filter_album_rules",
     "storage_source_aliases",
     "storage_sources",
+    "user_role_assignments",
+    "users",
     "watched_folders",
 ]

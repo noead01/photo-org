@@ -32,8 +32,11 @@ endif
 ifndef PHOTO_ORG_UI_API_BASE_URL
 PHOTO_ORG_UI_API_BASE_URL := http://127.0.0.1:$(PHOTO_ORG_API_HOST_PORT)
 endif
+ifndef PHOTO_ORG_UI_ALLOWED_HOSTS
+PHOTO_ORG_UI_ALLOWED_HOSTS := photo.example.com
+endif
 ifndef PHOTO_ORG_API_CORS_ALLOWED_ORIGINS
-PHOTO_ORG_API_CORS_ALLOWED_ORIGINS := http://127.0.0.1:$(PHOTO_ORG_UI_HOST_PORT),http://localhost:$(PHOTO_ORG_UI_HOST_PORT)
+PHOTO_ORG_API_CORS_ALLOWED_ORIGINS := http://127.0.0.1:$(PHOTO_ORG_UI_HOST_PORT),http://localhost:$(PHOTO_ORG_UI_HOST_PORT),https://photo.example.com
 endif
 -include $(PHOTO_ORG_ENV_REGISTRY_FILE)
 COMPOSE_ENV_FILE_ARG := $(if $(PHOTO_ORG_ENV_FILE),--env-file $(PHOTO_ORG_ENV_FILE),)
@@ -59,6 +62,7 @@ export PHOTO_ORG_UI_HOST_PORT
 export PHOTO_ORG_DB_SERVICE_DATABASE_URL
 export PHOTO_ORG_COMPOSE_DATABASE_URL
 export PHOTO_ORG_UI_API_BASE_URL
+export PHOTO_ORG_UI_ALLOWED_HOSTS
 export PHOTO_ORG_API_CORS_ALLOWED_ORIGINS
 
 .PHONY: help sync lint test test-all ui-test ui-test-coverage ui-build test-e2e check pre-push migrate env-create compose-up compose-migrate compose-down compose-down-volumes compose-smoke compose-e2e-smoke print-compose-db-url print-compose-api-base-url print-compose-ui-base-url seed-corpus-check seed-corpus-load ensure-environment
@@ -134,6 +138,7 @@ env-create:
 		"PHOTO_ORG_DB_SERVICE_DATABASE_URL := $(PHOTO_ORG_DB_SERVICE_DATABASE_URL)" \
 		"PHOTO_ORG_COMPOSE_DATABASE_URL := $(PHOTO_ORG_COMPOSE_DATABASE_URL)" \
 		"PHOTO_ORG_UI_API_BASE_URL := $(PHOTO_ORG_UI_API_BASE_URL)" \
+		"PHOTO_ORG_UI_ALLOWED_HOSTS := $(PHOTO_ORG_UI_ALLOWED_HOSTS)" \
 		"PHOTO_ORG_API_CORS_ALLOWED_ORIGINS := $(PHOTO_ORG_API_CORS_ALLOWED_ORIGINS)" \
 		> "$$candidate"; \
 	if [ -f "$(PHOTO_ORG_ENV_REGISTRY_FILE)" ]; then \

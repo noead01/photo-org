@@ -347,6 +347,56 @@ ingest_queue = Table(
     Column("last_error", Text),
 )
 
+users = Table(
+    "users",
+    metadata,
+    Column("user_id", String(36), primary_key=True),
+    Column("auth_provider", String, nullable=False),
+    Column("auth_subject", String, nullable=False, unique=True),
+    Column("email", String, nullable=False, unique=True),
+    Column("display_name", String),
+    Column(
+        "created_ts",
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    Column(
+        "updated_ts",
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+)
+
+user_role_assignments = Table(
+    "user_role_assignments",
+    metadata,
+    Column(
+        "user_id",
+        String(36),
+        ForeignKey("users.user_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("role", String, primary_key=True),
+    Column(
+        "created_ts",
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    Column(
+        "updated_ts",
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    ),
+    CheckConstraint(
+        "role IN ('viewer', 'contributor', 'admin')",
+        name="ck_user_role_assignments_role",
+    ),
+)
+
 albums = Table(
     "albums",
     metadata,
@@ -429,6 +479,8 @@ Index("idx_ingest_run_files_ingest_run_id", ingest_run_files.c.ingest_run_id)
 Index("idx_ingest_run_files_ingest_queue_id", ingest_run_files.c.ingest_queue_id)
 Index("idx_ingest_run_files_run_id_outcome", ingest_run_files.c.ingest_run_id, ingest_run_files.c.outcome)
 Index("idx_ingest_queue_status_enqueued_ts", ingest_queue.c.status, ingest_queue.c.enqueued_ts)
+Index("idx_users_email", users.c.email)
+Index("idx_user_role_assignments_role", user_role_assignments.c.role)
 Index("idx_albums_owner_updated_ts", albums.c.owner_user_id, albums.c.updated_ts)
 Index("idx_editable_album_items_photo_id", editable_album_items.c.photo_id)
 Index(
