@@ -7,6 +7,7 @@ from sqlalchemy import create_engine, delete, insert, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.dml import Update
 
+from app.auth import CF_ACCESS_JWT_ASSERTION_HEADER
 from app.dependencies import FACE_VALIDATION_ROLE_HEADER, _get_session_factory
 from app.main import app
 from app.migrations import upgrade_database
@@ -21,6 +22,11 @@ from app.storage import (
     photos,
     user_role_assignments,
     users,
+)
+from tests.cloudflare_access_test_support import (
+    build_access_jwt,
+    configure_cloudflare_access_env,
+    stub_cloudflare_access_certs,
 )
 
 
@@ -215,7 +221,8 @@ def test_face_assignment_api_accepts_cloudflare_access_contributor_role(tmp_path
     database_url = _database_url(tmp_path, "face-assign-cloudflare.db")
     upgrade_database(database_url)
     monkeypatch.setenv("DATABASE_URL", database_url)
-    monkeypatch.setenv("PHOTO_ORG_AUTH_MODE", "cloudflare_access")
+    configure_cloudflare_access_env(monkeypatch)
+    stub_cloudflare_access_certs(monkeypatch)
     _get_session_factory.cache_clear()
 
     engine = create_engine(database_url, future=True)
@@ -225,7 +232,7 @@ def test_face_assignment_api_accepts_cloudflare_access_contributor_role(tmp_path
             insert(users).values(
                 user_id="user-1",
                 auth_provider="cloudflare_access",
-                auth_subject="contributor@example.com",
+                auth_subject="sub-contributor",
                 email="contributor@example.com",
                 display_name=None,
                 created_ts=now,
@@ -254,7 +261,13 @@ def test_face_assignment_api_accepts_cloudflare_access_contributor_role(tmp_path
     response = client.post(
         "/api/v1/faces/face-1/assignments",
         json={"person_id": "person-1"},
-        headers={"Cf-Access-Authenticated-User-Email": "contributor@example.com"},
+        headers={
+            CF_ACCESS_JWT_ASSERTION_HEADER: build_access_jwt(
+                subject="sub-contributor",
+                email="contributor@example.com",
+            ),
+            "Cf-Access-Authenticated-User-Email": "contributor@example.com",
+        },
     )
 
     assert response.status_code == 201

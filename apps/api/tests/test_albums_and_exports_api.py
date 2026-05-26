@@ -7,6 +7,7 @@ from zipfile import ZipFile
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, insert, inspect, select
 
+from app.auth import CF_ACCESS_JWT_ASSERTION_HEADER
 from app.dependencies import _get_session_factory
 from app.main import app
 from app.migrations import upgrade_database
@@ -18,6 +19,11 @@ from app.storage import (
     saved_filter_album_rules,
     users,
     watched_folders,
+)
+from tests.cloudflare_access_test_support import (
+    build_access_jwt,
+    configure_cloudflare_access_env,
+    stub_cloudflare_access_certs,
 )
 
 
@@ -157,13 +163,18 @@ def test_albums_support_saved_filter_kind_and_reject_duplicate_names(tmp_path, m
 
 
 def test_albums_cloudflare_access_scope_by_authenticated_email(tmp_path, monkeypatch):
-    monkeypatch.setenv("PHOTO_ORG_AUTH_MODE", "cloudflare_access")
+    configure_cloudflare_access_env(monkeypatch)
+    stub_cloudflare_access_certs(monkeypatch)
     client = _client(tmp_path, monkeypatch, "albums-cloudflare.db")
 
     create_response = client.post(
         "/api/v1/albums",
         json={"name": "Weekend Favorites"},
         headers={
+            CF_ACCESS_JWT_ASSERTION_HEADER: build_access_jwt(
+                subject="sub-owner",
+                email="owner@example.com",
+            ),
             "Cf-Access-Authenticated-User-Email": "owner@example.com",
             "X-Photo-Org-User-Id": "spoofed-user",
         },
@@ -183,21 +194,39 @@ def test_albums_cloudflare_access_scope_by_authenticated_email(tmp_path, monkeyp
 
     owner_list_response = client.get(
         "/api/v1/albums",
-        headers={"Cf-Access-Authenticated-User-Email": "owner@example.com"},
+        headers={
+            CF_ACCESS_JWT_ASSERTION_HEADER: build_access_jwt(
+                subject="sub-owner",
+                email="owner@example.com",
+            ),
+            "Cf-Access-Authenticated-User-Email": "owner@example.com",
+        },
     )
     assert owner_list_response.status_code == 200
     assert [album["album_id"] for album in owner_list_response.json()] == [album_id]
 
     other_user_list_response = client.get(
         "/api/v1/albums",
-        headers={"Cf-Access-Authenticated-User-Email": "other@example.com"},
+        headers={
+            CF_ACCESS_JWT_ASSERTION_HEADER: build_access_jwt(
+                subject="sub-other",
+                email="other@example.com",
+            ),
+            "Cf-Access-Authenticated-User-Email": "other@example.com",
+        },
     )
     assert other_user_list_response.status_code == 200
     assert other_user_list_response.json() == []
 
     other_user_detail_response = client.get(
         f"/api/v1/albums/{album_id}",
-        headers={"Cf-Access-Authenticated-User-Email": "other@example.com"},
+        headers={
+            CF_ACCESS_JWT_ASSERTION_HEADER: build_access_jwt(
+                subject="sub-other",
+                email="other@example.com",
+            ),
+            "Cf-Access-Authenticated-User-Email": "other@example.com",
+        },
     )
     assert other_user_detail_response.status_code == 404
 
