@@ -1869,7 +1869,7 @@ describe("LibraryRoutePage", () => {
     await user.click(screen.getByRole("link", { name: "Back to library" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Page 3" })).toHaveAttribute(
+      expect(screen.getByRole("button", { name: "Bottom page 3" })).toHaveAttribute(
         "aria-current",
         "page"
       );

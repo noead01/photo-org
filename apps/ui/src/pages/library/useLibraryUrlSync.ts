@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Location, NavigateFunction } from "react-router-dom";
 import type { LibraryViewRouteState } from "../libraryRouteState";
+import { DEFAULT_SEARCH_PAGE_LIMIT } from "./libraryPageSize";
 import { buildLibraryUrlQuery } from "./libraryRouteSearchState";
 import { saveLastLibraryUrl, saveLibraryViewState } from "./libraryRouteMemory";
 import type {
@@ -67,12 +68,19 @@ export function useLibraryUrlSync({
   const lastAppliedParsedUrlStateSignatureRef = useRef<string | null>(parsedUrlStateSignature);
   const shouldRestoreInitialViewStateRef = useRef(shouldRestoreInitialViewState);
 
-  function setPage(pageNumber: number, replace = false) {
+  function setPage(pageNumber: number, replace = false, nextPageSize?: number) {
     const nextParams = new URLSearchParams(location.search);
     if (pageNumber <= 1) {
       nextParams.delete("page");
     } else {
       nextParams.set("page", String(pageNumber));
+    }
+    if (nextPageSize === undefined) {
+      // Preserve the current page-size query parameter when only paging changes.
+    } else if (nextPageSize <= 0 || nextPageSize === DEFAULT_SEARCH_PAGE_LIMIT) {
+      nextParams.delete("pageSize");
+    } else {
+      nextParams.set("pageSize", String(nextPageSize));
     }
 
     const nextSearch = nextParams.toString();

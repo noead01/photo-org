@@ -55,7 +55,7 @@ export function BrowsePagination({
         onPageChange={({ selected }) => onPageChange(selected + 1)}
         pageLabelBuilder={(page) => `[${page}]`}
         ariaLabelBuilder={(page, isSelected) => (
-          pageAriaLabelBuilder ? pageAriaLabelBuilder(page, isSelected) : `Page ${page}`
+          pageAriaLabelBuilder ? pageAriaLabelBuilder(page, Boolean(isSelected)) : `Page ${page}`
         )}
         previousAriaLabel={previousAriaLabel}
         nextAriaLabel={nextAriaLabel}

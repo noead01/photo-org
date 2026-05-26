@@ -537,7 +537,7 @@ describe("AlbumsRoutePage", () => {
   it("exports album photos into a selected folder one file at a time", async () => {
     const user = userEvent.setup();
     const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
-    let releaseFirstWrite: (() => void) | null = null;
+    let releaseFirstWrite: () => void = () => {};
     const firstWritePending = new Promise<void>((resolve) => {
       releaseFirstWrite = resolve;
     });
@@ -649,7 +649,7 @@ describe("AlbumsRoutePage", () => {
     ).toBeInTheDocument();
     expect(screen.getByText('Exporting 0 of 2 photos to "AlbumExports".')).toBeInTheDocument();
 
-    releaseFirstWrite?.();
+    releaseFirstWrite();
 
     await waitFor(() => {
       expect(showDirectoryPickerSpy).toHaveBeenCalledTimes(1);
