@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { expectPrimaryLinkActive } from "../support/navAsserts";
+import { bootstrapAdminSession } from "../support/session";
 
 test("technical: deep-link query state renders expected route shell @technical", async ({ page }) => {
   await page.goto("/library?query=lake");
@@ -13,6 +14,7 @@ test("technical: deep-link query state renders expected route shell @technical",
 test(
   "technical: browser back and forward keep shell mounted with route-local content @technical",
   async ({ page }) => {
+    await bootstrapAdminSession(page);
     await page.goto("/library");
 
     const banner = page.getByRole("banner");
