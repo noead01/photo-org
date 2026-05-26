@@ -5,17 +5,23 @@ from datetime import UTC, datetime
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, insert, select
 
+from app.auth import CF_ACCESS_JWT_ASSERTION_HEADER
 from app.dependencies import _get_session_factory
 from app.main import app
 from app.migrations import upgrade_database
 from app.storage import faces, people, photos, user_role_assignments, users
+from tests.cloudflare_access_test_support import (
+    build_access_jwt,
+    configure_cloudflare_access_env,
+    stub_cloudflare_access_certs,
+)
 
 
-def test_cloudflare_access_auto_provisions_user_without_roles(tmp_path, monkeypatch):
+def test_cloudflare_access_rejects_missing_jwt_assertion_header(tmp_path, monkeypatch):
     database_url = f"sqlite:///{tmp_path / 'auth-rbac.db'}"
     upgrade_database(database_url)
     monkeypatch.setenv("DATABASE_URL", database_url)
-    monkeypatch.setenv("PHOTO_ORG_AUTH_MODE", "cloudflare_access")
+    configure_cloudflare_access_env(monkeypatch)
     _get_session_factory.cache_clear()
 
     client = TestClient(app)
@@ -24,20 +30,74 @@ def test_cloudflare_access_auto_provisions_user_without_roles(tmp_path, monkeypa
         headers={"Cf-Access-Authenticated-User-Email": "new.user@example.com"},
     )
 
+    assert response.status_code == 403
+
+
+def test_cloudflare_access_auto_provisions_user_without_roles(tmp_path, monkeypatch):
+    database_url = f"sqlite:///{tmp_path / 'auth-rbac.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    configure_cloudflare_access_env(monkeypatch)
+    stub_cloudflare_access_certs(monkeypatch)
+    _get_session_factory.cache_clear()
+
+    client = TestClient(app)
+    response = client.get(
+        "/api/v1/albums",
+        headers={
+            CF_ACCESS_JWT_ASSERTION_HEADER: build_access_jwt(
+                subject="sub-new-user",
+                email="new.user@example.com",
+            ),
+            "Cf-Access-Authenticated-User-Email": "new.user@example.com",
+        },
+    )
+
     assert response.status_code == 200
     engine = create_engine(database_url, future=True)
     with engine.connect() as connection:
         persisted = connection.execute(
-            select(users.c.email, users.c.auth_provider)
+            select(users.c.auth_subject, users.c.email, users.c.auth_provider)
         ).mappings().all()
-    assert persisted == [{"email": "new.user@example.com", "auth_provider": "cloudflare_access"}]
+    assert persisted == [
+        {
+            "auth_subject": "sub-new-user",
+            "email": "new.user@example.com",
+            "auth_provider": "cloudflare_access",
+        }
+    ]
+
+
+def test_cloudflare_access_rejects_invalid_audience_jwt(tmp_path, monkeypatch):
+    database_url = f"sqlite:///{tmp_path / 'auth-rbac-invalid-aud.db'}"
+    upgrade_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    configure_cloudflare_access_env(monkeypatch)
+    stub_cloudflare_access_certs(monkeypatch)
+    _get_session_factory.cache_clear()
+
+    client = TestClient(app)
+    response = client.get(
+        "/api/v1/albums",
+        headers={
+            CF_ACCESS_JWT_ASSERTION_HEADER: build_access_jwt(
+                subject="sub-bad-aud",
+                email="viewer@example.com",
+                audience="wrong-audience",
+            ),
+            "Cf-Access-Authenticated-User-Email": "viewer@example.com",
+        },
+    )
+
+    assert response.status_code == 403
 
 
 def test_cloudflare_access_user_without_role_cannot_confirm_face(tmp_path, monkeypatch):
     database_url = f"sqlite:///{tmp_path / 'auth-rbac-face.db'}"
     upgrade_database(database_url)
     monkeypatch.setenv("DATABASE_URL", database_url)
-    monkeypatch.setenv("PHOTO_ORG_AUTH_MODE", "cloudflare_access")
+    configure_cloudflare_access_env(monkeypatch)
+    stub_cloudflare_access_certs(monkeypatch)
     _get_session_factory.cache_clear()
 
     engine = create_engine(database_url, future=True)
@@ -71,7 +131,13 @@ def test_cloudflare_access_user_without_role_cannot_confirm_face(tmp_path, monke
     response = client.post(
         "/api/v1/faces/face-1/assignments",
         json={"person_id": "person-1"},
-        headers={"Cf-Access-Authenticated-User-Email": "viewer@example.com"},
+        headers={
+            CF_ACCESS_JWT_ASSERTION_HEADER: build_access_jwt(
+                subject="sub-viewer",
+                email="viewer@example.com",
+            ),
+            "Cf-Access-Authenticated-User-Email": "viewer@example.com",
+        },
     )
 
     assert response.status_code == 403
@@ -82,7 +148,8 @@ def test_cloudflare_access_session_endpoint_returns_roles_and_capabilities(tmp_p
     database_url = f"sqlite:///{tmp_path / 'auth-rbac-session.db'}"
     upgrade_database(database_url)
     monkeypatch.setenv("DATABASE_URL", database_url)
-    monkeypatch.setenv("PHOTO_ORG_AUTH_MODE", "cloudflare_access")
+    configure_cloudflare_access_env(monkeypatch)
+    stub_cloudflare_access_certs(monkeypatch)
     _get_session_factory.cache_clear()
 
     engine = create_engine(database_url, future=True)
@@ -92,7 +159,7 @@ def test_cloudflare_access_session_endpoint_returns_roles_and_capabilities(tmp_p
             insert(users).values(
                 user_id="admin-user",
                 auth_provider="cloudflare_access",
-                auth_subject="admin@example.com",
+                auth_subject="sub-admin",
                 email="admin@example.com",
                 display_name="Admin User",
                 created_ts=now,
@@ -111,7 +178,13 @@ def test_cloudflare_access_session_endpoint_returns_roles_and_capabilities(tmp_p
     client = TestClient(app)
     response = client.get(
         "/api/v1/admin/session",
-        headers={"Cf-Access-Authenticated-User-Email": "admin@example.com"},
+        headers={
+            CF_ACCESS_JWT_ASSERTION_HEADER: build_access_jwt(
+                subject="sub-admin",
+                email="admin@example.com",
+            ),
+            "Cf-Access-Authenticated-User-Email": "admin@example.com",
+        },
     )
 
     assert response.status_code == 200
@@ -134,7 +207,8 @@ def test_cloudflare_access_admin_can_list_and_replace_user_roles(tmp_path, monke
     database_url = f"sqlite:///{tmp_path / 'auth-rbac-admin.db'}"
     upgrade_database(database_url)
     monkeypatch.setenv("DATABASE_URL", database_url)
-    monkeypatch.setenv("PHOTO_ORG_AUTH_MODE", "cloudflare_access")
+    configure_cloudflare_access_env(monkeypatch)
+    stub_cloudflare_access_certs(monkeypatch)
     _get_session_factory.cache_clear()
 
     engine = create_engine(database_url, future=True)
@@ -146,7 +220,7 @@ def test_cloudflare_access_admin_can_list_and_replace_user_roles(tmp_path, monke
                     {
                         "user_id": "admin-user",
                         "auth_provider": "cloudflare_access",
-                        "auth_subject": "admin@example.com",
+                        "auth_subject": "sub-admin",
                         "email": "admin@example.com",
                         "display_name": "Admin User",
                         "created_ts": now,
@@ -155,7 +229,7 @@ def test_cloudflare_access_admin_can_list_and_replace_user_roles(tmp_path, monke
                     {
                         "user_id": "viewer-user",
                         "auth_provider": "cloudflare_access",
-                        "auth_subject": "viewer@example.com",
+                        "auth_subject": "sub-viewer",
                         "email": "viewer@example.com",
                         "display_name": None,
                         "created_ts": now,
@@ -177,7 +251,13 @@ def test_cloudflare_access_admin_can_list_and_replace_user_roles(tmp_path, monke
 
     list_response = client.get(
         "/api/v1/admin/users",
-        headers={"Cf-Access-Authenticated-User-Email": "admin@example.com"},
+        headers={
+            CF_ACCESS_JWT_ASSERTION_HEADER: build_access_jwt(
+                subject="sub-admin",
+                email="admin@example.com",
+            ),
+            "Cf-Access-Authenticated-User-Email": "admin@example.com",
+        },
     )
 
     assert list_response.status_code == 200
@@ -187,7 +267,13 @@ def test_cloudflare_access_admin_can_list_and_replace_user_roles(tmp_path, monke
     update_response = client.put(
         "/api/v1/admin/users/viewer-user/roles",
         json={"roles": ["viewer", "contributor"]},
-        headers={"Cf-Access-Authenticated-User-Email": "admin@example.com"},
+        headers={
+            CF_ACCESS_JWT_ASSERTION_HEADER: build_access_jwt(
+                subject="sub-admin",
+                email="admin@example.com",
+            ),
+            "Cf-Access-Authenticated-User-Email": "admin@example.com",
+        },
     )
 
     assert update_response.status_code == 200
@@ -206,7 +292,8 @@ def test_cloudflare_access_non_admin_cannot_manage_roles(tmp_path, monkeypatch):
     database_url = f"sqlite:///{tmp_path / 'auth-rbac-non-admin.db'}"
     upgrade_database(database_url)
     monkeypatch.setenv("DATABASE_URL", database_url)
-    monkeypatch.setenv("PHOTO_ORG_AUTH_MODE", "cloudflare_access")
+    configure_cloudflare_access_env(monkeypatch)
+    stub_cloudflare_access_certs(monkeypatch)
     _get_session_factory.cache_clear()
 
     engine = create_engine(database_url, future=True)
@@ -216,7 +303,7 @@ def test_cloudflare_access_non_admin_cannot_manage_roles(tmp_path, monkeypatch):
             insert(users).values(
                 user_id="contributor-user",
                 auth_provider="cloudflare_access",
-                auth_subject="contributor@example.com",
+                auth_subject="sub-contributor",
                 email="contributor@example.com",
                 display_name=None,
                 created_ts=now,
@@ -235,7 +322,13 @@ def test_cloudflare_access_non_admin_cannot_manage_roles(tmp_path, monkeypatch):
     client = TestClient(app)
     response = client.get(
         "/api/v1/admin/users",
-        headers={"Cf-Access-Authenticated-User-Email": "contributor@example.com"},
+        headers={
+            CF_ACCESS_JWT_ASSERTION_HEADER: build_access_jwt(
+                subject="sub-contributor",
+                email="contributor@example.com",
+            ),
+            "Cf-Access-Authenticated-User-Email": "contributor@example.com",
+        },
     )
 
     assert response.status_code == 403

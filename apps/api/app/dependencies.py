@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.auth import (
     AUTH_MODE_CLOUDFLARE_ACCESS,
     CF_ACCESS_AUTHENTICATED_USER_EMAIL_HEADER,
+    CF_ACCESS_JWT_ASSERTION_HEADER,
     AppUser,
     get_or_create_cloudflare_user,
     resolve_cloudflare_access_identity,
@@ -85,13 +86,23 @@ def require_role(required_role: str):
 def require_face_validation_role(
     face_validation_role: str | None = Header(default=None, alias=FACE_VALIDATION_ROLE_HEADER),
     db: Session = Depends(get_db),
+    cloudflare_access_jwt_assertion: str | None = Header(
+        default=None, alias=CF_ACCESS_JWT_ASSERTION_HEADER
+    ),
     cloudflare_access_email: str | None = Header(
         default=None, alias=CF_ACCESS_AUTHENTICATED_USER_EMAIL_HEADER
     ),
 ) -> str:
     if get_auth_mode() == AUTH_MODE_CLOUDFLARE_ACCESS:
-        resolved_identity = resolve_cloudflare_access_identity(cloudflare_access_email)
-        user = get_or_create_cloudflare_user(db, email=resolved_identity.email)
+        resolved_identity = resolve_cloudflare_access_identity(
+            cloudflare_access_jwt_assertion,
+            cloudflare_access_email,
+        )
+        user = get_or_create_cloudflare_user(
+            db,
+            email=resolved_identity.email,
+            subject=resolved_identity.subject,
+        )
         user_rank = max((ROLE_RANK.get(role, 0) for role in user.roles), default=0)
         if user_rank < ROLE_RANK["contributor"]:
             raise HTTPException(
@@ -111,13 +122,23 @@ def require_face_validation_role(
 def require_authenticated_user(
     db: Session = Depends(get_db),
     authenticated_user_id_header: str | None = Header(default=None, alias=USER_ID_HEADER),
+    cloudflare_access_jwt_assertion: str | None = Header(
+        default=None, alias=CF_ACCESS_JWT_ASSERTION_HEADER
+    ),
     cloudflare_access_email: str | None = Header(
         default=None, alias=CF_ACCESS_AUTHENTICATED_USER_EMAIL_HEADER
     ),
 ) -> AppUser:
     if get_auth_mode() == AUTH_MODE_CLOUDFLARE_ACCESS:
-        resolved_identity = resolve_cloudflare_access_identity(cloudflare_access_email)
-        return get_or_create_cloudflare_user(db, email=resolved_identity.email)
+        resolved_identity = resolve_cloudflare_access_identity(
+            cloudflare_access_jwt_assertion,
+            cloudflare_access_email,
+        )
+        return get_or_create_cloudflare_user(
+            db,
+            email=resolved_identity.email,
+            subject=resolved_identity.subject,
+        )
 
     candidate = (authenticated_user_id_header or "").strip() or "demo-user"
     return AppUser(
