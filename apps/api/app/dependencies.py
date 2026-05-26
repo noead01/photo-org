@@ -110,7 +110,7 @@ def require_face_validation_role(
 
 def require_authenticated_user(
     db: Session = Depends(get_db),
-    user_id: str | None = Header(default=None, alias=USER_ID_HEADER),
+    authenticated_user_id_header: str | None = Header(default=None, alias=USER_ID_HEADER),
     cloudflare_access_email: str | None = Header(
         default=None, alias=CF_ACCESS_AUTHENTICATED_USER_EMAIL_HEADER
     ),
@@ -119,7 +119,7 @@ def require_authenticated_user(
         resolved_identity = resolve_cloudflare_access_identity(cloudflare_access_email)
         return get_or_create_cloudflare_user(db, email=resolved_identity.email)
 
-    candidate = (user_id or "").strip() or "demo-user"
+    candidate = (authenticated_user_id_header or "").strip() or "demo-user"
     return AppUser(
         user_id=candidate,
         email="",

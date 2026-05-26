@@ -17,14 +17,28 @@ describe("sessionIdentity", () => {
       userId: "operator-1",
       displayName: "Operator One",
       email: "op1@photo-org.local",
-      capabilities: { addToAlbum: true, export: false }
+      roles: ["viewer", "contributor"],
+      capabilities: {
+        addToAlbum: true,
+        export: false,
+        reviewFaces: true,
+        manageRoles: false,
+        manageSources: false
+      }
     };
 
     expect(resolveInitialSessionIdentity()).toEqual({
       userId: "operator-1",
       displayName: "Operator One",
       email: "op1@photo-org.local",
-      capabilities: { addToAlbum: true, export: false }
+      roles: ["viewer", "contributor"],
+      capabilities: {
+        addToAlbum: true,
+        export: false,
+        reviewFaces: true,
+        manageRoles: false,
+        manageSources: false
+      }
     });
   });
 
@@ -33,7 +47,14 @@ describe("sessionIdentity", () => {
       userId: "operator-1",
       displayName: "Operator One",
       email: "op1@photo-org.local",
-      capabilities: { addToAlbum: "yes", export: false }
+      roles: ["viewer"],
+      capabilities: {
+        addToAlbum: "yes",
+        export: false,
+        reviewFaces: false,
+        manageRoles: false,
+        manageSources: false
+      }
     };
 
     expect(resolveInitialSessionIdentity()).toBeNull();

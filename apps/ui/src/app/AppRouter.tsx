@@ -7,7 +7,7 @@ import {
   useNavigate,
   useLocation
 } from "react-router-dom";
-import { useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 import { NuqsAdapter } from "nuqs/adapters/react-router/v6";
 import { AppShell } from "./AppShell";
 import {
@@ -22,7 +22,9 @@ import { NotFoundPage } from "../pages/NotFoundPage";
 import { PeopleManagementRoutePage } from "../pages/PeopleManagementRoutePage";
 import { SuggestionsRoutePage } from "../pages/SuggestionsRoutePage";
 import { AlbumsRoutePage } from "../pages/AlbumsRoutePage";
+import { OperationsRoutePage } from "../pages/OperationsRoutePage";
 import {
+  fetchCurrentSessionIdentity,
   resolveInitialSessionIdentity,
   type SessionIdentity
 } from "../session/sessionIdentity";
@@ -66,9 +68,35 @@ export function AppRouteTree({ initialSessionIdentity }: AppRouteTreeProps = {})
     if (initialSessionIdentity !== undefined) {
       return initialSessionIdentity;
     }
-
+    if (typeof window !== "undefined" && window.__PHOTO_ORG_SESSION__ === undefined) {
+      return null;
+    }
     return resolveInitialSessionIdentity();
   });
+
+  useEffect(() => {
+    if (initialSessionIdentity !== undefined) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    fetchCurrentSessionIdentity(controller.signal)
+      .then((resolvedIdentity) => {
+        startTransition(() => {
+          setSessionIdentity(resolvedIdentity);
+        });
+      })
+      .catch(() => {
+        if (controller.signal.aborted) {
+          return;
+        }
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [initialSessionIdentity]);
 
   return (
     <Routes>
@@ -95,6 +123,8 @@ export function AppRouteTree({ initialSessionIdentity }: AppRouteTreeProps = {})
                 <PeopleManagementRoutePage />
               ) : route.key === "suggestions" ? (
                 <SuggestionsRoutePage />
+              ) : route.key === "operations" ? (
+                <OperationsRoutePage sessionIdentity={sessionIdentity} />
               ) : (
                 <PrimaryRoutePage route={route} />
               )

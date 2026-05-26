@@ -266,7 +266,14 @@ describe("LibraryRoutePage", () => {
       userId: "operator-1",
       displayName: "Operator One",
       email: "op1@photo-org.local",
-      capabilities: { addToAlbum: true, export: true }
+      roles: ["admin"],
+      capabilities: {
+        addToAlbum: true,
+        export: true,
+        reviewFaces: true,
+        manageRoles: true,
+        manageSources: true
+      }
     };
   });
 

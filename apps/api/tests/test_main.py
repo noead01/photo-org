@@ -78,6 +78,10 @@ class TestHealthEndpoint:
         ]["400"]["description"] == "Watched folder validation failed"
         assert "/api/v1/operations/activity" in schema["paths"]
         assert "/api/v1/operations/activity/history" in schema["paths"]
+        assert "/api/v1/admin/session" in schema["paths"]
+        assert "/api/v1/admin/users" in schema["paths"]
+        assert "/api/v1/admin/users/{user_id}/roles" in schema["paths"]
+        assert any(tag["name"] == "admin" for tag in schema["tags"])
         assert any(tag["name"] == "operations" for tag in schema["tags"])
         watched_folder_mutation_responses = schema["paths"][
             "/api/v1/storage-sources/{storage_source_id}/watched-folders/{watched_folder_id}"

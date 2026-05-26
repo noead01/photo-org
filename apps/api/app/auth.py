@@ -28,6 +28,15 @@ class AppUser:
     roles: frozenset[str]
 
 
+@dataclass(frozen=True)
+class AppCapabilities:
+    add_to_album: bool
+    export: bool
+    review_faces: bool
+    manage_roles: bool
+    manage_sources: bool
+
+
 def normalize_email(value: str | None) -> str | None:
     candidate = (value or "").strip().lower()
     return candidate if candidate else None
@@ -92,4 +101,18 @@ def get_or_create_cloudflare_user(
         email=row["email"],
         display_name=row["display_name"],
         roles=assigned_roles,
+    )
+
+
+def derive_capabilities(user: AppUser) -> AppCapabilities:
+    user_rank = max(
+        ({"viewer": 1, "contributor": 2, "admin": 3}.get(role, 0) for role in user.roles),
+        default=0,
+    )
+    return AppCapabilities(
+        add_to_album=True,
+        export=True,
+        review_faces=user_rank >= 2,
+        manage_roles=user_rank >= 3,
+        manage_sources=user_rank >= 3,
     )

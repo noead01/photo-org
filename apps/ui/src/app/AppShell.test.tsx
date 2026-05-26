@@ -11,9 +11,13 @@ const TEST_SESSION_IDENTITY: SessionIdentity = {
   userId: "test-operator",
   displayName: "Avery Operator",
   email: "avery.operator@example.com",
+  roles: ["admin"],
   capabilities: {
     addToAlbum: true,
-    export: true
+    export: true,
+    reviewFaces: true,
+    manageRoles: true,
+    manageSources: true
   }
 };
 
@@ -75,7 +79,8 @@ const ROUTES_WITH_PRIMARY_PAGE_FEEDBACK = PRIMARY_ROUTE_DEFINITIONS.filter(
     route.key !== "library" &&
     route.key !== "albums" &&
     route.key !== "labeling" &&
-    route.key !== "suggestions"
+    route.key !== "suggestions" &&
+    route.key !== "operations"
 );
 
 describe("App shell", () => {
@@ -198,39 +203,19 @@ describe("App shell", () => {
     }
   );
 
-  it("transitions from route error to ready on retry for primary-placeholder routes", async () => {
-    const user = userEvent.setup();
-    renderAtPath("/operations?demoState=error");
+  it("hides the Operations nav entry for non-admin sessions", () => {
+    renderAtPath("/library", {
+      ...TEST_SESSION_IDENTITY,
+      roles: ["viewer"],
+      capabilities: {
+        ...TEST_SESSION_IDENTITY.capabilities,
+        manageRoles: false,
+        manageSources: false,
+        reviewFaces: false
+      }
+    });
 
-    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", {
-        name: "Could not load Operations",
-        level: 2
-      })
-    ).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Retry" }));
-
-    expect(screen.getByRole("heading", { name: "Operations", level: 1 })).toBeInTheDocument();
-    expect(screen.getByText("Operations is ready.")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Dismiss notification" }));
-    expect(screen.queryByText("Operations is ready.")).not.toBeInTheDocument();
-  });
-
-  it("does not reset feedback state when unrelated query params change", async () => {
-    const user = userEvent.setup();
-    renderAtPathWithQueryBump("/operations?demoState=error&panel=primary");
-
-    await user.click(screen.getByRole("button", { name: "Retry" }));
-    expect(screen.getByText("Operations is ready.")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Bump query" }));
-
-    expect(screen.getByRole("heading", { name: "Operations", level: 1 })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
-    expect(screen.getByText("Operations is ready.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Operations" })).not.toBeInTheDocument();
   });
 
   it("renders only Library as the discovery workflow route", async () => {
