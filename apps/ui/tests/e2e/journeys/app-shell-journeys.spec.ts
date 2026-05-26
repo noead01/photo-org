@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { bootstrapAdminSession } from "../support/session";
 
 interface ShellViewport {
   label: string;
@@ -183,6 +184,7 @@ test("JRN-P2-shared-feedback-surfaces @journey @smoke", async ({ page }) => {
 });
 
 test("JRN-P2-responsive-shell-layout @journey @smoke", async ({ page }) => {
+  await bootstrapAdminSession(page);
   await page.goto("/library");
 
   for (const viewport of RESPONSIVE_VIEWPORTS) {

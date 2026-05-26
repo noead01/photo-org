@@ -1031,10 +1031,7 @@ export function LibraryRoutePage() {
             pageSize,
             nextPageSize
           );
-          setPageSize(nextPageSize);
-          window.setTimeout(() => {
-            setPage(nextPage);
-          }, 0);
+          setPage(nextPage, false, nextPageSize);
         }}
         onSelectPage={(pageNumber) => {
           handleSelectPage(pageNumber);

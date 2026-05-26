@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers.face_assignments import router as face_assignments_router
+from app.routers.admin import router as admin_router
 from app.routers.albums import router as albums_router
 from app.routers.exports import router as exports_router
 from app.routers.ingest_queue import router as ingest_queue_router
@@ -31,6 +32,10 @@ def create_app() -> FastAPI:
             "models in this repository and checked in as generated output."
         ),
         openapi_tags=[
+            {
+                "name": "admin",
+                "description": "Session identity and application role management workflows.",
+            },
             {
                 "name": "photos",
                 "description": "Browse and inspect photo records and metadata.",
@@ -89,6 +94,7 @@ def create_app() -> FastAPI:
 
     app.include_router(ingest_queue_router, prefix="/api/v1")
     app.include_router(operations_router, prefix="/api/v1")
+    app.include_router(admin_router, prefix="/api/v1")
     app.include_router(face_assignments_router, prefix="/api/v1")
     app.include_router(people_router, prefix="/api/v1")
     app.include_router(photos_router, prefix="/api/v1")

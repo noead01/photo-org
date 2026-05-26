@@ -128,7 +128,12 @@ export function AppShell({
 
       <nav aria-label="Primary" className="shell-nav">
         <ul>
-          {PRIMARY_ROUTE_DEFINITIONS.map((route) => {
+          {PRIMARY_ROUTE_DEFINITIONS.filter((route) => {
+            if (route.key !== "operations") {
+              return true;
+            }
+            return sessionIdentity?.capabilities.manageRoles ?? false;
+          }).map((route) => {
             const isActive = route.key === navigationState.activeRoute.key;
             const routeTarget = route.key === "library" ? rememberedLibraryUrl : route.path;
 

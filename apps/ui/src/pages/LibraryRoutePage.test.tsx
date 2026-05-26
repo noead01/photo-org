@@ -266,7 +266,14 @@ describe("LibraryRoutePage", () => {
       userId: "operator-1",
       displayName: "Operator One",
       email: "op1@photo-org.local",
-      capabilities: { addToAlbum: true, export: true }
+      roles: ["admin"],
+      capabilities: {
+        addToAlbum: true,
+        export: true,
+        reviewFaces: true,
+        manageRoles: true,
+        manageSources: true
+      }
     };
   });
 
@@ -1869,7 +1876,7 @@ describe("LibraryRoutePage", () => {
     await user.click(screen.getByRole("link", { name: "Back to library" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Page 3" })).toHaveAttribute(
+      expect(screen.getByRole("button", { name: "Bottom page 3" })).toHaveAttribute(
         "aria-current",
         "page"
       );

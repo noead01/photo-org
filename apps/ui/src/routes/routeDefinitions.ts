@@ -73,7 +73,7 @@ export const PRIMARY_ROUTE_DEFINITIONS: PrimaryRouteDefinition[] = [
     path: "/operations",
     navLabel: "Operations",
     title: "Operations",
-    description: "Operational admin workflow surface placeholder.",
+    description: "Operational role management and admin workflow surface.",
     handoff: baseHandoffExpectation
   }
 ];
