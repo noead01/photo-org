@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from app.db.queue import IngestQueueStore
 from app.processing.ingest_common import IngestResult, iter_photo_files
@@ -78,10 +78,12 @@ def poll_registered_storage_sources(
     now: datetime | None = None,
     missing_file_grace_period_days: int | None = None,
     poll_chunk_size: int = 100,
+    poll_mode: Literal["incremental", "full"] = "incremental",
 ) -> IngestResult:
     return ingest_polling_module.poll_registered_storage_sources(
         database_url=database_url,
         now=now,
         missing_file_grace_period_days=missing_file_grace_period_days,
         poll_chunk_size=poll_chunk_size,
+        poll_mode=poll_mode,
     )

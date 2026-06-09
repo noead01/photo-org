@@ -126,8 +126,8 @@ Current high-value targets:
   - validate the checked-in `seed-corpus/` inventory and manifest
 - `make seed-corpus-load`
   - migrate and load the checked-in `seed-corpus/` into the local development database
-- `curl -sS -X POST http://127.0.0.1:<api-port>/api/v1/internal/storage-sources/poll -H 'Content-Type: application/json' -H 'X-Worker-Role: ingest-processor' -d '{"queue_process_limit":100}'`
-  - trigger the central polling loop and drain queued ingest work through the internal worker endpoint
+- `curl -sS -X POST http://127.0.0.1:<api-port>/api/v1/internal/storage-sources/poll -H 'Content-Type: application/json' -H 'X-Worker-Role: ingest-processor' -d '{"queue_process_limit":100,"poll_mode":"incremental"}'`
+  - trigger the central polling loop in incremental mode and drain queued ingest work through the internal worker endpoint
 - `uv run python apps/api/scripts/generate_openapi.py`
   - regenerate the generated OpenAPI YAML artifact at `apps/api/.generated/openapi.yaml` from the current FastAPI app
   - the API also serves the same runtime schema at `GET /openapi.yaml` and the Swagger UI docs at `GET /docs`
@@ -243,7 +243,8 @@ For missing-file reconciliation verification, run `uv run python -m pytest apps/
 That targeted suite exercises a temporary watched-folder fixture and simulated time so contributors can verify `active`, `missing`, `deleted`, and recovery transitions without bringing up the full worker stack.
 
 For the source-aware central polling loop, register a storage source plus watched folder first, then call `POST /api/v1/internal/storage-sources/poll` with `X-Worker-Role: ingest-processor`.
-That endpoint validates source markers before scanning, reconciles only enabled watched folders attached to registered storage sources, enqueues candidate work for downstream extraction, and drains the ingest queue to persistence-ready completion for that trigger request.
+That endpoint defaults to `poll_mode="incremental"`: it validates source markers, scans enabled watched folders attached to registered storage sources, enqueues candidate work for downstream extraction, and drains the ingest queue to persistence-ready completion for that trigger request.
+Use `poll_mode="full"` when you need missing-file reconciliation and deleted-path lifecycle updates in the same poll request.
 
 ### Automated Version Updates
 

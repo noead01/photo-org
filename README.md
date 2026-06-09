@@ -182,7 +182,8 @@ The project is still being shaped and documented. The architecture, operational 
 
 The current Phase 0 development path now uses an API-owned persistence boundary for ingest work:
 
-- `poll-storage-sources` now performs discovery and candidate scheduling only
+- `poll-storage-sources` now defaults to incremental discovery and candidate scheduling only
+- `poll-storage-sources` accepts an explicit full-reconciliation mode when missing-file and deleted-path updates are needed
 - queued workers hash content and, when needed, run metadata extraction, thumbnail generation, and face detection before persistence
 - duplicate-content files reuse existing extracted artifacts by SHA instead of re-running full analysis
 - the API owns queue processing and domain-table mutation
