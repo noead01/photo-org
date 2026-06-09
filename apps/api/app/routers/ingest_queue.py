@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
@@ -68,6 +70,10 @@ class TriggerStorageSourcePollingRequest(BaseModel):
     drain_queue: bool = Field(
         default=True,
         description="When false, only scan and enqueue candidates without draining queued ingest work.",
+    )
+    poll_mode: Literal["incremental", "full"] = Field(
+        default="incremental",
+        description="Select incremental discovery or full missing-file reconciliation.",
     )
 
 
@@ -279,6 +285,7 @@ def poll_storage_sources_endpoint(
     result = trigger_storage_source_polling(
         queue_process_limit=body.queue_process_limit,
         drain_queue=body.drain_queue,
+        poll_mode=body.poll_mode,
     )
     return TriggerStorageSourcePollingResponse(
         scanned=result.scanned,

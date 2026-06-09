@@ -329,9 +329,11 @@ def test_poll_storage_sources_endpoint_forwards_queue_process_limit(
         *,
         queue_process_limit: int = 100,
         drain_queue: bool = True,
+        poll_mode: str = "incremental",
     ):
         captured["queue_process_limit"] = queue_process_limit
         captured["drain_queue"] = drain_queue
+        captured["poll_mode"] = poll_mode
         return Result()
 
     monkeypatch.setattr(
@@ -346,7 +348,11 @@ def test_poll_storage_sources_endpoint_forwards_queue_process_limit(
     )
 
     assert response.status_code == 200
-    assert captured == {"queue_process_limit": 333, "drain_queue": False}
+    assert captured == {
+        "queue_process_limit": 333,
+        "drain_queue": False,
+        "poll_mode": "incremental",
+    }
     assert response.json() == {
         "scanned": 10,
         "enqueued": 7,
@@ -357,6 +363,100 @@ def test_poll_storage_sources_endpoint_forwards_queue_process_limit(
         "retryable_errors": 2,
         "error_count": 4,
         "poll_errors": ["marker mismatch"],
+    }
+
+
+def test_poll_storage_sources_endpoint_defaults_to_incremental_mode(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    captured: dict[str, object] = {}
+
+    class Result:
+        scanned = 1
+        enqueued = 1
+        inserted = 0
+        updated = 0
+        queue_processed = 0
+        queue_failed = 0
+        queue_retryable_errors = 0
+        poll_errors = ()
+        error_count = 0
+
+    def fake_trigger_storage_source_polling(
+        *,
+        queue_process_limit: int = 100,
+        drain_queue: bool = True,
+        poll_mode: str = "incremental",
+    ):
+        captured["queue_process_limit"] = queue_process_limit
+        captured["drain_queue"] = drain_queue
+        captured["poll_mode"] = poll_mode
+        return Result()
+
+    monkeypatch.setattr(
+        "app.routers.ingest_queue.trigger_storage_source_polling",
+        fake_trigger_storage_source_polling,
+    )
+
+    response = client.post(
+        "/api/v1/internal/storage-sources/poll",
+        headers={"X-Worker-Role": "ingest-processor"},
+        json={},
+    )
+
+    assert response.status_code == 200
+    assert captured == {
+        "queue_process_limit": 100,
+        "drain_queue": True,
+        "poll_mode": "incremental",
+    }
+
+
+def test_poll_storage_sources_endpoint_forwards_explicit_full_mode(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    captured: dict[str, object] = {}
+
+    class Result:
+        scanned = 10
+        enqueued = 7
+        inserted = 3
+        updated = 2
+        queue_processed = 5
+        queue_failed = 1
+        queue_retryable_errors = 2
+        poll_errors = ("marker mismatch",)
+        error_count = 4
+
+    def fake_trigger_storage_source_polling(
+        *,
+        queue_process_limit: int = 100,
+        drain_queue: bool = True,
+        poll_mode: str = "incremental",
+    ):
+        captured["queue_process_limit"] = queue_process_limit
+        captured["drain_queue"] = drain_queue
+        captured["poll_mode"] = poll_mode
+        return Result()
+
+    monkeypatch.setattr(
+        "app.routers.ingest_queue.trigger_storage_source_polling",
+        fake_trigger_storage_source_polling,
+    )
+
+    response = client.post(
+        "/api/v1/internal/storage-sources/poll",
+        headers={"X-Worker-Role": "ingest-processor"},
+        json={"queue_process_limit": 333, "drain_queue": False, "poll_mode": "full"},
+    )
+
+    assert response.status_code == 200
+    assert captured == {
+        "queue_process_limit": 333,
+        "drain_queue": False,
+        "poll_mode": "full",
     }
 
 
