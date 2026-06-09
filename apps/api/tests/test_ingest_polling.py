@@ -8,10 +8,11 @@ from sqlalchemy import create_engine, func, select
 
 from app.db.queue import IngestQueueStore
 from app.migrations import upgrade_database
+from app.services.ingest_queue_processor import process_pending_ingest_queue
 from app.services.source_registration import MARKER_FILENAME, write_source_marker
 from app.services.storage_sources import attach_storage_source_alias, create_storage_source
 from app.services.watched_folders import create_watched_folder
-from app.storage import photos, storage_sources, watched_folders
+from app.storage import photo_files, photos, storage_sources, watched_folders
 from photoorg_db_schema import ingest_runs
 
 pytest.importorskip("PIL")
@@ -277,6 +278,7 @@ def test_poll_registered_storage_sources_rolls_back_candidate_queue_rows_when_ch
         database_url=database_url,
         now=now,
         poll_chunk_size=2,
+        poll_mode="full",
     )
 
     assert result.errors == [f"watched_folder:{watched_folder['watched_folder_id']}: forced chunk failure"]
@@ -494,6 +496,7 @@ def test_poll_registered_storage_sources_records_failed_outcome_for_late_reconci
         database_url=database_url,
         now=now,
         poll_chunk_size=2,
+        poll_mode="full",
     )
 
     with engine.connect() as connection:
@@ -613,10 +616,214 @@ def test_poll_registered_storage_sources_defers_missing_file_reconciliation_unti
         database_url=database_url,
         now=now,
         poll_chunk_size=1,
+        poll_mode="full",
     )
 
     assert result.scanned == 3
     assert reconciliation_calls == [{"first.jpg", "third.jpg", "fourth.jpg"}]
+
+
+def test_poll_registered_storage_sources_incremental_mode_skips_missing_reconciliation(tmp_path):
+    from app.processing.ingest_polling import poll_registered_storage_sources
+
+    database_url = f"sqlite:///{tmp_path / 'poll-incremental-skip-reconcile.db'}"
+    upgrade_database(database_url)
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 6, 8, 12, 0, tzinfo=UTC)
+
+    root = tmp_path / "source-root"
+    watched = root / "imports"
+    watched.mkdir(parents=True)
+    first_photo = watched / "photo_000.jpg"
+    second_photo = watched / "photo_001.jpg"
+    _write_test_image(first_photo)
+    _write_test_image(second_photo)
+
+    with engine.begin() as connection:
+        source = create_storage_source(
+            connection,
+            display_name="Source",
+            marker_filename=MARKER_FILENAME,
+            marker_version=1,
+            now=now,
+        )
+        attach_storage_source_alias(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            now=now,
+        )
+        watched_folder = create_watched_folder(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            watched_path=watched.as_posix(),
+            display_name="Imports",
+            now=now,
+        )
+        write_source_marker(root, storage_source_id=source["storage_source_id"])
+
+    poll_registered_storage_sources(database_url=database_url, now=now, poll_mode="full")
+    first_pass = process_pending_ingest_queue(database_url, limit=10)
+    second_pass = process_pending_ingest_queue(database_url, limit=10)
+    assert first_pass.processed == 2
+    assert second_pass.processed == 2
+    second_photo.unlink()
+
+    later = now.replace(hour=13)
+    result = poll_registered_storage_sources(
+        database_url=database_url,
+        now=later,
+        poll_mode="incremental",
+    )
+
+    assert result.errors == []
+    with engine.connect() as connection:
+        row = connection.execute(
+            select(
+                photo_files.c.lifecycle_state,
+                photo_files.c.missing_ts,
+                photo_files.c.deleted_ts,
+            ).where(
+                photo_files.c.watched_folder_id == watched_folder["watched_folder_id"],
+                photo_files.c.relative_path == "photo_001.jpg",
+            )
+        ).mappings().one()
+    assert row["lifecycle_state"] == "active"
+    assert row["missing_ts"] is None
+    assert row["deleted_ts"] is None
+
+
+def test_poll_registered_storage_sources_full_mode_marks_missing_files(tmp_path):
+    from app.processing.ingest_polling import poll_registered_storage_sources
+
+    database_url = f"sqlite:///{tmp_path / 'poll-full-reconcile.db'}"
+    upgrade_database(database_url)
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 6, 8, 12, 0, tzinfo=UTC)
+
+    root = tmp_path / "source-root"
+    watched = root / "imports"
+    watched.mkdir(parents=True)
+    first_photo = watched / "photo_000.jpg"
+    second_photo = watched / "photo_001.jpg"
+    _write_test_image(first_photo)
+    _write_test_image(second_photo)
+
+    with engine.begin() as connection:
+        source = create_storage_source(
+            connection,
+            display_name="Source",
+            marker_filename=MARKER_FILENAME,
+            marker_version=1,
+            now=now,
+        )
+        attach_storage_source_alias(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            now=now,
+        )
+        watched_folder = create_watched_folder(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            watched_path=watched.as_posix(),
+            display_name="Imports",
+            now=now,
+        )
+        write_source_marker(root, storage_source_id=source["storage_source_id"])
+
+    poll_registered_storage_sources(database_url=database_url, now=now, poll_mode="full")
+    first_pass = process_pending_ingest_queue(database_url, limit=10)
+    second_pass = process_pending_ingest_queue(database_url, limit=10)
+    assert first_pass.processed == 2
+    assert second_pass.processed == 2
+    second_photo.unlink()
+
+    later = now.replace(hour=13)
+    result = poll_registered_storage_sources(
+        database_url=database_url,
+        now=later,
+        poll_mode="full",
+        missing_file_grace_period_days=0,
+    )
+
+    assert result.errors == []
+    with engine.connect() as connection:
+        row = connection.execute(
+            select(
+                photo_files.c.lifecycle_state,
+                photo_files.c.missing_ts,
+                photo_files.c.deleted_ts,
+            ).where(
+                photo_files.c.watched_folder_id == watched_folder["watched_folder_id"],
+                photo_files.c.relative_path == "photo_001.jpg",
+            )
+        ).mappings().one()
+    assert row["lifecycle_state"] == "deleted"
+    assert row["missing_ts"] == later.replace(tzinfo=None)
+    assert row["deleted_ts"] == later.replace(tzinfo=None)
+
+
+def test_poll_registered_storage_sources_defaults_to_incremental_mode(tmp_path):
+    from app.processing.ingest_polling import poll_registered_storage_sources
+
+    database_url = f"sqlite:///{tmp_path / 'poll-default-incremental.db'}"
+    upgrade_database(database_url)
+    engine = create_engine(database_url, future=True)
+    now = datetime(2026, 6, 8, 14, 0, tzinfo=UTC)
+
+    root = tmp_path / "source-root"
+    watched = root / "imports"
+    watched.mkdir(parents=True)
+    first_photo = watched / "photo_000.jpg"
+    second_photo = watched / "photo_001.jpg"
+    _write_test_image(first_photo)
+    _write_test_image(second_photo)
+
+    with engine.begin() as connection:
+        source = create_storage_source(
+            connection,
+            display_name="Source",
+            marker_filename=MARKER_FILENAME,
+            marker_version=1,
+            now=now,
+        )
+        attach_storage_source_alias(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            now=now,
+        )
+        watched_folder = create_watched_folder(
+            connection,
+            storage_source_id=source["storage_source_id"],
+            alias_path=root.as_posix(),
+            watched_path=watched.as_posix(),
+            display_name="Imports",
+            now=now,
+        )
+        write_source_marker(root, storage_source_id=source["storage_source_id"])
+
+    poll_registered_storage_sources(database_url=database_url, now=now, poll_mode="full")
+    first_pass = process_pending_ingest_queue(database_url, limit=10)
+    second_pass = process_pending_ingest_queue(database_url, limit=10)
+    assert first_pass.processed == 2
+    assert second_pass.processed == 2
+    second_photo.unlink()
+
+    later = now.replace(hour=15)
+    poll_registered_storage_sources(database_url=database_url, now=later)
+
+    with engine.connect() as connection:
+        row = connection.execute(
+            select(photo_files.c.lifecycle_state).where(
+                photo_files.c.watched_folder_id == watched_folder["watched_folder_id"],
+                photo_files.c.relative_path == "photo_001.jpg",
+            )
+        ).scalar_one()
+    assert row == "active"
 
 
 def test_reconcile_directory_processes_a_watched_folder_end_to_end(tmp_path):

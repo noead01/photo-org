@@ -215,11 +215,13 @@ def test_ingest_facade_poll_registered_storage_sources_delegates_to_polling_modu
         now=None,
         missing_file_grace_period_days=None,
         poll_chunk_size=100,
+        poll_mode="incremental",
     ):
         assert database_url == f"sqlite:///{tmp_path / 'facade-delegation.db'}"
         assert now is None
         assert missing_file_grace_period_days is None
         assert poll_chunk_size == 100
+        assert poll_mode == "incremental"
         return sentinel_result
 
     fake_module.poll_registered_storage_sources = fake_poll_registered_storage_sources
@@ -1341,6 +1343,7 @@ def test_poll_registered_storage_sources_reassesses_existing_locations_for_same_
         database_url=db_url,
         now=now + timedelta(minutes=5),
         missing_file_grace_period_days=0,
+        poll_mode="full",
     )
 
     assert result.errors == []

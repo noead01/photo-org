@@ -41,9 +41,13 @@ def trigger_storage_source_polling(
     database_url: str | Path | None = None,
     queue_process_limit: int = 100,
     drain_queue: bool = True,
+    poll_mode: str = "incremental",
 ) -> TriggerStorageSourcePollingResult:
     initial_photo_count = _count_photos(database_url)
-    poll_result = poll_registered_storage_sources(database_url=database_url)
+    poll_result = poll_registered_storage_sources(
+        database_url=database_url,
+        poll_mode=poll_mode,
+    )
 
     queue_processed = 0
     queue_failed = 0

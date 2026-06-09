@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from stat import S_ISDIR
-from typing import Callable, Iterable, Iterator
+from typing import Callable, Iterable, Iterator, Literal
 
 from sqlalchemy import select
 from sqlalchemy.engine import Connection
@@ -33,6 +33,9 @@ from app.services.file_reconciliation import (
 from app.services.source_registration import SourceRegistrationError, read_source_marker
 from app.services.thumbnails import generate_thumbnail
 from app.storage import create_db_engine, photo_files, storage_source_aliases, watched_folders
+
+PollMode = Literal["incremental", "full"]
+
 
 @dataclass(frozen=True)
 class RegisteredWatchedFolderTarget:
@@ -106,8 +109,10 @@ def poll_registered_storage_sources(
     now: datetime | None = None,
     missing_file_grace_period_days: int | None = None,
     poll_chunk_size: int = 100,
+    poll_mode: PollMode = "incremental",
 ) -> IngestResult:
     _validate_chunk_size(poll_chunk_size)
+    _validate_poll_mode(poll_mode)
     result = IngestResult()
     at = now if now is not None else utc_now()
     grace_period_days = resolve_missing_file_grace_period_days(missing_file_grace_period_days)
@@ -150,7 +155,9 @@ def poll_registered_storage_sources(
                     alias_root=alias_root,
                     relative_path=target.relative_path,
                 )
-                observed_relative_paths: set[str] = set()
+                observed_relative_paths: set[str] | None = (
+                    set() if poll_mode == "full" else None
+                )
                 touched_photo_ids: set[str] = set()
                 try:
                     _validate_scan_root(scan_root)
@@ -190,19 +197,22 @@ def poll_registered_storage_sources(
                         result.updated += outcome.updated
                         result.errors.extend(outcome.error_messages)
                     with engine.begin() as connection:
-                        _finalize_watched_folder_scan(
-                            connection,
-                            watched_folder_id=target.watched_folder_id,
-                            observed_relative_paths=observed_relative_paths,
-                            touched_photo_ids=touched_photo_ids,
-                            now=at,
-                            missing_file_grace_period_days=grace_period_days,
-                        )
-                        record_watched_folder_scan_success(
-                            connection,
-                            watched_folder_id=target.watched_folder_id,
-                            now=at,
-                        )
+                        if poll_mode == "full":
+                            assert observed_relative_paths is not None
+                            _finalize_full_watched_folder_scan(
+                                connection,
+                                watched_folder_id=target.watched_folder_id,
+                                observed_relative_paths=observed_relative_paths,
+                                touched_photo_ids=touched_photo_ids,
+                                now=at,
+                                missing_file_grace_period_days=grace_period_days,
+                            )
+                        else:
+                            _finalize_incremental_watched_folder_scan(
+                                connection,
+                                watched_folder_id=target.watched_folder_id,
+                                now=at,
+                            )
                 except Exception as exc:
                     with engine.begin() as connection:
                         record_watched_folder_scan_failure(
@@ -262,6 +272,11 @@ def _validate_chunk_size(chunk_size: int) -> None:
         raise ValueError("chunk_size must be at least 1")
 
 
+def _validate_poll_mode(poll_mode: PollMode) -> None:
+    if poll_mode not in {"incremental", "full"}:
+        raise ValueError(f"unsupported poll mode: {poll_mode}")
+
+
 def _process_watched_folder_chunk(
     connection: Connection,
     *,
@@ -271,7 +286,7 @@ def _process_watched_folder_chunk(
     canonical_path_for_relative_path: Callable[[str], str],
     reuse_existing_photo_by_sha: bool,
     now: datetime,
-    observed_relative_paths: set[str],
+    observed_relative_paths: set[str] | None,
     queue_store: IngestQueueStore | None = None,
     storage_source_id: str | None = None,
 ) -> tuple[WatchedFolderPollOutcome, set[str]]:
@@ -285,7 +300,8 @@ def _process_watched_folder_chunk(
     for photo_path in photo_paths:
         scanned += 1
         relative_path = relative_photo_path(source_root, photo_path)
-        observed_relative_paths.add(relative_path)
+        if observed_relative_paths is not None:
+            observed_relative_paths.add(relative_path)
         if reuse_existing_photo_by_sha:
             assert queue_store is not None
             assert storage_source_id is not None
@@ -382,7 +398,20 @@ def _process_watched_folder_chunk(
     )
 
 
-def _finalize_watched_folder_scan(
+def _finalize_incremental_watched_folder_scan(
+    connection: Connection,
+    *,
+    watched_folder_id: str,
+    now: datetime,
+) -> None:
+    record_watched_folder_scan_success(
+        connection,
+        watched_folder_id=watched_folder_id,
+        now=now,
+    )
+
+
+def _finalize_full_watched_folder_scan(
     connection: Connection,
     *,
     watched_folder_id: str,
@@ -401,6 +430,11 @@ def _finalize_watched_folder_scan(
         )
     )
     refresh_photo_deleted_timestamps(connection, photo_ids=touched_photo_ids, now=now)
+    record_watched_folder_scan_success(
+        connection,
+        watched_folder_id=watched_folder_id,
+        now=now,
+    )
 
 
 def _reconcile_watched_folder_root(
@@ -448,7 +482,7 @@ def _reconcile_watched_folder_root(
         now=now,
         observed_relative_paths=observed_relative_paths,
     )
-    _finalize_watched_folder_scan(
+    _finalize_full_watched_folder_scan(
         connection,
         watched_folder_id=watched_folder_id,
         observed_relative_paths=observed_relative_paths,

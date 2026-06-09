@@ -103,3 +103,43 @@ def test_trigger_storage_source_polling_can_skip_queue_draining(monkeypatch):
     assert result.queue_retryable_errors == 0
     assert result.poll_errors == ()
     assert result.error_count == 0
+
+
+def test_trigger_storage_source_polling_forwards_poll_mode(monkeypatch):
+    captured: dict[str, object] = {}
+    photo_counts = iter([11, 11])
+
+    def fake_poll_registered_storage_sources(**kwargs):
+        captured["database_url"] = kwargs.get("database_url")
+        captured["poll_mode"] = kwargs.get("poll_mode")
+        return type(
+            "PollResult",
+            (),
+            {
+                "scanned": 4,
+                "enqueued": 4,
+                "updated": 0,
+                "errors": [],
+            },
+        )()
+
+    monkeypatch.setattr(
+        polling_service,
+        "poll_registered_storage_sources",
+        fake_poll_registered_storage_sources,
+    )
+    monkeypatch.setattr(
+        polling_service,
+        "_count_photos",
+        lambda database_url=None: next(photo_counts),
+    )
+
+    result = polling_service.trigger_storage_source_polling(
+        queue_process_limit=77,
+        drain_queue=False,
+        poll_mode="full",
+    )
+
+    assert captured["poll_mode"] == "full"
+    assert result.scanned == 4
+    assert result.enqueued == 4
