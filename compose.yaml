@@ -87,7 +87,7 @@ services:
     ports:
       - "${PHOTO_ORG_HTTP_HOST_PORT:-80}:80"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./docker/caddy:/etc/caddy:ro
       - caddy_data:/data
       - caddy_config:/config
 
