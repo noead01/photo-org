@@ -6,10 +6,13 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const apiProxyTarget =
     env.VITE_API_PROXY_TARGET || env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
-  const allowedHosts = (env.VITE_ALLOWED_HOSTS || "")
-    .split(",")
-    .map((host) => host.trim())
-    .filter(Boolean);
+  const allowedHosts = [
+    "photo.noead.com",
+    ...(env.VITE_ALLOWED_HOSTS || "")
+      .split(",")
+      .map((host) => host.trim())
+      .filter(Boolean),
+  ];
 
   return {
     plugins: [react()],

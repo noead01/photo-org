@@ -55,6 +55,13 @@ def test_compose_uses_persistent_postgres_volume_by_default():
     assert "/var/lib/postgresql/data" in compose
 
 
+def test_compose_mounts_caddy_config_directory_instead_of_single_file():
+    compose = Path("compose.yaml").read_text(encoding="utf-8")
+
+    assert "./docker/caddy:/etc/caddy:ro" in compose
+    assert "./Caddyfile:/etc/caddy/Caddyfile:ro" not in compose
+
+
 def test_ephemeral_compose_override_exists_for_smoke_workflows():
     compose_override = Path("compose.ephemeral.yaml")
 
